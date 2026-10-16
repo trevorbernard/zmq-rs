@@ -7,5 +7,7 @@
 //! Specs: RFC 13, 15, 23, 24, 25, 26, 27, 32, 37. See `docs/rfc-compliance.md`.
 
 mod frame;
+mod message;
 
 pub use frame::Frame;
+pub use message::{EmptyMessage, IntoIter, Iter, Message};
