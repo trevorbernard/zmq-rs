@@ -1,0 +1,16 @@
+[package]
+name = "zmq-core"
+description = "ZeroMQ engine: I/O threads, transports, sessions and socket patterns"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+zmtp.workspace = true
+zmq-pipe.workspace = true
+
+[lints]
+workspace = true

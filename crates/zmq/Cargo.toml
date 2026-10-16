@@ -1,0 +1,15 @@
+[package]
+name = "zmq"
+description = "Idiomatic, type-safe ZeroMQ for Rust"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish.workspace = true
+
+[dependencies]
+zmq-core.workspace = true
+
+[lints]
+workspace = true

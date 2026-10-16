@@ -1,0 +1,25 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0-dev"
+edition = "2024"
+rust-version = "1.94"
+license = "MPL-2.0"
+repository = "https://github.com/trevorbernard/zmq-rs"
+publish = false
+
+[workspace.dependencies]
+bytes = "1"
+zmtp = { path = "crates/zmtp" }
+zmq-pipe = { path = "crates/zmq-pipe" }
+zmq-core = { path = "crates/zmq-core" }
+
+[workspace.lints.rust]
+unsafe_code = "deny"
+missing_debug_implementations = "warn"
+unreachable_pub = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
