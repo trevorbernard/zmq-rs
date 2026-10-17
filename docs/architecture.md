@@ -301,3 +301,5 @@ Also check while on Linux:
 | 6b | XPUB and XSUB | done |
 | 6c | PAIR | done |
 | 7 | `ipc://` | done |
+| 8a | CURVE in `zmtp`: Z85, keys, handshake, MESSAGE boxing | done |
+| 8b | CURVE on connections and sockets | next |

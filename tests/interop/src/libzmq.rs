@@ -19,6 +19,10 @@ const ZMQ_LAST_ENDPOINT: c_int = 32;
 const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
 const ZMQ_PLAIN_PASSWORD: c_int = 46;
+const ZMQ_CURVE_SERVER: c_int = 47;
+const ZMQ_CURVE_PUBLICKEY: c_int = 48;
+const ZMQ_CURVE_SECRETKEY: c_int = 49;
+const ZMQ_CURVE_SERVERKEY: c_int = 50;
 const ZMQ_ZAP_DOMAIN: c_int = 55;
 const ZMQ_HEARTBEAT_IVL: c_int = 75;
 const ZMQ_HEARTBEAT_TTL: c_int = 76;
@@ -197,6 +201,20 @@ impl Socket {
     pub fn set_plain_client(&self, username: &[u8], password: &[u8]) {
         self.set_bytes(ZMQ_PLAIN_USERNAME, username);
         self.set_bytes(ZMQ_PLAIN_PASSWORD, password);
+    }
+
+    /// Makes this socket a CURVE server with this long-term secret key.
+    pub fn set_curve_server(&self, secret: &[u8; 32]) {
+        self.set_int(ZMQ_CURVE_SERVER, 1);
+        self.set_bytes(ZMQ_CURVE_SECRETKEY, secret);
+    }
+
+    /// Makes this socket a CURVE client with its long-term key pair, for
+    /// the server whose public key is `server`.
+    pub fn set_curve_client(&self, public: &[u8; 32], secret: &[u8; 32], server: &[u8; 32]) {
+        self.set_bytes(ZMQ_CURVE_PUBLICKEY, public);
+        self.set_bytes(ZMQ_CURVE_SECRETKEY, secret);
+        self.set_bytes(ZMQ_CURVE_SERVERKEY, server);
     }
 
     /// Sends a PING every `interval`, gives up after `timeout` without

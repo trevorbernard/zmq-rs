@@ -67,6 +67,9 @@ pub enum HandshakeError {
     Authentication(ZapFailure),
     /// The mechanism requires ZMTP 3.x but the peer speaks 1.0 or 2.0.
     LegacyPeer,
+    /// A CURVE box did not open, or did not hold the keys it should: the
+    /// peer has the wrong key, or the traffic was tampered with.
+    Cryptographic,
 }
 
 /// Sent to a ZMTP 3.x peer whose socket type we reject.
@@ -322,6 +325,7 @@ impl fmt::Display for HandshakeError {
             }
             Self::Authentication(failure) => write!(f, "authentication failed: {failure:?}"),
             Self::LegacyPeer => f.write_str("the security mechanism requires ZMTP 3.x"),
+            Self::Cryptographic => f.write_str("a CURVE box did not open"),
         }
     }
 }

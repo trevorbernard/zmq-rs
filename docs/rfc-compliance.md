@@ -222,6 +222,7 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - Sending fails at `u64::MAX` rather than wrapping.
 - Any malformed command SHALL disconnect. The server never sends ERROR for a bad MESSAGE, and the client never sends ERROR at all.
 - libzmq deviations we must match:
+  - MESSAGE goes on the wire as a single-part **data frame**, not the command frame RFC 25 describes: libzmq's mechanism replaces the message, flags included, before framing. A COMMAND-flagged MESSAGE sent to libzmq is taken for a command and its contents are never delivered. We send data frames and accept both forms.
   - The MESSAGE flags octet carries MORE (`0x01`) **and COMMAND (`0x02`)**, although the RFC requires bits 7–1 to be zero.
   - Post-handshake commands are boxed as MESSAGE with COMMAND set.
   - On receipt, mask the flags with `0x03`.
@@ -231,8 +232,14 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - **Verify against HELLO/WELCOME captures from libzmq before trusting the layout.**
 
 **Design:**
-- `Keypair` can only be generated or derived from its secret key, so a mismatched pair cannot be constructed. `SecretKey` is zeroized and has no `Debug` or `Clone`.
+- `Keypair` can only be generated or derived from its secret key, so a mismatched pair cannot be constructed. `SecretKey` is zeroized, not `Clone`, and its `Debug` prints nothing of it.
 - Transient keys exist only inside the mechanism.
+
+**Done in `zmtp` (sans-IO):**
+- `CurveClient`, `CurveServer` and `PendingCurveAuthentication` mirror PLAIN's state machines. ZAP sees `ZapCredentials::Curve(PublicKey)`, the client's long-term key, after the vouch has proven the client holds its secret.
+- `CurveCodec` boxes and unboxes frames after the handshake: the client sends from nonce 3 and the server from nonce 2, each refuses a nonce not above the peer's last, and sending stops at `u64::MAX`.
+- Checks beyond libzmq: the vouch must name our long-term key as well as C' (RFC 26; libzmq checks only C').
+- Verified on the wire against libzmq 4.3.5 in both roles, with multipart messages and 100 KB frames, using the key pairs from libzmq's `zmq_curve(7)`; public keys derived from those secrets match the published ones.
 
 ### ZAP (RFC 27)
 

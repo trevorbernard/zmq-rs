@@ -6,10 +6,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 use zmtp::{
-    ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame,
-    Greeting, GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, LegacyPeers,
-    Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials, PlainServer,
-    PlainServerConfig, Role, ServerStep, SocketType, ZapReply, ZapRequest,
+    ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
+    CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
+    Frame, Greeting, GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, Keypair,
+    LegacyPeers, Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials,
+    PlainServer, PlainServerConfig, PublicKey, Role, ServerStep, SocketType, ZapReply, ZapRequest,
 };
 
 /// Which security mechanism a [`Peer`] uses, and its side of it.
@@ -21,6 +22,17 @@ pub enum Security {
         domain: Frame,
         authenticate: Box<dyn FnOnce(&ZapRequest) -> ZapReply + Send>,
     },
+    /// A CURVE client with its long-term key pair, for the server whose
+    /// public key is `server_key`.
+    CurveClient {
+        keypair: Keypair,
+        server_key: PublicKey,
+    },
+    /// A CURVE server that asks `authenticate` about the client's key.
+    CurveServer {
+        keypair: Keypair,
+        authenticate: Box<dyn FnOnce(&ZapRequest) -> ZapReply + Send>,
+    },
 }
 
 /// A connection that has completed the greeting and security handshake.
@@ -29,6 +41,8 @@ pub struct Peer {
     stream: TcpStream,
     encoder: Encoder,
     decoder: Decoder,
+    /// Boxes and unboxes frames after a CURVE handshake.
+    curve: Option<CurveCodec>,
     /// What the handshake established.
     pub established: Established,
 }
@@ -40,6 +54,7 @@ pub enum ConnectError {
     Greeting(GreetingError),
     Handshake(HandshakeError),
     Decode(DecodeError),
+    Curve(CurveError),
     /// The peer closed the connection.
     Closed,
 }
@@ -92,6 +107,8 @@ impl Peer {
             },
             Security::PlainClient(_) => Mechanism::Plain(Role::Client),
             Security::PlainServer { .. } => Mechanism::Plain(Role::Server),
+            Security::CurveClient { .. } => Mechanism::Curve(Role::Client),
+            Security::CurveServer { .. } => Mechanism::Curve(Role::Server),
         };
         let (peer, leftover) = greet(&mut stream, socket_type, &identity, mechanism)?;
         let version = peer.version();
@@ -102,6 +119,7 @@ impl Peer {
             decoder,
             out: Vec::new(),
         };
+        let mut curve = None;
         let established = match security {
             Security::Null => {
                 let handshake = NullHandshake::start(socket_type, &identity, &peer, &mut io.out);
@@ -154,11 +172,64 @@ impl Peer {
                 };
                 established
             }
+            Security::CurveClient {
+                keypair,
+                server_key,
+            } => {
+                let start = CurveClient::start(
+                    socket_type,
+                    identity,
+                    &keypair,
+                    server_key,
+                    &peer,
+                    &mut io.out,
+                );
+                let mut client = io.flush(start)?;
+                loop {
+                    let item = io.next()?;
+                    let step = client.receive(item, &mut io.out);
+                    match io.flush(step)? {
+                        CurveClientStep::Continue(next) => client = next,
+                        CurveClientStep::Established(established, codec) => {
+                            curve = Some(codec);
+                            break established;
+                        }
+                    }
+                }
+            }
+            Security::CurveServer {
+                keypair,
+                authenticate,
+            } => {
+                let config = CurveServerConfig {
+                    socket_type,
+                    identity,
+                    domain: Frame::new(),
+                    peer_address: String::new(),
+                };
+                let mut server =
+                    CurveServer::start(config, &keypair, &peer).map_err(ConnectError::Handshake)?;
+                let (pending, request) = loop {
+                    let item = io.next()?;
+                    let step = server.receive(item, &mut io.out);
+                    match io.flush(step)? {
+                        CurveServerStep::Continue(next) => server = next,
+                        CurveServerStep::Authenticate(pending, request) => {
+                            break (pending, request);
+                        }
+                    }
+                };
+                let reply = pending.reply(authenticate(&request), &mut io.out);
+                let (established, codec) = io.flush(reply)?;
+                curve = Some(codec);
+                established
+            }
         };
         Ok(Self {
             stream: io.stream,
             encoder: Encoder::new(version),
             decoder: io.decoder,
+            curve,
             established,
         })
     }
@@ -166,7 +237,12 @@ impl Peer {
     /// Sends a message.
     pub fn send(&mut self, message: &Message) -> io::Result<()> {
         let mut out = Vec::new();
-        self.encoder.encode(message, &mut out);
+        match &mut self.curve {
+            Some(codec) => codec
+                .encode_message(message, self.encoder, &mut out)
+                .map_err(io::Error::other)?,
+            None => self.encoder.encode(message, &mut out),
+        }
         self.stream.write_all(&out)
     }
 
@@ -175,15 +251,29 @@ impl Peer {
         let mut body = Vec::new();
         command.encode(&mut body);
         let mut out = Vec::new();
-        self.encoder
-            .encode_command(&body, &mut out)
-            .map_err(io::Error::other)?;
+        match &mut self.curve {
+            Some(codec) => codec
+                .encode_command(&body, self.encoder, &mut out)
+                .map_err(io::Error::other)?,
+            None => self
+                .encoder
+                .encode_command(&body, &mut out)
+                .map_err(io::Error::other)?,
+        }
         self.stream.write_all(&out)
     }
 
     /// Receives the next message or command.
     pub fn recv(&mut self) -> Result<Incoming, ConnectError> {
-        next(&mut self.decoder, &mut self.stream)
+        loop {
+            let item = next(&mut self.decoder, &mut self.stream)?;
+            let Some(codec) = &mut self.curve else {
+                return Ok(item);
+            };
+            if let Some(item) = codec.decode(item).map_err(ConnectError::Curve)? {
+                return Ok(item);
+            }
+        }
     }
 
     /// Receives the next message, skipping commands.
@@ -272,6 +362,18 @@ impl fmt::Debug for Security {
                 .debug_struct("PlainServer")
                 .field("domain", domain)
                 .finish_non_exhaustive(),
+            Self::CurveClient {
+                keypair,
+                server_key,
+            } => f
+                .debug_struct("CurveClient")
+                .field("keypair", keypair)
+                .field("server_key", server_key)
+                .finish(),
+            Self::CurveServer { keypair, .. } => f
+                .debug_struct("CurveServer")
+                .field("keypair", keypair)
+                .finish_non_exhaustive(),
         }
     }
 }
@@ -283,6 +385,7 @@ impl fmt::Display for ConnectError {
             Self::Greeting(err) => write!(f, "greeting: {err}"),
             Self::Handshake(err) => write!(f, "handshake: {err}"),
             Self::Decode(err) => write!(f, "decode: {err}"),
+            Self::Curve(err) => write!(f, "CURVE: {err}"),
             Self::Closed => f.write_str("peer closed the connection"),
         }
     }

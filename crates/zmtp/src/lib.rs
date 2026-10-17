@@ -8,6 +8,8 @@
 
 mod codec;
 mod command;
+mod curve;
+mod curve_keys;
 mod frame;
 mod greeting;
 mod handshake;
@@ -17,6 +19,7 @@ mod message;
 mod plain;
 mod socket_type;
 mod subscription;
+pub mod z85;
 mod zap;
 
 pub use codec::{CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming};
@@ -24,6 +27,11 @@ pub use command::{
     Command, CommandError, CommandName, ErrorReason, Group, InvalidGroup, InvalidName, Metadata,
     Ping, PingContext, PropertyName, TooLong, Ttl,
 };
+pub use curve::{
+    CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerConfig,
+    CurveServerStep, PendingCurveAuthentication,
+};
+pub use curve_keys::{KeyError, Keypair, PublicKey, SecretKey};
 pub use frame::Frame;
 pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, Replay, Version};
 pub use handshake::{Established, HandshakeError, NullHandshake};

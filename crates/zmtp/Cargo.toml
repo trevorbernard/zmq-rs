@@ -14,6 +14,8 @@ bytes = []
 
 [dependencies]
 bytes.workspace = true
+crypto_box.workspace = true
+crypto_secretbox.workspace = true
 zeroize.workspace = true
 
 [lints]

@@ -9,7 +9,7 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
-use crate::{Frame, Metadata, TooLong};
+use crate::{Frame, Metadata, PublicKey, TooLong};
 
 /// What a server asks its authenticator about a connecting peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -31,6 +31,9 @@ pub enum ZapCredentials {
     Null,
     /// PLAIN presents a username and password.
     Plain(PlainCredentials),
+    /// CURVE presents the client's long-term public key, which the
+    /// handshake has proven the client holds the secret key for.
+    Curve(PublicKey),
 }
 
 /// The authenticator's verdict.
@@ -81,6 +84,7 @@ impl ZapCredentials {
         match self {
             Self::Null => "NULL",
             Self::Plain(_) => "PLAIN",
+            Self::Curve(_) => "CURVE",
         }
     }
 }

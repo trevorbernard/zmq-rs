@@ -13,6 +13,8 @@ publish = false
 [workspace.dependencies]
 atomic-waker = "1"
 bytes = "1"
+crypto_box = "0.9"
+crypto_secretbox = "0.1"
 mio = { version = "1", features = ["net", "os-poll"] }
 zeroize = "1"
 zmtp = { path = "crates/zmtp" }
