@@ -12,6 +12,7 @@ use std::time::Duration;
 
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SUBSCRIBE: c_int = 6;
+const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RCVTIMEO: c_int = 27;
 const ZMQ_LAST_ENDPOINT: c_int = 32;
@@ -230,6 +231,11 @@ impl Socket {
     /// Subscribes a SUB socket to `topic`.
     pub fn subscribe(&self, topic: &[u8]) {
         self.set_bytes(ZMQ_SUBSCRIBE, topic);
+    }
+
+    /// Removes a SUB socket's subscription to `topic`.
+    pub fn unsubscribe(&self, topic: &[u8]) {
+        self.set_bytes(ZMQ_UNSUBSCRIBE, topic);
     }
 
     /// Binds to an ephemeral TCP port on loopback and returns its address.

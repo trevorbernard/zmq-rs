@@ -6,9 +6,10 @@ use std::marker::PhantomData;
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmq_core::{
-    ConnectionConfig, FairQueue, LoadBalancer, Outstanding, PeerGone, Peers, Received, Replier,
-    Requester, RouteOutcome, RouterTable,
+    ConnectionConfig, FairQueue, LoadBalancer, Outstanding, PeerGone, PeerList, Peers, Publisher,
+    Received, Replier, Requester, RouteOutcome, RouterTable, Subscriber,
 };
+use zmq_pipe::Hwm;
 use zmtp::Message;
 
 use crate::endpoint::Target;
@@ -26,7 +27,55 @@ pub trait SocketType: sealed::Sealed + 'static {
     const KIND: zmtp::SocketType;
     /// How the socket routes messages among its peers.
     #[doc(hidden)]
-    type Routing: Default + fmt::Debug + Send;
+    type Routing: Routing;
+}
+
+/// How a socket type routes messages among its peers.
+#[doc(hidden)]
+pub trait Routing: Default + fmt::Debug + Send {
+    /// Called when [`Socket::connect`] has added a peer.
+    fn connected(&mut self, _peers: &mut PeerList) {}
+}
+
+impl Routing for LoadBalancer {}
+impl Routing for FairQueue {}
+impl Routing for Requester {}
+impl Routing for Replier {}
+impl Routing for DealerRouting {}
+impl Routing for RouterRouting {}
+impl Routing for Publisher {}
+
+impl Routing for Subscriber {
+    /// Subscriptions go to a peer as soon as it is connected, as in libzmq,
+    /// so it publishes to us even before we next receive.
+    fn connected(&mut self, peers: &mut PeerList) {
+        self.greet(peers);
+    }
+}
+
+/// Sends each message to every SUB peer subscribed to a prefix of its
+/// first frame (RFC 29). Never blocks: a subscriber whose queue is full
+/// misses the message, as in libzmq.
+#[derive(Debug)]
+pub enum Pub {}
+
+/// Receives what its PUB peers publish on the topics it subscribes to
+/// (RFC 29). Subscribed to nothing at first, so it receives nothing until
+/// [`subscribe`](Socket::subscribe) is called. Its subscriptions are never
+/// dropped: its queues towards peers are unbounded, whatever its send HWM.
+#[derive(Debug)]
+pub enum Sub {}
+
+impl sealed::Sealed for Pub {}
+impl SocketType for Pub {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Pub;
+    type Routing = Publisher;
+}
+
+impl sealed::Sealed for Sub {}
+impl SocketType for Sub {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Sub;
+    type Routing = Subscriber;
 }
 
 /// Sends messages round robin to its PULL peers (RFC 30). Waits while no
@@ -125,7 +174,12 @@ impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
-            send_hwm: options.send_hwm,
+            // A SUB only sends subscriptions, which must never be dropped.
+            send_hwm: if matches!(T::KIND, zmtp::SocketType::Sub) {
+                Hwm::Unlimited
+            } else {
+                options.send_hwm
+            },
             recv_hwm: options.recv_hwm,
             linger: options.linger,
             reconnect: options.reconnect,
@@ -166,6 +220,7 @@ impl<T: SocketType> Socket<T> {
             Target::Tcp(addr) => self.peers.connect(addr),
             Target::Inproc(name) => self.peers.connect_inproc(&name),
         };
+        self.routing.connected(self.peers.list_mut());
         Ok(())
     }
 }
@@ -195,6 +250,59 @@ impl Socket<Push> {
         // that are gone.
         self.peers.prune_send_only();
         poll_load_balanced(&mut self.peers, &mut self.routing, slot, cx)
+    }
+}
+
+impl Socket<Pub> {
+    /// Sends `message` to every subscriber that wants it and has room.
+    /// Never blocks. Returns how many subscribers it was queued for: none if
+    /// nobody has subscribed to it yet, as subscriptions take a moment to
+    /// arrive after connecting.
+    pub fn send(&mut self, message: impl Into<Message>) -> usize {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing.send(self.peers.list_mut(), message.into())
+    }
+}
+
+impl Socket<Sub> {
+    /// Subscribes to messages whose first frame starts with `topic`. The
+    /// empty topic matches everything. Subscribing to a topic again needs
+    /// another [`unsubscribe`](Self::unsubscribe) to undo.
+    pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing
+            .subscribe(self.peers.list_mut(), topic.as_ref());
+    }
+
+    /// Removes one subscription to `topic`. Returns whether there was one.
+    /// Messages already queued that no longer match are dropped.
+    pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing
+            .unsubscribe(self.peers.list_mut(), topic.as_ref())
+    }
+
+    /// The next message on a subscribed topic, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Message> {
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+    }
+
+    /// The next message on a subscribed topic, blocking until one arrives.
+    pub fn recv(&mut self) -> Message {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message on a subscribed topic, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Message {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        self.peers.accept(cx);
+        self.routing.poll_recv(self.peers.list_mut(), cx)
     }
 }
 

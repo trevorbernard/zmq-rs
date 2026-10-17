@@ -67,6 +67,9 @@ signal again for data it has already reported.
   (`session_base_t::engine_error`), a protocol error such as a failed
   handshake or an incompatible peer ends the session instead, closing its
   pipes. Accepted sessions never reconnect.
+- A SUB or XSUB session remembers the topics it has carried, and the next
+  connection sends them before anything else in the pipe. The new peer
+  starts with no subscriptions, so this is how it learns them.
 - `Reconnect::Fixed` waits the interval plus random jitter below it, and
   `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
   handshake succeeds; both follow libzmq's `get_new_reconnect_ivl`.
@@ -112,6 +115,14 @@ strategies work over that set, as in libzmq:
   id leads the envelope and replies with another id are dropped.
 - `Replier` (`rep_t`) fair-queues requests, keeps every frame up to the
   delimiter as the envelope, and sends the reply back behind it.
+- `Publisher` (`xpub_t`, `dist_t`) keeps each peer's topics, read from
+  subscription messages as it sends, and queues a message for every peer
+  subscribed to a prefix of its first frame that has room. It never
+  blocks. A ZMTP 1.0 peer, which sends no subscriptions, is subscribed to
+  everything.
+- `Subscriber` (`xsub_t`) counts its topics, sends them to each new peer
+  and every change to all peers, and drops arriving messages that match no
+  topic. `Topics` does the prefix matching for both.
 
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a
@@ -195,3 +206,5 @@ connections waiting for a name.
 | 5a | PLAIN on connections, with an `Authenticator` trait | done |
 | 5b | Heartbeats (ZMTP 3.1 PING/PONG) and the handshake deadline | done |
 | 5c | `inproc` | done |
+| 6a | PUB and SUB; subscriptions on the wire and replayed after reconnecting | done |
+| 6b | XPUB and XSUB | next |

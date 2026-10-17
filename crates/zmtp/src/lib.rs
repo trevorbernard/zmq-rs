@@ -16,6 +16,7 @@ mod mechanism;
 mod message;
 mod plain;
 mod socket_type;
+mod subscription;
 mod zap;
 
 pub use codec::{CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming};
@@ -33,6 +34,7 @@ pub use plain::{
     ClientStep, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, ServerStep,
 };
 pub use socket_type::SocketType;
+pub use subscription::Subscription;
 pub use zap::{
     Authenticated, Credential, PlainCredentials, ZapCredentials, ZapFailure, ZapReply, ZapRequest,
 };

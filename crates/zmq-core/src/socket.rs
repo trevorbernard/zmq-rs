@@ -73,6 +73,10 @@ impl PeerList {
         self.peers.iter()
     }
 
+    pub(crate) fn iter_mut(&mut self) -> impl Iterator<Item = &mut Peer> {
+        self.peers.iter_mut()
+    }
+
     /// The peer with `key`, if it is still here.
     pub fn get(&self, key: PeerKey) -> Option<&Peer> {
         let index = self.peers.binary_search_by_key(&key, Peer::key).ok()?;

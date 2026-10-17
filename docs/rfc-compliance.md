@@ -178,9 +178,13 @@ connection error, so a connecting session reconnects.
 | V2, V3.0 | data frame prefixed `01` (subscribe) or `00` (unsubscribe) |
 | V3.1 | `SUBSCRIBE` and `CANCEL` commands |
 
-**Design:** sockets emit semantic `Subscribe(Bytes)` and `Cancel(Bytes)`
-values, and the codec chooses the wire form. Decoding normalises every form
-into those two values.
+**Design:** `zmtp::Subscription` is `Subscribe(Frame)` or `Cancel(Frame)`,
+with both wire forms. Inside the process, subscriptions travel in the
+message form, as in libzmq: a SUB or XSUB socket sends `01`/`00`-prefixed
+messages, and its engine turns them into commands for ZMTP 3.1 peers. A PUB
+or XPUB engine turns incoming commands back into that form. Only those
+socket types convert, so another socket's message that happens to start
+with `01` is left alone. `inproc` needs no conversion at all.
 
 ## Security (RFC 24, 25, 26, 27, 32)
 
@@ -311,6 +315,13 @@ Rules shared by every pattern:
 - `SubscriptionEvent` has a wire form for XPUB↔XSUB proxies.
 - Add an `XSub` type that sends `SubscriptionEvent | Message` and receives `Message`.
 - `Pub::send` never returns an HWM error unless `no_drop` is set.
+
+**Done (PUB and SUB):**
+- `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.
+- A SUB counts its subscriptions: every `subscribe` goes upstream, as in libzmq, while `unsubscribe` sends CANCEL only for the last one. A publisher keeps one subscription per topic and peer, as libzmq's XPUB does.
+- A SUB filters what arrives too. That covers publishers that send everything, and messages queued before an `unsubscribe`.
+- A SUB's subscriptions go to a peer as soon as `connect` returns. Its queues towards peers are unbounded, so a subscription is never dropped at the HWM.
+- A session replays the topics it has carried to each new connection after a reconnect, which is the effect of libzmq's hiccup. Cancelled topics are not replayed.
 
 ### PIPELINE (RFC 30) and EXPAIR (RFC 31)
 

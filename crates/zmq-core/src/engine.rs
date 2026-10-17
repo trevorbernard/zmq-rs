@@ -17,11 +17,11 @@ use zmtp::{
     ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting,
     GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message, NullHandshake,
     PeerGreeting, PendingAuthentication, Ping, PingContext, PlainClient, PlainServer,
-    PlainServerConfig, Role, ServerStep, Ttl, Version, ZapReply,
+    PlainServerConfig, Role, ServerStep, SocketType, Subscription, Ttl, Version, ZapReply,
 };
 
 use crate::context::PeerSlot;
-use crate::{ConnectionConfig, Security, ZapResponder};
+use crate::{ConnectionConfig, Security, Topics, ZapResponder};
 
 /// The shortest PING interval, so a zero interval cannot spin.
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
@@ -144,6 +144,9 @@ pub(crate) struct Pipes<'a> {
     pub(crate) outbound: &'a mut Reader<Message>,
     /// Where the handshake's outcome goes, for the socket to read.
     pub(crate) peer: &'a PeerSlot,
+    /// The topics a SUB or XSUB has subscribed to over this session's
+    /// connections, replayed to each new one as libzmq does on a hiccup.
+    pub(crate) subscriptions: &'a mut Topics,
 }
 
 impl Engine {
@@ -303,7 +306,13 @@ impl Engine {
         while self.out.len() - self.out_pos < MAX_PENDING_OUTPUT {
             match pipes.outbound.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
-                    encoder.encode(&message, &mut self.out);
+                    match self.outgoing_subscription(&message) {
+                        Some(subscription) => {
+                            remember(pipes.subscriptions, &subscription);
+                            self.encode_subscription(encoder, &subscription);
+                        }
+                        None => encoder.encode(&message, &mut self.out),
+                    }
                     self.outbound_empty = false;
                     progressed = true;
                 }
@@ -474,9 +483,14 @@ impl Engine {
                 // Published before any message from this peer can be
                 // delivered, so a ROUTER always knows who sent it.
                 *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
+                let encoder = Encoder::new(version);
+                for topic in pipes.subscriptions.iter() {
+                    let topic = zmtp::Frame::copy_from_slice(topic);
+                    self.encode_subscription(encoder, &Subscription::Subscribe(topic));
+                }
                 self.state = State::Active {
                     decoder,
-                    encoder: Encoder::new(version),
+                    encoder,
                     pending: None,
                 };
             }
@@ -567,7 +581,12 @@ impl Engine {
                     progressed = true;
                 }
                 Some(Incoming::Command(body)) => {
-                    self.handle_command(&body, encoder)?;
+                    if let Some(message) = self.handle_command(&body, encoder)?
+                        && let Some(refused) = deliver(pipes.inbound, message, cx)?
+                    {
+                        *pending = Some(refused);
+                        return Ok(true);
+                    }
                     progressed = true;
                 }
                 None => {
@@ -580,10 +599,21 @@ impl Engine {
         }
     }
 
-    fn handle_command(&mut self, body: &[u8], encoder: Encoder) -> Result<(), EngineError> {
+    /// Answers heartbeats. Returns a subscription for a PUB or XPUB socket
+    /// to read, in the message form; other commands are ignored.
+    fn handle_command(
+        &mut self,
+        body: &[u8],
+        encoder: Encoder,
+    ) -> Result<Option<Message>, EngineError> {
         let command = Command::parse(body)
             .map_err(|err| EngineError::Handshake(HandshakeError::MalformedCommand(err)))?;
-        // Answer heartbeats; subscriptions and the rest belong to patterns.
+        if let Command::Subscribe(_) | Command::Cancel(_) = command {
+            let publishes = matches!(self.config.socket_type, SocketType::Pub | SocketType::XPub);
+            return Ok(Subscription::from_command(command)
+                .filter(|_| publishes)
+                .map(|subscription| subscription.to_message()));
+        }
         if let Command::Ping(ping) = command {
             if ping.ttl != Ttl::ZERO {
                 self.deadlines
@@ -594,7 +624,27 @@ impl Engine {
             Command::Pong(ping.context).encode(&mut pong);
             let _ = encoder.encode_command(&pong, &mut self.out);
         }
-        Ok(())
+        Ok(None)
+    }
+
+    /// The subscription `message` carries, if this is a SUB or XSUB socket
+    /// and it is one.
+    fn outgoing_subscription(&self, message: &Message) -> Option<Subscription> {
+        matches!(self.config.socket_type, SocketType::Sub | SocketType::XSub)
+            .then(|| Subscription::from_message(message))
+            .flatten()
+    }
+
+    /// Writes `subscription` as ZMTP 3.1 does, as a command, or in the
+    /// message form older peers expect.
+    fn encode_subscription(&mut self, encoder: Encoder, subscription: &Subscription) {
+        if encoder.version() == Version::V3_1 {
+            let mut body = Vec::new();
+            subscription.to_command().encode(&mut body);
+            let _ = encoder.encode_command(&body, &mut self.out);
+        } else {
+            encoder.encode(&subscription.to_message(), &mut self.out);
+        }
     }
 
     /// Reads from the stream into `decoder`. Returns whether anything arrived.
@@ -605,6 +655,21 @@ impl Engine {
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(false),
             Err(err) if err.kind() == io::ErrorKind::Interrupted => Ok(true),
             Err(err) => Err(EngineError::Io(err)),
+        }
+    }
+}
+
+/// Records a subscription sent on the session, for replay. Topics are a
+/// set here: a subscriber cancels only its last subscription to a topic.
+fn remember(subscriptions: &mut Topics, subscription: &Subscription) {
+    match subscription {
+        Subscription::Subscribe(topic) => {
+            if !subscriptions.contains(topic) {
+                subscriptions.add(topic);
+            }
+        }
+        Subscription::Cancel(topic) => {
+            subscriptions.remove(topic);
         }
     }
 }

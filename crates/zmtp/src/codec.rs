@@ -101,6 +101,11 @@ impl Encoder {
         Self { version }
     }
 
+    /// The protocol version it encodes for.
+    pub const fn version(&self) -> Version {
+        self.version
+    }
+
     /// Appends `message` to `out`, setting MORE on every frame but the last.
     pub fn encode(&self, message: &Message, out: &mut Vec<u8>) {
         let last = message.len().get() - 1;

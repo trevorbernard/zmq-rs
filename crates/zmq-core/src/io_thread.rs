@@ -19,7 +19,7 @@ use zmtp::Message;
 use crate::context::PeerSlot;
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
-use crate::{Connection, ConnectionConfig, Linger};
+use crate::{Connection, ConnectionConfig, Linger, Topics};
 
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
@@ -324,6 +324,7 @@ impl EventLoop {
             inbound,
             outbound,
             peer,
+            subscriptions: Topics::default(),
             task_waker: Waker::from(waker.clone()),
             waker,
         };
@@ -551,6 +552,8 @@ struct Session {
     outbound: Reader<Message>,
     /// Shared with the socket's [`Connection`].
     peer: PeerSlot,
+    /// Subscriptions sent so far, replayed after reconnecting.
+    subscriptions: Topics,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
 }
@@ -609,6 +612,7 @@ impl Session {
             inbound: &mut self.inbound,
             outbound: &mut self.outbound,
             peer: &self.peer,
+            subscriptions: &mut self.subscriptions,
         };
         engine.drive(&mut pipes, &mut cx)
     }

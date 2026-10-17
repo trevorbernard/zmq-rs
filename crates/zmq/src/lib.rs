@@ -46,6 +46,20 @@
 //! request.reply("b");
 //! ```
 //!
+//! A PUB socket cannot receive, and a SUB socket cannot send:
+//!
+//! ```compile_fail,E0599
+//! let context = zmq::Context::new().unwrap();
+//! let mut publisher = context.socket::<zmq::Pub>();
+//! publisher.recv();
+//! ```
+//!
+//! ```compile_fail,E0599
+//! let context = zmq::Context::new().unwrap();
+//! let mut subscriber = context.socket::<zmq::Sub>();
+//! subscriber.send("upstream");
+//! ```
+//!
 //! A ROUTER cannot send without saying to whom:
 //!
 //! ```compile_fail,E0061
@@ -63,7 +77,9 @@ use std::io;
 
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
-pub use socket::{Dealer, Pull, Push, Rep, Req, Request, Router, Socket, SocketType};
+#[doc(hidden)]
+pub use socket::Routing;
+pub use socket::{Dealer, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub};
 pub use zmq_core::{
     Authenticator, Heartbeat, Linger, PeerGone, Reconnect, RouteOutcome, Security, ZapResponder,
 };

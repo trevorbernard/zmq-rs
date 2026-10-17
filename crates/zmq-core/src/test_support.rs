@@ -34,6 +34,21 @@ impl FakeSession {
     }
 }
 
+impl FakeSession {
+    /// Completes a handshake with a ZMTP 1.0 SUB, which never sends
+    /// subscriptions.
+    pub(crate) fn establish_legacy_subscriber(&self) {
+        *self.connection_peer.lock().unwrap() = Some(Established {
+            version: Version::V1,
+            peer_socket_type: None,
+            peer_identity: Frame::new(),
+            metadata: Metadata::new(),
+            authenticated: None,
+            implicit_subscription: true,
+        });
+    }
+}
+
 pub(crate) fn connection(hwm: usize) -> (Connection, FakeSession) {
     let hwm = Hwm::Messages(NonZeroUsize::new(hwm).unwrap());
     let (tx, from_socket) = pipe(hwm);
