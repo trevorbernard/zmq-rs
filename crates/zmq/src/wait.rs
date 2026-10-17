@@ -19,7 +19,15 @@ pub(crate) fn block_on<R>(mut poll: impl FnMut(&mut Context<'_>) -> Poll<R>) -> 
         }
     }
 
-    let waker = Waker::from(Arc::new(Unpark(thread::current())));
+    // One waker per thread: a fresh one per call is allocated here and,
+    // once a peer's wake drops the last reference, freed on the peer's
+    // thread, a cross-thread free per message that glibc handles badly.
+    thread_local! {
+        static WAKER: Waker = Waker::from(Arc::new(Unpark(thread::current())));
+    }
+    let waker = WAKER
+        .try_with(Waker::clone)
+        .unwrap_or_else(|_| Waker::from(Arc::new(Unpark(thread::current()))));
     let mut cx = Context::from_waker(&waker);
     loop {
         if let Poll::Ready(output) = poll(&mut cx) {
