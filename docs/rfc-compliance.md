@@ -337,6 +337,12 @@ Rules shared by every pattern:
 - **PULL** fair-queues.
 - **PAIR** has at most one peer; libzmq terminates any second pipe. With no peer it blocks or errors.
 
+**Done (PAIR):**
+- The oldest peer is the one. Any other is turned away by closing its connection, as libzmq terminates the pipe. Messages a turned-away peer already sent are lost with it, as in libzmq; a libzmq PAIR keeps reconnecting and gets in once the slot is free.
+- The slot frees only when the peer's session ends for good. A connecting session that is reconnecting keeps it, as libzmq's pipe does.
+- Difference from libzmq: messages the departed peer had already delivered are still received, before anything from the next peer. libzmq drops them with the pipe.
+- `send` and `recv` wait while there is no peer or no room; `try_send` hands the message back.
+
 ### Thread-safe types (RFC 41, 48, 49, 51, 52)
 
 - Single-part only. Received multipart messages MUST be discarded, and the peer MAY be disconnected.

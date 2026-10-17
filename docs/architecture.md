@@ -127,6 +127,9 @@ strategies work over that set, as in libzmq:
   and every change to all peers, and drops arriving messages that match no
   topic. `Topics` does the prefix matching for both. XSUB uses it too,
   with `send_upstream` for messages to every publisher.
+- `Pair` (`pair_t`) keeps the oldest peer and closes every other. When the
+  peer's session ends, what it delivered moves to a leftover queue that is
+  received first, and the next peer to arrive takes its place.
 
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a
@@ -212,3 +215,4 @@ connections waiting for a name.
 | 5c | `inproc` | done |
 | 6a | PUB and SUB; subscriptions on the wire and replayed after reconnecting | done |
 | 6b | XPUB and XSUB | done |
+| 6c | PAIR | done |

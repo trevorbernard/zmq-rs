@@ -80,7 +80,7 @@ pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 #[doc(hidden)]
 pub use socket::Routing;
 pub use socket::{
-    Dealer, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub, XPub, XSub,
+    Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub, XPub, XSub,
 };
 pub use zmq_core::{
     Authenticator, Heartbeat, Linger, PeerGone, Reconnect, RouteOutcome, Security, XPubEvent,

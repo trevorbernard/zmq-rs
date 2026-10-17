@@ -9,6 +9,7 @@
 mod context;
 mod engine;
 mod io_thread;
+mod pair;
 mod pubsub;
 mod reconnect;
 mod reqrep;
@@ -21,6 +22,7 @@ pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
     ShutdownTimedOut,
 };
+pub use pair::Pair;
 pub use pubsub::{Publisher, Subscriber, Topics, XPubEvent};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};

@@ -80,6 +80,7 @@ fn check(rc: c_int) -> io::Result<c_int> {
 /// A libzmq socket type, numbered as in `zmq.h`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
+    Pair = 0,
     Pub = 1,
     Sub = 2,
     Req = 3,
