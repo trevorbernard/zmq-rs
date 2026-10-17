@@ -15,10 +15,10 @@ use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
     CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    Greeting, GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message,
-    NullHandshake, PeerGreeting, PendingAuthentication, PendingCurveAuthentication, Ping,
-    PingContext, PlainClient, PlainServer, PlainServerConfig, Role, ServerStep, SocketType,
-    Subscription, Ttl, Version, ZapFailure, ZapReply,
+    Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
+    Membership, Message, NullHandshake, PeerGreeting, PendingAuthentication,
+    PendingCurveAuthentication, Ping, PingContext, PlainClient, PlainServer, PlainServerConfig,
+    Role, ServerStep, SocketType, Subscription, Ttl, Version, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -386,12 +386,14 @@ impl Engine {
         while self.out.len() - self.out_pos < MAX_PENDING_OUTPUT {
             match pipes.outbound.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
-                    match self.outgoing_subscription(&message) {
-                        Some(subscription) => {
-                            remember(pipes.subscriptions, &subscription);
-                            self.encode_subscription(encoder, &subscription)?;
-                        }
-                        None => self.write_message(encoder, &message)?,
+                    if let Some(subscription) = self.outgoing_subscription(&message) {
+                        remember(pipes.subscriptions, &subscription);
+                        self.encode_subscription(encoder, &subscription)?;
+                    } else if let Some(change) = self.outgoing_membership(&message) {
+                        remember_membership(pipes.subscriptions, &change);
+                        self.encode_membership(encoder, &change)?;
+                    } else {
+                        self.write_message(encoder, &message)?;
                     }
                     self.outbound_empty = false;
                     progressed = true;
@@ -595,9 +597,16 @@ impl Engine {
                 // delivered, so a ROUTER always knows who sent it.
                 *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
                 let encoder = Encoder::new(version);
+                // A SUB's topics, or a DISH's groups.
+                let dish = self.config.socket_type == SocketType::Dish;
                 for topic in pipes.subscriptions.iter() {
                     let topic = zmtp::Frame::copy_from_slice(topic);
-                    self.encode_subscription(encoder, &Subscription::Subscribe(topic))?;
+                    if dish {
+                        let group = Group::new(topic).expect("remembered only valid groups");
+                        self.encode_membership(encoder, &Membership::Join(group))?;
+                    } else {
+                        self.encode_subscription(encoder, &Subscription::Subscribe(topic))?;
+                    }
                 }
                 self.state = State::Active {
                     decoder,
@@ -788,6 +797,12 @@ impl Engine {
                 .filter(|_| publishes)
                 .map(|subscription| subscription.to_message()));
         }
+        if let Command::Join(_) | Command::Leave(_) = command {
+            let radio = self.config.socket_type == SocketType::Radio;
+            return Ok(Membership::from_command(command)
+                .filter(|_| radio)
+                .map(|change| change.to_message()));
+        }
         if let Command::Ping(ping) = command {
             if ping.ttl != Ttl::ZERO {
                 self.deadlines
@@ -807,6 +822,26 @@ impl Engine {
         matches!(self.config.socket_type, SocketType::Sub | SocketType::XSub)
             .then(|| Subscription::from_message(message))
             .flatten()
+    }
+
+    /// The membership change `message` carries, if this is a DISH socket
+    /// and it is one.
+    fn outgoing_membership(&self, message: &Message) -> Option<Membership> {
+        (self.config.socket_type == SocketType::Dish)
+            .then(|| Membership::from_message(message))
+            .flatten()
+    }
+
+    /// Writes a JOIN or LEAVE command, as libzmq's DISH does whatever the
+    /// peer's ZMTP 3.x version.
+    fn encode_membership(
+        &mut self,
+        encoder: Encoder,
+        change: &Membership,
+    ) -> Result<(), EngineError> {
+        let mut body = Vec::new();
+        change.to_command().encode(&mut body);
+        self.write_command(encoder, &body).map(drop)
     }
 
     /// Writes `subscription` as ZMTP 3.1 does, as a command, or in the
@@ -848,6 +883,20 @@ fn remember(subscriptions: &mut Topics, subscription: &Subscription) {
         }
         Subscription::Cancel(topic) => {
             subscriptions.remove(topic);
+        }
+    }
+}
+
+/// Records a DISH's join or leave for replay, as subscriptions are.
+fn remember_membership(groups: &mut Topics, change: &Membership) {
+    match change {
+        Membership::Join(group) => {
+            if !groups.contains(group.as_slice()) {
+                groups.add(group.as_slice());
+            }
+        }
+        Membership::Leave(group) => {
+            groups.remove(group.as_slice());
         }
     }
 }

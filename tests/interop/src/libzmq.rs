@@ -62,7 +62,36 @@ unsafe extern "C" {
     fn zmq_msg_close(msg: *mut RawMsg) -> c_int;
     fn zmq_errno() -> c_int;
     fn zmq_has(capability: *const c_char) -> c_int;
+    fn zmq_msg_init_size(msg: *mut RawMsg, size: usize) -> c_int;
+    fn zmq_msg_send(msg: *mut RawMsg, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_strerror(errnum: c_int) -> *const c_char;
+}
+
+// libzmq's draft API is exported under these names only by a build with
+// drafts; a build without them has C++-mangled ones. Linking them would
+// fail against such a libzmq, so they are looked up when first used.
+unsafe extern "C" {
+    fn dlsym(handle: *mut c_void, symbol: *const c_char) -> *mut c_void;
+}
+
+/// `RTLD_DEFAULT`: search every loaded library.
+#[cfg(target_os = "macos")]
+const RTLD_DEFAULT: *mut c_void = -2isize as *mut c_void;
+#[cfg(not(target_os = "macos"))]
+const RTLD_DEFAULT: *mut c_void = std::ptr::null_mut();
+
+/// The address of libzmq's draft function `name`, which must exist: check
+/// [`has`]`("draft")` first.
+fn draft_function(name: &str) -> *mut c_void {
+    let symbol = CString::new(name).unwrap();
+    // SAFETY: `symbol` is a valid C string; RTLD_DEFAULT searches every
+    // loaded library.
+    let address = unsafe { dlsym(RTLD_DEFAULT, symbol.as_ptr()) };
+    assert!(
+        !address.is_null(),
+        "this libzmq has no {name}: built without drafts"
+    );
+    address
 }
 
 fn last_error() -> io::Error {
@@ -98,6 +127,8 @@ pub enum Kind {
     XSub = 10,
     Server = 12,
     Client = 13,
+    Radio = 14,
+    Dish = 15,
 }
 
 /// A libzmq context, shared by sockets that talk over `inproc`, such as a
@@ -249,6 +280,68 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+    }
+
+    /// Joins a DISH socket to `group`. Needs a libzmq with drafts.
+    pub fn join(&self, group: &str) {
+        let group = CString::new(group).unwrap();
+        // SAFETY: zmq_join has this signature in zmq.h's draft API.
+        let join: unsafe extern "C" fn(*mut c_void, *const c_char) -> c_int =
+            unsafe { std::mem::transmute(draft_function("zmq_join")) };
+        // SAFETY: the socket is open and `group` is a valid C string.
+        check(unsafe { join(self.raw.as_ptr(), group.as_ptr()) }).expect("zmq_join");
+    }
+
+    /// Sends `body` to `group` from a RADIO socket. Needs a libzmq with
+    /// drafts.
+    pub fn send_to_group(&self, group: &str, body: &[u8]) -> io::Result<()> {
+        let group = CString::new(group).unwrap();
+        // SAFETY: zmq_msg_set_group has this signature in zmq.h's draft API.
+        let set_group: unsafe extern "C" fn(*mut RawMsg, *const c_char) -> c_int =
+            unsafe { std::mem::transmute(draft_function("zmq_msg_set_group")) };
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is sized for `body`, filled, given its group and
+        // sent, which takes it; it is closed if anything fails first.
+        unsafe {
+            check(zmq_msg_init_size(&mut msg, body.len()))?;
+            let data = zmq_msg_data(&mut msg).cast::<u8>();
+            std::ptr::copy_nonoverlapping(body.as_ptr(), data, body.len());
+            let sent = check(set_group(&mut msg, group.as_ptr()))
+                .and_then(|_| check(zmq_msg_send(&mut msg, self.raw.as_ptr(), 0)));
+            if sent.is_err() {
+                zmq_msg_close(&mut msg);
+            }
+            sent.map(drop)
+        }
+    }
+
+    /// Receives a message and its group on a DISH socket. Needs a libzmq
+    /// with drafts.
+    pub fn recv_from_group(&self) -> io::Result<(String, Vec<u8>)> {
+        // SAFETY: zmq_msg_group has this signature in zmq.h's draft API.
+        let group_of: unsafe extern "C" fn(*mut RawMsg) -> *const c_char =
+            unsafe { std::mem::transmute(draft_function("zmq_msg_group")) };
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is initialized before use and closed afterwards;
+        // its group and data are copied out while it is still open.
+        unsafe {
+            check(zmq_msg_init(&mut msg))?;
+            if let Err(err) = check(zmq_msg_recv(&mut msg, self.raw.as_ptr(), 0)) {
+                zmq_msg_close(&mut msg);
+                return Err(err);
+            }
+            let group = CStr::from_ptr(group_of(&mut msg))
+                .to_string_lossy()
+                .into_owned();
+            let size = zmq_msg_size(&msg);
+            let body = if size == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(zmq_msg_data(&mut msg).cast::<u8>(), size).to_vec()
+            };
+            zmq_msg_close(&mut msg);
+            Ok((group, body))
+        }
     }
 
     /// Subscribes a SUB socket to `topic`.

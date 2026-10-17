@@ -368,3 +368,4 @@ Also check while on Linux:
 | 9 | Built-in proxy, with capture and steering | done |
 | 10 | Socket monitoring | done |
 | 11a | CLIENT and SERVER (`draft` feature) | done |
+| 11b | RADIO and DISH (`draft` feature) | done |

@@ -15,6 +15,7 @@ mod greeting;
 mod handshake;
 mod identity;
 mod mechanism;
+mod membership;
 mod message;
 mod plain;
 mod socket_type;
@@ -37,6 +38,7 @@ pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, 
 pub use handshake::{Established, HandshakeError, NullHandshake};
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
+pub use membership::Membership;
 pub use message::{EmptyMessage, IntoIter, Iter, Message};
 pub use plain::{
     ClientStep, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, ServerStep,

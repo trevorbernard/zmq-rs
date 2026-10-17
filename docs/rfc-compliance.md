@@ -380,6 +380,13 @@ GitHub CI, which installs Ubuntu's.
 - `Socket<Client>` and `Socket<Server>` send and receive `Frame`s, not `Message`s, so sending a multipart message does not compile. Received multipart messages are dropped.
 - SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect(id)` closes a client's connection.
 - Not yet: libzmq SERVER replying in the interop tests, which needs its draft routing-id API through the FFI.
+
+**Done (RADIO and DISH):**
+- `Socket<Radio>::send(&group, body)` reaches every DISH peer that joined the group, matched exactly, and never blocks: a full dish misses the message, as in libzmq. It returns how many dishes it was queued for.
+- `Socket<Dish>` joins and leaves groups (`false` for a second join, or leaving one not joined, as libzmq refuses them), and receives `(Group, Frame)`. It filters what arrives, so messages queued before a leave are dropped. Its queues towards peers are unbounded, so a join is never dropped.
+- On the wire, messages are `group (MORE) | body` and membership changes are JOIN and LEAVE commands, whatever the ZMTP 3.x version, as libzmq's DISH sends them. Inside the process, DISH writes `zmtp::Membership` in a `0x01`/`0x00` message form, as SUB does subscriptions; engines convert, and a session replays its groups after reconnecting.
+- The interop tests drive libzmq's RADIO and DISH through its draft API (`zmq_join`, `zmq_msg_set_group`, `zmq_msg_group`), looked up at run time: a libzmq without drafts exports them only under C++-mangled names.
+- Not supported: UDP, RADIO/DISH's other transport.
 - **CHANNEL** has a single peer.
 - **RADIO**
   - Silently drops when full, and never blocks unless `no_drop` is set.

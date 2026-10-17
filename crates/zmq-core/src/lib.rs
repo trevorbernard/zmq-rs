@@ -12,6 +12,8 @@ mod io_thread;
 mod monitor;
 mod pair;
 mod pubsub;
+#[cfg(feature = "draft")]
+mod radiodish;
 mod reconnect;
 mod reqrep;
 mod security;
@@ -29,6 +31,8 @@ pub use context::{
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
 pub use pair::Pair;
 pub use pubsub::{Publisher, Subscriber, Topics, XPubEvent};
+#[cfg(feature = "draft")]
+pub use radiodish::{Dish, Radio};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};

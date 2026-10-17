@@ -227,9 +227,12 @@ impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
-            // Subscriptions must never be dropped, so SUB and XSUB queue
-            // without limit towards their peers.
-            send_hwm: if matches!(T::KIND, zmtp::SocketType::Sub | zmtp::SocketType::XSub) {
+            // Subscriptions and joins must never be dropped, so SUB, XSUB
+            // and DISH queue without limit towards their peers.
+            send_hwm: if matches!(
+                T::KIND,
+                zmtp::SocketType::Sub | zmtp::SocketType::XSub | zmtp::SocketType::Dish
+            ) {
                 Hwm::Unlimited
             } else {
                 options.send_hwm

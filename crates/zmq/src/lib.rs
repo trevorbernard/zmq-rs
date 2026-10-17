@@ -99,7 +99,7 @@ mod wait;
 use std::io;
 
 #[cfg(feature = "draft")]
-pub use draft::{Client, ClientId, NoSuchClient, Server};
+pub use draft::{Client, ClientId, Dish, NoSuchClient, Radio, Server};
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
@@ -119,6 +119,8 @@ pub use zmtp::{
     Credential, Frame, Identity, KeyError, Keypair, Message, Metadata, PlainCredentials, PublicKey,
     SecretKey, ZapCredentials, ZapReply, ZapRequest,
 };
+#[cfg(feature = "draft")]
+pub use zmtp::{Group, InvalidGroup};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
 #[derive(Debug, Clone)]

@@ -7,7 +7,7 @@ use std::num::NonZeroU32;
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
-use zmtp::{Frame, Message};
+use zmtp::{Frame, Group, Message};
 
 use crate::socket::{Routing, SocketType, sealed};
 use crate::{Socket, wait};
@@ -53,6 +53,89 @@ pub struct ClientRouting {
 
 impl Routing for ClientRouting {}
 impl Routing for ServerTable {}
+impl Routing for zmq_core::Radio {}
+
+impl Routing for zmq_core::Dish {
+    /// Groups are told to a peer as soon as it is connected, as in libzmq.
+    fn connected(&mut self, peers: &mut zmq_core::PeerList) {
+        self.greet(peers);
+    }
+}
+
+/// Sends single-part messages to a [`Group`], reaching every DISH peer
+/// that joined it (RFC 48). Groups match exactly. Never blocks: a dish
+/// whose queue is full misses the message, as in libzmq.
+#[derive(Debug)]
+pub enum Radio {}
+
+/// Receives what its RADIO peers send to the groups it joined (RFC 48).
+/// Joins nothing at first. Its joins are never dropped: its queues towards
+/// peers are unbounded, whatever its send HWM.
+#[derive(Debug)]
+pub enum Dish {}
+
+impl sealed::Sealed for Radio {}
+impl SocketType for Radio {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Radio;
+    type Routing = zmq_core::Radio;
+}
+
+impl sealed::Sealed for Dish {}
+impl SocketType for Dish {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Dish;
+    type Routing = zmq_core::Dish;
+}
+
+impl Socket<Radio> {
+    /// Sends `body` to every dish in `group` that has room. Never blocks.
+    /// Returns how many dishes it was queued for: none if nobody has joined
+    /// yet, as joins take a moment to arrive after connecting.
+    pub fn send(&mut self, group: &Group, body: impl Into<Frame>) -> usize {
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        let (peers, radio) = self.parts_accepting(&mut cx);
+        radio.send(peers, group, body.into())
+    }
+}
+
+impl Socket<Dish> {
+    /// Joins `group`. Returns false if it was already joined.
+    pub fn join(&mut self, group: &Group) -> bool {
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        let (peers, dish) = self.parts_accepting(&mut cx);
+        dish.join(peers, group)
+    }
+
+    /// Leaves `group`. Returns false if it was not joined. Messages already
+    /// queued for the group are dropped.
+    pub fn leave(&mut self, group: &Group) -> bool {
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        let (peers, dish) = self.parts_accepting(&mut cx);
+        dish.leave(peers, group)
+    }
+
+    /// The next message and its group, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<(Group, Frame)> {
+        match self.poll_recv_group(&mut TaskContext::from_waker(Waker::noop())) {
+            Poll::Ready(received) => Some(received),
+            Poll::Pending => None,
+        }
+    }
+
+    /// The next message and its group, blocking until one arrives.
+    pub fn recv(&mut self) -> (Group, Frame) {
+        wait::block_on(|cx| self.poll_recv_group(cx))
+    }
+
+    /// The next message and its group, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> (Group, Frame) {
+        poll_fn(|cx| self.poll_recv_group(cx)).await
+    }
+
+    fn poll_recv_group(&mut self, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
+        let (peers, dish) = self.parts_accepting(cx);
+        dish.poll_recv(peers, cx)
+    }
+}
 
 impl sealed::Sealed for Client {}
 impl SocketType for Client {
