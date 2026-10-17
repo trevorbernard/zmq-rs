@@ -21,7 +21,15 @@
           f {
             pkgs = import nixpkgs {
               inherit system;
-              overlays = [rust-overlay.overlays.default];
+              overlays = [
+                rust-overlay.overlays.default
+                # The reference libzmq with its draft socket types, for the
+                # draft interop tests. Its draft sockets abort on their first
+                # handshake when built without them.
+                (final: prev: {
+                  zeromq = prev.zeromq.override {enableDrafts = true;};
+                })
+              ];
             };
           }
       );

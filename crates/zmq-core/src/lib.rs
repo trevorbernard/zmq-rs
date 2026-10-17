@@ -35,3 +35,5 @@ pub use security::{Authenticator, Security, ZapResponder};
 pub use socket::{
     FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterTable,
 };
+#[cfg(feature = "draft")]
+pub use socket::{ServerSendError, ServerTable};

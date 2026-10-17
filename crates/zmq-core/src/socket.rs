@@ -441,6 +441,147 @@ impl RouterTable {
     }
 }
 
+/// SERVER's routing (RFC 41), as libzmq's `server_t`: every peer gets a
+/// non-zero 32-bit id, from a counter that starts at a random value;
+/// replies go to a peer by its id. Single-part messages only.
+#[cfg(feature = "draft")]
+#[derive(Debug)]
+pub struct ServerTable {
+    by_id: HashMap<std::num::NonZeroU32, PeerKey>,
+    by_peer: HashMap<PeerKey, std::num::NonZeroU32>,
+    /// Peers with keys below this have ids.
+    seen_below: u64,
+    /// `PeerList::removals` when last synced.
+    removals: u64,
+    next_id: u32,
+    recv: FairQueue,
+}
+
+/// Why SERVER could not send to a client.
+#[cfg(feature = "draft")]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ServerSendError {
+    /// No client has that id, or it has gone. The frame is handed back.
+    NoSuchClient(Frame),
+    /// The client's queue is full. The frame is handed back.
+    Full(Frame),
+}
+
+#[cfg(feature = "draft")]
+impl Default for ServerTable {
+    fn default() -> Self {
+        Self {
+            by_id: HashMap::new(),
+            by_peer: HashMap::new(),
+            seen_below: 0,
+            removals: 0,
+            recv: FairQueue::default(),
+            // libzmq starts its ids at a random value.
+            next_id: RandomState::new().hash_one(()) as u32,
+        }
+    }
+}
+
+#[cfg(feature = "draft")]
+impl ServerTable {
+    /// Gives new peers their ids and forgets peers that are gone.
+    pub fn sync(&mut self, peers: &PeerList) {
+        if peers.removals != self.removals {
+            self.removals = peers.removals;
+            let live: HashSet<PeerKey> = peers.iter().map(Peer::key).collect();
+            self.by_peer.retain(|key, _| live.contains(key));
+            self.by_id.retain(|_, key| live.contains(key));
+        }
+        let first_new = peers
+            .peers
+            .partition_point(|peer| peer.key.0 < self.seen_below);
+        for peer in &peers.peers[first_new..] {
+            let id = loop {
+                let candidate = self.next_id;
+                self.next_id = self.next_id.wrapping_add(1);
+                // Never zero, and never one still in use after wrapping.
+                if let Some(id) = std::num::NonZeroU32::new(candidate)
+                    && !self.by_id.contains_key(&id)
+                {
+                    break id;
+                }
+            };
+            self.by_id.insert(id, peer.key);
+            self.by_peer.insert(peer.key, id);
+        }
+        self.seen_below = peers.next_key;
+    }
+
+    /// The next single-part message and the id of the client that sent it,
+    /// or `Pending` with `cx` registered on every peer. Multipart messages
+    /// are dropped, as RFC 41 requires.
+    pub fn poll_recv(
+        &mut self,
+        peers: &mut PeerList,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<(std::num::NonZeroU32, Frame)> {
+        self.sync(peers);
+        loop {
+            let Poll::Ready((key, message)) = self.recv.poll_recv(peers, cx) else {
+                return Poll::Pending;
+            };
+            let (frame, rest) = message.split_first();
+            if !rest.is_empty() {
+                continue;
+            }
+            if let Some(&id) = self.by_peer.get(&key) {
+                return Poll::Ready((id, frame.clone()));
+            }
+        }
+    }
+
+    /// Sends `frame` to the client with `id`, without waiting. On `Full`,
+    /// `cx` is registered to hear when it has room.
+    pub fn try_send(
+        &mut self,
+        peers: &mut PeerList,
+        id: std::num::NonZeroU32,
+        frame: Frame,
+        cx: &mut TaskContext<'_>,
+    ) -> Result<(), ServerSendError> {
+        self.sync(peers);
+        let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
+            return Err(ServerSendError::NoSuchClient(frame));
+        };
+        let tx = &mut peer.connection.tx;
+        match tx.poll_ready(cx) {
+            Poll::Ready(Ok(())) => match tx.try_send(Message::new(frame)) {
+                Ok(()) => Ok(()),
+                Err(TrySendError::Full(message)) => Err(ServerSendError::Full(only_frame(message))),
+                Err(TrySendError::Closed(message)) => {
+                    Err(ServerSendError::NoSuchClient(only_frame(message)))
+                }
+            },
+            // The client's session has ended.
+            Poll::Ready(Err(())) => Err(ServerSendError::NoSuchClient(frame)),
+            Poll::Pending => Err(ServerSendError::Full(frame)),
+        }
+    }
+
+    /// Closes the connection to the client with `id`. Returns whether there
+    /// was one.
+    pub fn disconnect(&mut self, peers: &mut PeerList, id: std::num::NonZeroU32) -> bool {
+        self.sync(peers);
+        let Some(key) = self.by_id.remove(&id) else {
+            return false;
+        };
+        self.by_peer.remove(&key);
+        peers.retain_mut(|peer| peer.key != key);
+        true
+    }
+}
+
+/// The frame of a message built from one.
+#[cfg(feature = "draft")]
+fn only_frame(message: Message) -> Frame {
+    message.into_iter().next().expect("a message has a frame")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

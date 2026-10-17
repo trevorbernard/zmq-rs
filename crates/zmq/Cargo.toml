@@ -8,6 +8,12 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# libzmq's draft socket types (CLIENT, SERVER, and later RADIO, DISH,
+# SCATTER, GATHER, PEER and CHANNEL), as its --enable-drafts. Their RFCs
+# are drafts, so their API may change.
+draft = ["zmq-core/draft"]
+
 [dependencies]
 zmq-core.workspace = true
 zmq-pipe.workspace = true

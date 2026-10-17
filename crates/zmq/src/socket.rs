@@ -250,6 +250,17 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
+    /// Takes in peers the socket's listeners accepted, registering `cx`
+    /// with them, then lends out the peers and the routing state together.
+    #[cfg(feature = "draft")]
+    pub(crate) fn parts_accepting(
+        &mut self,
+        cx: &mut TaskContext<'_>,
+    ) -> (&mut PeerList, &mut T::Routing) {
+        self.peers.accept(cx);
+        (self.peers.list_mut(), &mut self.routing)
+    }
+
     /// A new monitor of this socket's events, as libzmq's
     /// `zmq_socket_monitor`: its listeners binding, accepting and closing,
     /// and its connections connecting, completing or failing handshakes,

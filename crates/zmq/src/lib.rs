@@ -88,6 +88,8 @@
 //! router.send("to nobody in particular");
 //! ```
 
+#[cfg(feature = "draft")]
+mod draft;
 mod endpoint;
 mod options;
 mod proxy;
@@ -96,6 +98,8 @@ mod wait;
 
 use std::io;
 
+#[cfg(feature = "draft")]
+pub use draft::{Client, ClientId, NoSuchClient, Server};
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
@@ -104,6 +108,8 @@ pub use socket::Routing;
 pub use socket::{
     Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub, XPub, XSub,
 };
+#[cfg(feature = "draft")]
+pub use zmq_core::ServerSendError;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
     ProtocolError, Reconnect, RouteOutcome, Security, XPubEvent, ZapResponder,

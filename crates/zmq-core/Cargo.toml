@@ -8,6 +8,10 @@ license.workspace = true
 repository.workspace = true
 publish.workspace = true
 
+[features]
+# Routing for libzmq's draft socket types. Enabled by `zmq/draft`.
+draft = []
+
 [dependencies]
 mio.workspace = true
 zmtp.workspace = true

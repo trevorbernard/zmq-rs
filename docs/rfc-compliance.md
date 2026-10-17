@@ -358,12 +358,28 @@ Rules shared by every pattern:
 
 ### Thread-safe types (RFC 41, 48, 49, 51, 52)
 
+These are libzmq's draft socket types, behind the `draft` Cargo feature
+(off by default, like libzmq's `--enable-drafts`), since their RFCs are
+drafts and their API may change. `zmtp` knows their names regardless.
+
+A libzmq built without drafts still creates these sockets, but aborts on
+their first handshake (`mechanism.cpp`: the socket-type name table only
+lists them in a drafts build). The flake therefore uses
+`zeromq.override { enableDrafts = true; }`; the draft interop tests check
+`zmq_has("draft")` and skip themselves on a libzmq without them, as in
+GitHub CI, which installs Ubuntu's.
+
 - Single-part only. Received multipart messages MUST be discarded, and the peer MAY be disconnected.
 - **SERVER and PEER**
   - The routing id is a local, non-zero u32 assigned by us, never by the peer. libzmq starts it at a random value and increments.
   - Unknown id → `HostUnreachable`. Full queue → block, or `WouldBlock` for a non-blocking send.
   - `connect_peer` returns the id synchronously.
 - **CLIENT and SCATTER** round-robin and never drop. **GATHER** fair-queues.
+
+**Done (CLIENT and SERVER):**
+- `Socket<Client>` and `Socket<Server>` send and receive `Frame`s, not `Message`s, so sending a multipart message does not compile. Received multipart messages are dropped.
+- SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect(id)` closes a client's connection.
+- Not yet: libzmq SERVER replying in the interop tests, which needs its draft routing-id API through the FFI.
 - **CHANNEL** has a single peer.
 - **RADIO**
   - Silently drops when full, and never blocks unless `no_drop` is set.

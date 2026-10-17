@@ -61,6 +61,7 @@ unsafe extern "C" {
     fn zmq_msg_more(msg: *const RawMsg) -> c_int;
     fn zmq_msg_close(msg: *mut RawMsg) -> c_int;
     fn zmq_errno() -> c_int;
+    fn zmq_has(capability: *const c_char) -> c_int;
     fn zmq_strerror(errnum: c_int) -> *const c_char;
 }
 
@@ -95,6 +96,8 @@ pub enum Kind {
     Push = 8,
     XPub = 9,
     XSub = 10,
+    Server = 12,
+    Client = 13,
 }
 
 /// A libzmq context, shared by sockets that talk over `inproc`, such as a
@@ -331,6 +334,14 @@ impl Drop for Socket {
         // SAFETY: the pointer came from zmq_socket and is closed exactly once.
         unsafe { zmq_close(self.raw.as_ptr()) };
     }
+}
+
+/// Whether this libzmq was built with `capability`, such as `"draft"` or
+/// `"curve"`.
+pub fn has(capability: &str) -> bool {
+    let capability = CString::new(capability).unwrap();
+    // SAFETY: `capability` is a valid C string for the call.
+    unsafe { zmq_has(capability.as_ptr()) != 0 }
 }
 
 /// A ZAP handler (RFC 27) for `context` that answers one request with

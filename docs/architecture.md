@@ -367,3 +367,4 @@ Also check while on Linux:
 | 8b | CURVE on connections and sockets | done |
 | 9 | Built-in proxy, with capture and steering | done |
 | 10 | Socket monitoring | done |
+| 11a | CLIENT and SERVER (`draft` feature) | done |
