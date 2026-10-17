@@ -1,5 +1,5 @@
 //! Endpoint strings, as libzmq writes them: `tcp://host:port`,
-//! `ipc://path` and `inproc://name`.
+//! `ipc://path`, `ipc://@name` (Linux, Android) and `inproc://name`.
 
 use std::fmt;
 use std::io;
@@ -28,6 +28,9 @@ pub enum Endpoint {
     Tcp(SocketAddr),
     /// A Unix domain socket's path, for `ipc://`. Unix only.
     Ipc(PathBuf),
+    /// A name in the abstract socket namespace, without the leading `@`,
+    /// for `ipc://@name`. Linux and Android only.
+    IpcAbstract(String),
     /// An `inproc` name, reachable from sockets of the same context.
     Inproc(String),
 }
@@ -37,7 +40,7 @@ impl Endpoint {
     pub fn tcp_addr(&self) -> Option<SocketAddr> {
         match self {
             Self::Tcp(addr) => Some(*addr),
-            Self::Ipc(_) | Self::Inproc(_) => None,
+            Self::Ipc(_) | Self::IpcAbstract(_) | Self::Inproc(_) => None,
         }
     }
 }
@@ -53,6 +56,7 @@ impl fmt::Display for Endpoint {
         match self {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
             Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
+            Self::IpcAbstract(name) => write!(f, "ipc://@{name}"),
             Self::Inproc(name) => write!(f, "inproc://{name}"),
         }
     }
@@ -64,6 +68,9 @@ pub(crate) enum Target {
     Ipc(PathBuf),
     /// `ipc://*`: a fresh path in a new temporary directory.
     IpcAnywhere,
+    /// `ipc://@name`: `name` in Linux's abstract socket namespace.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    IpcAbstract(String),
     Inproc(String),
 }
 
@@ -85,7 +92,9 @@ pub(crate) fn connect_target(endpoint: &str) -> Result<Target, Error> {
 }
 
 /// An `ipc://path` or `inproc://name` endpoint, whose path or name must not
-/// be empty.
+/// be empty. On Linux and Android, `ipc://@name` is an abstract name, where
+/// `*` is a literal name and not a wildcard, as in libzmq. Elsewhere it is a
+/// relative path.
 fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
     if let Some(name) = endpoint.strip_prefix("inproc://") {
         return match name {
@@ -96,6 +105,13 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
     if let Some(path) = endpoint.strip_prefix("ipc://") {
         if !cfg!(unix) {
             return Err(Error::UnsupportedTransport("ipc".to_owned()));
+        }
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        if let Some(name) = path.strip_prefix('@') {
+            return match name {
+                "" => Err(invalid(endpoint)),
+                name => Ok(Some(Target::IpcAbstract(name.to_owned()))),
+            };
         }
         return match path {
             "" => Err(invalid(endpoint)),
@@ -280,6 +296,31 @@ mod tests {
             Err(Error::InvalidEndpoint(_))
         ));
         assert_eq!(Endpoint::Ipc("/tmp/x".into()).to_string(), "ipc:///tmp/x");
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn abstract_ipc_endpoints() {
+        assert!(matches!(bind_target("ipc://@feed"), Ok(Target::IpcAbstract(n)) if n == "feed"));
+        assert!(matches!(connect_target("ipc://@a/b"), Ok(Target::IpcAbstract(n)) if n == "a/b"));
+        assert!(matches!(bind_target("ipc://@*"), Ok(Target::IpcAbstract(n)) if n == "*"));
+        assert!(matches!(connect_target("ipc://@*"), Ok(Target::IpcAbstract(n)) if n == "*"));
+        assert!(matches!(
+            bind_target("ipc://@"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+        assert_eq!(
+            Endpoint::IpcAbstract("feed".into()).to_string(),
+            "ipc://@feed"
+        );
+    }
+
+    #[cfg(all(unix, not(any(target_os = "linux", target_os = "android"))))]
+    #[test]
+    fn at_names_are_paths_off_linux() {
+        assert!(
+            matches!(bind_target("ipc://@feed"), Ok(Target::Ipc(p)) if p == std::path::Path::new("@feed"))
+        );
     }
 
     #[test]

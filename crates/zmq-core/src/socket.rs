@@ -196,6 +196,24 @@ impl Peers {
         self.connect_to(Address::Ipc(path.to_owned()))
     }
 
+    /// Binds `name` in Linux's abstract socket namespace and accepts peers
+    /// on it.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn bind_ipc_abstract(&mut self, name: &str) -> io::Result<()> {
+        let listener = self.context.bind_ipc_abstract(name, self.config.clone())?;
+        self.listeners.push(listener.into_queue());
+        Ok(())
+    }
+
+    /// Connects to `name` in Linux's abstract socket namespace, retrying
+    /// until it is bound. No key with
+    /// [`immediate`](ConnectionConfig::immediate), as for
+    /// [`connect`](Self::connect).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn connect_ipc_abstract(&mut self, name: &str) -> Option<PeerKey> {
+        self.connect_to(Address::IpcAbstract(name.to_owned()))
+    }
+
     /// Binds the `inproc` `name` and accepts peers on it.
     pub fn bind_inproc(&mut self, name: &str) -> io::Result<()> {
         let listener = self.context.bind_inproc(name, self.config.clone())?;

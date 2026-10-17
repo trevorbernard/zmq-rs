@@ -1,5 +1,5 @@
 //! The byte streams connections run over: TCP, and on Unix, the Unix domain
-//! sockets behind `ipc://` endpoints.
+//! sockets behind `ipc://` endpoints, including Linux's abstract names.
 
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
@@ -8,6 +8,8 @@ use mio::event::Source;
 use mio::net::{TcpListener, TcpStream};
 use mio::{Interest, Registry, Token};
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub(crate) use ipc::bind_ipc_abstract;
 #[cfg(unix)]
 pub(crate) use ipc::{IpcCleanup, bind_ipc, bind_ipc_anywhere};
 #[cfg(unix)]
@@ -26,6 +28,9 @@ pub(crate) enum Address {
     Tcp(SocketAddr),
     #[cfg(unix)]
     Ipc(PathBuf),
+    /// A name in Linux's abstract socket namespace, for `ipc://@name`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    IpcAbstract(String),
 }
 
 impl std::fmt::Display for Address {
@@ -35,6 +40,8 @@ impl std::fmt::Display for Address {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
             #[cfg(unix)]
             Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::IpcAbstract(name) => write!(f, "ipc://@{name}"),
         }
     }
 }
@@ -62,6 +69,10 @@ impl Stream {
             Address::Tcp(addr) => TcpStream::connect(*addr).map(Self::Tcp),
             #[cfg(unix)]
             Address::Ipc(path) => UnixStream::connect(path).map(Self::Unix),
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Address::IpcAbstract(name) => {
+                UnixStream::connect_addr(&ipc::abstract_addr(name)?).map(Self::Unix)
+            }
         }
     }
 
@@ -251,6 +262,25 @@ mod ipc {
             temp_dir: None,
         };
         Ok((listener, cleanup))
+    }
+
+    /// `name` in the abstract namespace. Fails if it is too long for
+    /// `sun_path`.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) fn abstract_addr(name: &str) -> io::Result<std::os::unix::net::SocketAddr> {
+        #[cfg(target_os = "android")]
+        use std::os::android::net::SocketAddrExt;
+        #[cfg(target_os = "linux")]
+        use std::os::linux::net::SocketAddrExt;
+        std::os::unix::net::SocketAddr::from_abstract_name(name)
+    }
+
+    /// Binds `name` in the abstract namespace, for `ipc://@name`. There is
+    /// no file, so nothing is stale and nothing needs removing: the kernel
+    /// refuses a live name and frees it when the listener closes.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub(crate) fn bind_ipc_abstract(name: &str) -> io::Result<UnixListener> {
+        UnixListener::bind_addr(&abstract_addr(name)?)
     }
 
     /// Binds a socket at a fresh path in a new temporary directory, for an

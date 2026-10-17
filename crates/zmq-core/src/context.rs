@@ -271,6 +271,48 @@ impl IpcListener {
     }
 }
 
+/// A bound `ipc://@name`: a Unix domain socket in Linux's abstract
+/// namespace. Peers that complete the handshake arrive as [`Connection`]s.
+/// Dropping the listener frees the name; there is no file.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[derive(Debug)]
+pub struct IpcAbstractListener {
+    name: String,
+    connections: Reader<Connection>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+impl IpcAbstractListener {
+    /// The bound name, without the leading `@`.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The next connection, if one is waiting.
+    pub fn try_accept(&mut self) -> Result<Connection, TryRecvError> {
+        self.connections.try_recv()
+    }
+
+    /// The next connection, or `None` once the listener has closed.
+    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+        self.connections.poll_recv(cx)
+    }
+
+    /// The next connection, waiting for one to arrive.
+    pub async fn accept(&mut self) -> Option<Connection> {
+        self.connections.recv().await
+    }
+
+    /// The next connection, blocking the thread until one arrives.
+    pub fn accept_blocking(&mut self) -> Option<Connection> {
+        self.connections.recv_blocking()
+    }
+
+    pub(crate) fn into_queue(self) -> Reader<Connection> {
+        self.connections
+    }
+}
+
 /// An `inproc` name bound in a context. Peers that connect to it with a
 /// compatible socket type arrive as [`Connection`]s. Dropping it frees the
 /// name.
@@ -464,6 +506,29 @@ impl Context {
         Ok(IpcListener { path, connections })
     }
 
+    /// Binds `name` in Linux's abstract socket namespace, for
+    /// `ipc://@name`, and accepts peers on an I/O thread. A live name is
+    /// `AddrInUse`, and a name too long for `sun_path` is `InvalidInput`.
+    /// There is no file: the name is free again once the listener closes.
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn bind_ipc_abstract(
+        &self,
+        name: &str,
+        config: ConnectionConfig,
+    ) -> io::Result<IpcAbstractListener> {
+        let endpoint = format!("ipc://@{name}");
+        let listener = reported(
+            crate::transport::bind_ipc_abstract(name),
+            &config,
+            &endpoint,
+        )?;
+        let connections = self.listen(StreamListener::Unix(listener), None, endpoint, config);
+        Ok(IpcAbstractListener {
+            name: name.to_owned(),
+            connections,
+        })
+    }
+
     /// Serves `listener`, bound at `endpoint`, on an I/O thread, returning
     /// its accept queue.
     fn listen(
@@ -596,6 +661,14 @@ impl Context {
     #[cfg(unix)]
     pub fn connect_ipc(&self, path: &Path, config: ConnectionConfig) -> Connection {
         self.connect_to(Address::Ipc(path.to_owned()), config)
+    }
+
+    /// Connects to `name` in Linux's abstract socket namespace in the
+    /// background, for `ipc://@name`, retrying and reconnecting like
+    /// [`connect_ipc`](Self::connect_ipc).
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    pub fn connect_ipc_abstract(&self, name: &str, config: ConnectionConfig) -> Connection {
+        self.connect_to(Address::IpcAbstract(name.to_owned()), config)
     }
 
     pub(crate) fn connect_to(&self, addr: Address, config: ConnectionConfig) -> Connection {

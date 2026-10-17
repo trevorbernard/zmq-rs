@@ -22,6 +22,8 @@ mod socket;
 mod test_support;
 mod transport;
 
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use context::IpcAbstractListener;
 #[cfg(unix)]
 pub use context::IpcListener;
 pub use context::{

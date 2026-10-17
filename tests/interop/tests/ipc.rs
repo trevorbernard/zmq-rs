@@ -104,3 +104,34 @@ fn plain_over_ipc_reports_an_empty_zap_address() {
     );
     assert_eq!(address.recv_timeout(FIVE).unwrap(), "", "as libzmq for ipc");
 }
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn our_push_reaches_a_libzmq_pull_over_an_abstract_name() {
+    let endpoint = format!("ipc://@zmq-interop-{}-to-libzmq", std::process::id());
+    let pull = Socket::new(Kind::Pull);
+    pull.set_receive_timeout(FIVE);
+    pull.bind(&endpoint);
+    let context = Context::new().unwrap();
+    let mut push = context.socket::<Push>();
+    push.connect(&endpoint).unwrap();
+    push.send("hello abstract libzmq");
+    assert_eq!(pull.recv().unwrap(), [b"hello abstract libzmq"]);
+}
+
+#[cfg(any(target_os = "linux", target_os = "android"))]
+#[test]
+fn a_libzmq_push_reaches_our_pull_over_an_abstract_name() {
+    let endpoint = format!("ipc://@zmq-interop-{}-from-libzmq", std::process::id());
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>();
+    let bound = pull.bind(&endpoint).unwrap();
+    assert!(matches!(bound, Endpoint::IpcAbstract(_)));
+    let push = Socket::new(Kind::Push);
+    push.connect(bound);
+    push.send(&[b"hello abstract us"]).unwrap();
+    assert_eq!(
+        within(FIVE, move || pull.recv()),
+        Message::from("hello abstract us")
+    );
+}

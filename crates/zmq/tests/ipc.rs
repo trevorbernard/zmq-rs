@@ -191,3 +191,115 @@ fn a_replaced_socket_file_is_left_alone() {
     thread::sleep(Duration::from_millis(200));
     assert!(path.exists(), "their socket file was removed");
 }
+
+/// Abstract names: `ipc://@name`, in Linux's abstract socket namespace.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod abstract_names {
+    use super::*;
+
+    /// A name no other test, or test run, uses.
+    fn unique(name: &str) -> String {
+        format!("zmq-rs-{}-{name}", std::process::id())
+    }
+
+    #[test]
+    fn push_and_pull_over_an_abstract_name() {
+        let name = unique("pipeline");
+        let context = Context::new().unwrap();
+        let mut pull = context.socket::<Pull>();
+        let bound = pull.bind(&format!("ipc://@{name}")).unwrap();
+        assert_eq!(bound, Endpoint::IpcAbstract(name.clone()));
+        assert_eq!(bound.to_string(), format!("ipc://@{name}"));
+        let mut push = context.socket::<Push>();
+        push.connect(&bound.to_string()).unwrap();
+        push.send("no file at all");
+        assert_eq!(
+            within(FIVE, move || pull.recv()),
+            Message::from("no file at all")
+        );
+        assert!(!std::path::Path::new(&format!("@{name}")).exists());
+        assert!(!std::path::Path::new(&name).exists());
+    }
+
+    #[test]
+    fn a_live_name_cannot_be_bound_until_its_socket_goes() {
+        let endpoint = format!("ipc://@{}", unique("in-use"));
+        let context = Context::new().unwrap();
+        let mut first = context.socket::<Pull>();
+        first.bind(&endpoint).unwrap();
+        let mut second = context.socket::<Pull>();
+        assert!(matches!(
+            second.bind(&endpoint),
+            Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
+        ));
+        drop(first);
+        let started = std::time::Instant::now();
+        while let Err(err) = second.bind(&endpoint) {
+            assert!(started.elapsed() < FIVE, "the name stayed taken: {err}");
+            thread::sleep(Duration::from_millis(5));
+        }
+    }
+
+    #[test]
+    fn an_empty_name_is_invalid() {
+        let context = Context::new().unwrap();
+        let mut pull = context.socket::<Pull>();
+        assert!(matches!(
+            pull.bind("ipc://@"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+    }
+
+    #[test]
+    fn a_name_too_long_for_sun_path_fails() {
+        let context = Context::new().unwrap();
+        let mut pull = context.socket::<Pull>();
+        let longest = "x".repeat(107);
+        assert!(pull.bind(&format!("ipc://@{longest}")).is_ok());
+        let mut pull = context.socket::<Pull>();
+        assert!(matches!(
+            pull.bind(&format!("ipc://@{longest}y")),
+            Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::InvalidInput
+        ));
+    }
+
+    #[test]
+    fn connecting_before_binding_retries_until_it_works() {
+        let endpoint = format!("ipc://@{}", unique("later"));
+        let context = Context::new().unwrap();
+        let mut push = context.socket::<Push>();
+        push.connect(&endpoint).unwrap();
+        push.send("queued");
+        thread::sleep(Duration::from_millis(50));
+        let mut pull = context.socket::<Pull>();
+        pull.bind(&endpoint).unwrap();
+        assert_eq!(within(FIVE, move || pull.recv()), Message::from("queued"));
+    }
+
+    #[test]
+    fn a_connection_comes_back_when_the_binder_does() {
+        let endpoint = format!("ipc://@{}", unique("restart"));
+        let context = Context::new().unwrap();
+        let mut pull = context.socket::<Pull>();
+        pull.bind(&endpoint).unwrap();
+        let mut push = context.socket::<Push>();
+        push.connect(&endpoint).unwrap();
+        push.send("before");
+        let pull = within(FIVE, move || {
+            assert_eq!(pull.recv(), Message::from("before"));
+            pull
+        });
+        drop(pull);
+        let started = std::time::Instant::now();
+        let mut pull = loop {
+            let mut pull = context.socket::<Pull>();
+            if pull.bind(&endpoint).is_ok() {
+                break pull;
+            }
+            assert!(started.elapsed() < FIVE, "the name stayed taken");
+            thread::sleep(Duration::from_millis(5));
+        };
+        push.send("after");
+        assert_eq!(within(FIVE, move || pull.recv()), Message::from("after"));
+    }
+}
