@@ -96,6 +96,10 @@
 //! router.send("to nobody in particular");
 //! ```
 
+#[cfg(doctest)]
+#[doc = include_str!("../../../README.md")]
+struct ReadmeDoctests;
+
 #[cfg(feature = "draft")]
 mod draft;
 mod endpoint;
