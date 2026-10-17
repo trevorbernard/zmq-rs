@@ -1,7 +1,8 @@
 //! zmq-core connections against libzmq and against a zmtp peer.
 
-use std::net::TcpListener;
+use std::net::{SocketAddr, TcpListener};
 use std::num::NonZeroUsize;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -305,12 +306,16 @@ fn protocol_errors_do_not_reconnect() {
     assert!(connection.tx.is_closed());
 }
 
-/// A port with nothing listening on it yet.
-fn free_port() -> std::net::SocketAddr {
-    TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
+/// A port with nothing listening on it yet, below the ephemeral range so no
+/// outgoing connection can take it while the test waits.
+fn free_port() -> SocketAddr {
+    static NEXT: AtomicU16 = AtomicU16::new(20000);
+    loop {
+        let port = NEXT.fetch_add(1, Ordering::Relaxed);
+        if let Ok(listener) = TcpListener::bind(("127.0.0.1", port)) {
+            return listener.local_addr().unwrap();
+        }
+    }
 }
 
 fn eager(identity: &str) -> ConnectionConfig {

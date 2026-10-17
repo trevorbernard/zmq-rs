@@ -328,12 +328,12 @@ heartbeats run over a `Stream` that is either kind. Unix only.
 
 
 
-- [ ] Run the stale-file mutation: drop the `is_socket()` check in
+- [x] Run the stale-file mutation: drop the `is_socket()` check in
   `transport::ipc::bind_ipc`. On Linux, `connect()` to a regular file
   fails with `ECONNREFUSED`, so `an_ordinary_file_is_never_replaced`
   should fail. On macOS this mutant survives because `connect()` fails
   differently there.
-- [ ] Run the whole suite 20 times and `nix flake check` on Linux. The ipc
+- [x] Run the whole suite 20 times and `nix flake check` on Linux. The ipc
   tests use `std::env::temp_dir()`, so check that their paths fit within
   Linux's 108-octet `sun_path`.
 
