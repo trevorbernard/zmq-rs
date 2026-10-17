@@ -9,7 +9,9 @@ on:
 jobs:
   ci:
     name: CI
-    runs-on: ubuntu-latest
+    # Pinned so the libzmq the interop tests run against changes only on
+    # purpose.
+    runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v5
