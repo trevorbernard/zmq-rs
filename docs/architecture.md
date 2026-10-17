@@ -125,8 +125,12 @@ strategies work over that set, as in libzmq:
   blocks. A ZMTP 1.0 peer, which sends no subscriptions, is subscribed to
   everything. For XPUB it also counts the peers subscribed to each topic
   and queues `XPubEvent`s: a topic's first subscription and last cancel
-  (including one caused by a peer leaving), and any other message a peer
-  sent.
+  (including one caused by a peer leaving), or more with a `Verbosity`, and
+  any other message a peer sent. In manual mode (`ManualXPub`) it applies
+  nothing itself: each event carries the peer it came from, and the
+  application applies subscriptions to that peer. `poll_send_all` waits
+  until every matching peer has room (`ZMQ_XPUB_NODROP`), and matching can
+  be inverted.
 - `Subscriber` (`xsub_t`) counts its topics, sends them to each new peer
   and every change to all peers, and drops arriving messages that match no
   topic. `Topics` does the prefix matching for both. XSUB uses it too,
@@ -135,9 +139,9 @@ strategies work over that set, as in libzmq:
   peer's session ends, what it delivered moves to a leftover queue that is
   received first, and the next peer to arrive takes its place.
 
-`Peers` can greet each new peer with a message before anything else, such
-as the empty one of `ZMQ_PROBE_ROUTER`. As in libzmq, an accepted peer is
-greeted when the socket next takes peers in.
+`Peers` can greet each new peer with a message before anything else: an
+empty one for `ZMQ_PROBE_ROUTER`, or XPUB's welcome message. As in libzmq,
+an accepted peer is greeted when the socket next takes peers in.
 
 Per-socket-type options are methods on that type, so an option a type
 lacks is a compile error: `set_conflate` exists only on the
@@ -399,3 +403,4 @@ Also check while on Linux:
 | 11c | SCATTER and GATHER (`draft` feature) | done |
 | 11d | PEER and CHANNEL (`draft` feature) | done |
 | 12 | ZAP for NULL connections | done |
+| 13 | Socket options: ROUTER mandatory, handover and probe; `IMMEDIATE`; `CONFLATE`; XPUB verbose, manual, welcome, nodrop and invert matching | done |

@@ -117,14 +117,15 @@ pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, 
 #[doc(hidden)]
 pub use socket::Routing;
 pub use socket::{
-    Conflatable, Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub,
-    UnknownRoutingId, XPub, XSub,
+    Conflatable, Dealer, ManualXPub, Pair, Pub, Publishes, Pull, Push, Rep, Req, Request, Router,
+    Socket, SocketType, Sub, SubscriptionRequest, UnknownRoutingId, XPub, XSub,
 };
 #[cfg(feature = "draft")]
 pub use zmq_core::ServerSendError;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
-    ProtocolError, Reconnect, RouteOutcome, RouterSendError, Security, XPubEvent, ZapResponder,
+    ProtocolError, Reconnect, RouteOutcome, RouterSendError, Security, Verbosity, XPubEvent,
+    ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{

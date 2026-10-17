@@ -29,6 +29,7 @@ const ZMQ_ROUTER_HANDOVER: c_int = 56;
 const ZMQ_HEARTBEAT_IVL: c_int = 75;
 const ZMQ_HEARTBEAT_TTL: c_int = 76;
 const ZMQ_HEARTBEAT_TIMEOUT: c_int = 77;
+const ZMQ_XPUB_WELCOME_MSG: c_int = 72;
 const ZMQ_SNDMORE: c_int = 2;
 
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
@@ -230,6 +231,11 @@ impl Socket {
     /// The identity announced to peers.
     pub fn set_routing_id(&self, id: &[u8]) {
         self.set_bytes(ZMQ_ROUTING_ID, id);
+    }
+
+    /// Sends each new peer `welcome` first (`ZMQ_XPUB_WELCOME_MSG`).
+    pub fn set_xpub_welcome(&self, welcome: &[u8]) {
+        self.set_bytes(ZMQ_XPUB_WELCOME_MSG, welcome);
     }
 
     /// Sends each new peer an empty message first (`ZMQ_PROBE_ROUTER`).

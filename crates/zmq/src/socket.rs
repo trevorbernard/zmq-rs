@@ -8,10 +8,10 @@ use std::task::{Context as TaskContext, Poll, Waker};
 use zmq_core::{
     ConnectionConfig, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting, PeerGone,
     PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterSendError,
-    RouterTable, Subscriber, XPubEvent,
+    RouterTable, Subscriber, Verbosity, XPubEvent,
 };
 use zmq_pipe::Hwm;
-use zmtp::Message;
+use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
 use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
@@ -98,6 +98,7 @@ impl Routing for DealerRouting {}
 impl Routing for RouterRouting {}
 impl Routing for Publisher {}
 impl Routing for XPubRouting {}
+impl Routing for ManualXPubRouting {}
 impl Routing for PairRouting {}
 
 impl Routing for Subscriber {
@@ -148,6 +149,32 @@ impl sealed::Sealed for XPub {}
 impl SocketType for XPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
     type Routing = XPubRouting;
+}
+
+/// An XPUB that decides its peers' subscriptions, as libzmq's
+/// `ZMQ_XPUB_MANUAL`: each subscription and cancel a peer sends arrives as
+/// a [`SubscriptionRequest`] and has no effect until the application acts
+/// on it, by accepting it or subscribing that peer to something else. It
+/// announces itself as XPUB.
+#[derive(Debug)]
+pub enum ManualXPub {}
+
+/// ManualXPub's routing: a publisher that leaves subscriptions to the
+/// application.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct ManualXPubRouting(Publisher);
+
+impl Default for ManualXPubRouting {
+    fn default() -> Self {
+        Self(Publisher::manual())
+    }
+}
+
+impl sealed::Sealed for ManualXPub {}
+impl SocketType for ManualXPub {
+    const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
+    type Routing = ManualXPubRouting;
 }
 
 impl sealed::Sealed for XSub {}
@@ -491,19 +518,91 @@ impl Socket<Pair> {
     }
 }
 
-impl Socket<Pub> {
+/// A socket type that publishes to subscribers: PUB, XPUB and
+/// [`ManualXPub`].
+pub trait Publishes: SocketType {
+    #[doc(hidden)]
+    fn publisher(routing: &mut Self::Routing) -> &mut Publisher;
+}
+
+impl Publishes for Pub {
+    fn publisher(routing: &mut Publisher) -> &mut Publisher {
+        routing
+    }
+}
+
+impl Publishes for XPub {
+    fn publisher(routing: &mut XPubRouting) -> &mut Publisher {
+        &mut routing.0
+    }
+}
+
+impl Publishes for ManualXPub {
+    fn publisher(routing: &mut ManualXPubRouting) -> &mut Publisher {
+        &mut routing.0
+    }
+}
+
+impl<T: Publishes> Socket<T> {
     /// Sends `message` to every subscriber that wants it and has room.
     /// Never blocks. Returns how many subscribers it was queued for: none if
     /// nobody has subscribed to it yet, as subscriptions take a moment to
     /// arrive after connecting.
     pub fn send(&mut self, message: impl Into<Message>) -> usize {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
-        self.routing.send(self.peers.list_mut(), message.into())
+        self.peers.accept(&mut noop());
+        T::publisher(&mut self.routing).send(self.peers.list_mut(), message.into())
+    }
+
+    /// Sends `message` to every subscriber that wants it if all of them
+    /// have room, otherwise hands it back, as libzmq's `ZMQ_XPUB_NODROP`.
+    /// Returns how many subscribers it was queued for.
+    pub fn try_send_all(&mut self, message: impl Into<Message>) -> Result<usize, Message> {
+        let mut slot = Some(message.into());
+        let poll = self.poll_send_all(&mut slot, &mut noop());
+        ready(poll).ok_or_else(|| slot.take().expect("kept while pending"))
+    }
+
+    /// Sends `message` to every subscriber that wants it, blocking until
+    /// all of them have room, as libzmq's `ZMQ_XPUB_NODROP`. Returns how
+    /// many subscribers it was queued for.
+    pub fn send_all(&mut self, message: impl Into<Message>) -> usize {
+        let mut slot = Some(message.into());
+        wait::block_on(|cx| self.poll_send_all(&mut slot, cx))
+    }
+
+    /// Sends `message` to every subscriber that wants it, waiting until all
+    /// of them have room, as libzmq's `ZMQ_XPUB_NODROP`. Returns how many
+    /// subscribers it was queued for.
+    pub async fn send_all_async(&mut self, message: impl Into<Message>) -> usize {
+        let mut slot = Some(message.into());
+        poll_fn(|cx| self.poll_send_all(&mut slot, cx)).await
+    }
+
+    fn poll_send_all(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<usize> {
+        self.peers.accept(cx);
+        T::publisher(&mut self.routing).poll_send_all(self.peers.list_mut(), slot, cx)
+    }
+
+    /// Whether messages go to the subscribers that want none of their
+    /// prefixes instead, as libzmq's `ZMQ_INVERT_MATCHING`. Its SUB peers
+    /// should invert too, as they filter what arrives. Off by default.
+    pub fn set_invert_matching(&mut self, on: bool) {
+        T::publisher(&mut self.routing).set_invert_matching(on);
     }
 }
 
 impl Socket<Sub> {
+    /// Whether messages starting with none of the topics are received
+    /// instead, as libzmq's `ZMQ_INVERT_MATCHING`. Its PUB peers must invert
+    /// too, or they send only what is then dropped. Off by default.
+    pub fn set_invert_matching(&mut self, on: bool) {
+        self.routing.set_invert_matching(on);
+    }
+
     /// Subscribes to messages whose first frame starts with `topic`. The
     /// empty topic matches everything. Subscribing to a topic again needs
     /// another [`unsubscribe`](Self::unsubscribe) to undo.
@@ -545,12 +644,18 @@ impl Socket<Sub> {
 }
 
 impl Socket<XPub> {
-    /// Sends `message` to every subscriber that wants it and has room.
-    /// Never blocks. Returns how many subscribers it was queued for.
-    pub fn send(&mut self, message: impl Into<Message>) -> usize {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
-        self.routing.0.send(self.peers.list_mut(), message.into())
+    /// Which subscriptions and cancels [`recv`](Self::recv) reports, as
+    /// libzmq's `ZMQ_XPUB_VERBOSE` and `ZMQ_XPUB_VERBOSER`. By default only
+    /// a topic's first subscription and last cancel.
+    pub fn set_verbosity(&mut self, verbosity: Verbosity) {
+        self.routing.0.set_verbosity(verbosity);
+    }
+
+    /// What each peer connected or accepted from now on is sent first, as
+    /// libzmq's `ZMQ_XPUB_WELCOME_MSG`. A SUB receives it only if
+    /// subscribed to it. None by default.
+    pub fn set_welcome(&mut self, welcome: Option<Message>) {
+        self.peers.set_greeting(welcome);
     }
 
     /// The next event, if one is waiting.
@@ -574,7 +679,127 @@ impl Socket<XPub> {
     }
 }
 
+impl Socket<ManualXPub> {
+    /// What each peer connected or accepted from now on is sent first, as
+    /// libzmq's `ZMQ_XPUB_WELCOME_MSG`. None by default.
+    pub fn set_welcome(&mut self, welcome: Option<Message>) {
+        self.peers.set_greeting(welcome);
+    }
+
+    /// The next request, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<SubscriptionRequest<'_>> {
+        let (peer, event) = ready(self.poll_request(&mut noop()))?;
+        Some(SubscriptionRequest {
+            socket: self,
+            peer,
+            event,
+        })
+    }
+
+    /// The next request, blocking until one arrives.
+    pub fn recv(&mut self) -> SubscriptionRequest<'_> {
+        let (peer, event) = wait::block_on(|cx| self.poll_request(cx));
+        SubscriptionRequest {
+            socket: self,
+            peer,
+            event,
+        }
+    }
+
+    /// The next request, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> SubscriptionRequest<'_> {
+        let (peer, event) = poll_fn(|cx| self.poll_request(cx)).await;
+        SubscriptionRequest {
+            socket: self,
+            peer,
+            event,
+        }
+    }
+
+    fn poll_request(
+        &mut self,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
+        self.peers.accept(cx);
+        self.routing.0.poll_request(self.peers.list_mut(), cx)
+    }
+}
+
+/// What a peer of a [`ManualXPub`] sent: a subscription or cancel to decide
+/// on, or a message. Acting on it affects that peer alone; dropping it
+/// leaves the peer's subscriptions as they were. Once the peer has gone,
+/// acting on it does nothing.
+#[must_use = "a subscription has no effect until accepted"]
+pub struct SubscriptionRequest<'a> {
+    socket: &'a mut Socket<ManualXPub>,
+    peer: Option<zmq_core::PeerKey>,
+    event: XPubEvent,
+}
+
+impl SubscriptionRequest<'_> {
+    /// What the peer sent.
+    pub fn event(&self) -> &XPubEvent {
+        &self.event
+    }
+
+    /// Does what the peer asked: subscribes or unsubscribes it. Returns
+    /// whether the peer is still there; a message asks for nothing, so
+    /// accepting it does nothing.
+    pub fn accept(&mut self) -> bool {
+        match &self.event {
+            XPubEvent::Subscribe(topic) => self.apply(Subscription::Subscribe(topic.clone())),
+            XPubEvent::Cancel(topic) => self.apply(Subscription::Cancel(topic.clone())),
+            XPubEvent::Message(_) => self.peer.is_some(),
+        }
+    }
+
+    /// Subscribes the peer to `topic`. Returns whether the peer is still
+    /// there.
+    pub fn subscribe(&mut self, topic: impl Into<Frame>) -> bool {
+        self.apply(Subscription::Subscribe(topic.into()))
+    }
+
+    /// Unsubscribes the peer from `topic`. Returns whether the peer is
+    /// still there.
+    pub fn unsubscribe(&mut self, topic: impl Into<Frame>) -> bool {
+        self.apply(Subscription::Cancel(topic.into()))
+    }
+
+    /// Sends `message` to this peer alone, if it is subscribed to it and
+    /// has room, as libzmq's `ZMQ_XPUB_MANUAL_LAST_VALUE` does after a
+    /// subscription. Returns whether it was queued.
+    pub fn send(&mut self, message: impl Into<Message>) -> bool {
+        let Some(peer) = self.peer else {
+            return false;
+        };
+        let socket = &mut *self.socket;
+        socket
+            .routing
+            .0
+            .send_to(socket.peers.list_mut(), peer, message.into())
+    }
+
+    fn apply(&mut self, subscription: Subscription) -> bool {
+        self.peer
+            .is_some_and(|peer| self.socket.routing.0.apply(peer, subscription))
+    }
+}
+
+impl fmt::Debug for SubscriptionRequest<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubscriptionRequest")
+            .field("event", &self.event)
+            .finish_non_exhaustive()
+    }
+}
+
 impl Socket<XSub> {
+    /// Whether messages starting with none of the topics are received
+    /// instead, as libzmq's `ZMQ_INVERT_MATCHING`. Off by default.
+    pub fn set_invert_matching(&mut self, on: bool) {
+        self.routing.set_invert_matching(on);
+    }
+
     /// Subscribes to messages whose first frame starts with `topic`, as
     /// [`Socket<Sub>::subscribe`] does.
     pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
@@ -998,6 +1223,10 @@ fn poll_fair_queued(
     queue
         .poll_recv(peers.list_mut(), cx)
         .map(|(_, message)| message)
+}
+
+fn noop() -> TaskContext<'static> {
+    TaskContext::from_waker(Waker::noop())
 }
 
 fn ready<T>(poll: Poll<T>) -> Option<T> {

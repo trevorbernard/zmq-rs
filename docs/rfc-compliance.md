@@ -329,7 +329,7 @@ Rules shared by every pattern:
 **Design changes:**
 - `Socket<XPub>` receives `XPubEvent::{Subscribe(Frame), Cancel(Frame), Message(Message)}` rather than libzmq's `01`/`00`-prefixed messages.
 - `Socket<XSub>` has `subscribe`, `unsubscribe`, `send` and `recv`, and `forward(XPubEvent)` for proxies, so an XPUB's events pass straight upstream.
-- `Pub::send` never returns an HWM error unless `no_drop` is set.
+- `send` never blocks and returns how many subscribers got the message. `try_send_all`, `send_all` and `send_all_async` are `XPUB_NODROP`: all matching subscribers must have room. PUB has them too.
 
 **Done (XPUB and XSUB):**
 - XPUB reports a topic's first subscription and last cancel across all peers, as libzmq does without `XPUB_VERBOSE`. A peer that disconnects cancels its topics. Anything else a peer sends is delivered as `XPubEvent::Message`.
@@ -338,7 +338,11 @@ Rules shared by every pattern:
   - A ZMTP 1.0 subscriber's implicit subscription is reported as `Subscribe("")`. libzmq reports nothing on arrival, yet still sends the cancel when the peer leaves.
 - XSUB `send`: a single frame starting with `01` or `00` subscribes or unsubscribes, as libzmq does, so the topics stay counted. Multi-frame messages are always user messages. libzmq would also read a subscription from their first frame.
 - XSUB, like SUB, queues without limit towards its peers, so neither subscriptions nor upstream messages are dropped at the HWM. libzmq's `dist_t` drops at the HWM.
-- Not yet: `XPUB_VERBOSE`/`VERBOSER`, `MANUAL`, `WELCOME_MSG`, `INVERT_MATCHING`, `NODROP`, `ONLY_FIRST_SUBSCRIBE`.
+- `set_verbosity(Verbosity::Subscriptions)` is `XPUB_VERBOSE`, and `Verbosity::Everything` is `XPUB_VERBOSER`. As in libzmq, a peer that leaves under `Everything` cancels each of its topics even if others remain.
+- `ManualXPub` is `XPUB_MANUAL`. Each subscription or cancel arrives as a `SubscriptionRequest` tied to the peer that sent it. It has no effect until `accept`, or until `subscribe`/`unsubscribe` set something else for that peer. `SubscriptionRequest::send` is `XPUB_MANUAL_LAST_VALUE`: to that peer alone. Every request is reported, whatever the verbosity; a departed peer's requested topics come as cancels with nobody to act on.
+- `set_welcome` is `XPUB_WELCOME_MSG`, sent to each new peer.
+- `set_invert_matching` on PUB, XPUB, SUB and XSUB is `INVERT_MATCHING`.
+- Not yet: `ONLY_FIRST_SUBSCRIBE`, `TOPICS_COUNT`.
 
 **Done (PUB and SUB):**
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.

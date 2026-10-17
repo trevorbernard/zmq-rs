@@ -91,6 +91,20 @@ pub enum XPubEvent {
     Message(Message),
 }
 
+/// Which subscriptions and cancels an XPUB reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Default)]
+pub enum Verbosity {
+    /// A topic's first subscription and last cancel across all peers.
+    #[default]
+    Changes,
+    /// Every subscription, even to topics already subscribed, and the
+    /// last cancel (libzmq's `ZMQ_XPUB_VERBOSE`).
+    Subscriptions,
+    /// Every subscription and every cancel, including those of a peer
+    /// that goes away (libzmq's `ZMQ_XPUB_VERBOSER`).
+    Everything,
+}
+
 /// PUB's and XPUB's routing: each peer's topics, and fan-out to the peers
 /// that match.
 #[derive(Debug, Default)]
@@ -98,14 +112,22 @@ pub struct Publisher {
     subscribers: HashMap<PeerKey, PeerTopics>,
     /// How many peers subscribe to each topic.
     everyone: Topics,
-    /// What XPUB has yet to receive. `None` for PUB, which discards it.
-    events: Option<VecDeque<XPubEvent>>,
+    /// What XPUB has yet to receive, and from which peer. `None` for PUB,
+    /// which discards it.
+    events: Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
+    verbosity: Verbosity,
+    /// Whether peers' subscriptions wait for [`apply`](Self::apply).
+    manual: bool,
+    /// Whether messages go to the peers they do not match instead.
+    invert: bool,
 }
 
 #[derive(Debug, Default)]
 struct PeerTopics {
     /// A set, as in libzmq's XPUB: subscribing twice is one subscription.
     topics: Topics,
+    /// In manual mode, what the peer asked for, as a set.
+    requested: Topics,
     /// Whether its handshake has been looked at for an implicit
     /// subscription.
     settled: bool,
@@ -121,6 +143,27 @@ impl Publisher {
         }
     }
 
+    /// A publisher whose peers' subscriptions are only reported, each
+    /// with the peer that sent it, until [`apply`](Self::apply) decides
+    /// them (libzmq's `ZMQ_XPUB_MANUAL`).
+    pub fn manual() -> Self {
+        Self {
+            manual: true,
+            ..Self::with_events()
+        }
+    }
+
+    /// Which subscriptions and cancels become events.
+    pub fn set_verbosity(&mut self, verbosity: Verbosity) {
+        self.verbosity = verbosity;
+    }
+
+    /// Whether messages go to the peers subscribed to no prefix of them
+    /// instead (libzmq's `ZMQ_INVERT_MATCHING`).
+    pub fn set_invert_matching(&mut self, on: bool) {
+        self.invert = on;
+    }
+
     /// The next event, or `Pending` with `cx` registered on every peer.
     /// Always `Pending` for a publisher made without events.
     pub fn poll_event(
@@ -128,11 +171,50 @@ impl Publisher {
         peers: &mut PeerList,
         cx: &mut TaskContext<'_>,
     ) -> Poll<XPubEvent> {
+        self.poll_request(peers, cx).map(|(_, event)| event)
+    }
+
+    /// The next event and the peer it came from, if it is still here, or
+    /// `Pending` with `cx` registered on every peer.
+    pub fn poll_request(
+        &mut self,
+        peers: &mut PeerList,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<(Option<PeerKey>, XPubEvent)> {
         self.drain(peers, cx);
         match self.events.as_mut().and_then(VecDeque::pop_front) {
-            Some(event) => Poll::Ready(event),
+            Some(request) => Poll::Ready(request),
             None => Poll::Pending,
         }
+    }
+
+    /// Subscribes or unsubscribes the peer with `key`, for a manual XPUB.
+    /// Returns whether that peer is still here.
+    pub fn apply(&mut self, key: PeerKey, subscription: Subscription) -> bool {
+        let Some(entry) = self.subscribers.get_mut(&key) else {
+            return false;
+        };
+        match subscription {
+            Subscription::Subscribe(topic) => {
+                if !entry.topics.contains(&topic) {
+                    entry.topics.add(&topic);
+                }
+            }
+            Subscription::Cancel(topic) => {
+                entry.topics.remove(&topic);
+            }
+        }
+        true
+    }
+
+    /// Sends `message` to the peer with `key` alone, if it wants it and has
+    /// room (libzmq's `ZMQ_XPUB_MANUAL_LAST_VALUE`). Returns whether it was
+    /// queued.
+    pub fn send_to(&mut self, peers: &mut PeerList, key: PeerKey, message: Message) -> bool {
+        self.wants(key, &message)
+            && peers
+                .get_mut(key)
+                .is_some_and(|peer| peer.connection.tx.try_send(message).is_ok())
     }
 
     /// Applies the subscriptions peers have sent, and forgets peers that
@@ -147,10 +229,20 @@ impl Publisher {
             subscribers,
             everyone,
             events,
+            verbosity,
+            manual,
+            ..
         } = self;
-        let mut changes = Changes { everyone, events };
+        let mut changes = Changes {
+            everyone,
+            events,
+            verbosity: *verbosity,
+            manual: *manual,
+            from: None,
+        };
         peers.retain_mut(|peer| {
             let entry = subscribers.entry(peer.key()).or_default();
+            changes.from = Some(peer.key());
             if !entry.settled
                 && let Some(established) = peer.connection.peer()
             {
@@ -185,40 +277,90 @@ impl Publisher {
     /// libzmq. Returns how many peers it went to.
     pub fn send(&mut self, peers: &mut PeerList, message: Message) -> usize {
         self.sync(peers);
-        let topic = message.split_first().0.as_slice();
         let mut sent = 0;
         for peer in peers.iter_mut() {
-            let wanted = self
-                .subscribers
-                .get(&peer.key())
-                .is_some_and(|entry| entry.topics.matches(topic));
-            if wanted && peer.connection.tx.try_send(message.clone()).is_ok() {
+            if self.wants(peer.key(), &message)
+                && peer.connection.tx.try_send(message.clone()).is_ok()
+            {
                 sent += 1;
             }
         }
         sent
+    }
+
+    /// Sends the message in `slot` to every peer subscribed to it once all
+    /// of them have room, as libzmq's `ZMQ_XPUB_NODROP`, returning how many
+    /// it went to. Until then `Pending`, with `cx` registered.
+    pub fn poll_send_all(
+        &mut self,
+        peers: &mut PeerList,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<usize> {
+        self.drain(peers, cx);
+        let Some(message) = slot.take() else {
+            return Poll::Ready(0);
+        };
+        let mut full = false;
+        for peer in peers.iter_mut() {
+            if self.wants(peer.key(), &message) && peer.connection.tx.poll_ready(cx).is_pending() {
+                full = true;
+            }
+        }
+        if full {
+            *slot = Some(message);
+            return Poll::Pending;
+        }
+        Poll::Ready(self.send(peers, message))
+    }
+
+    /// Whether the peer with `key` should get `message`.
+    fn wants(&self, key: PeerKey, message: &Message) -> bool {
+        let topic = message.split_first().0.as_slice();
+        self.subscribers
+            .get(&key)
+            .is_some_and(|entry| entry.topics.matches(topic) != self.invert)
     }
 }
 
 /// Applies what one peer sent to the topics of all peers, noting events.
 struct Changes<'a> {
     everyone: &'a mut Topics,
-    events: &'a mut Option<VecDeque<XPubEvent>>,
+    events: &'a mut Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
+    verbosity: Verbosity,
+    manual: bool,
+    /// The peer being read.
+    from: Option<PeerKey>,
 }
 
 impl Changes<'_> {
     fn subscribe(&mut self, peer: &mut PeerTopics, topic: Frame) {
-        if peer.topics.contains(&topic) {
+        if self.manual {
+            if !peer.requested.contains(&topic) {
+                peer.requested.add(&topic);
+            }
+            self.event(XPubEvent::Subscribe(topic));
             return;
         }
-        peer.topics.add(&topic);
-        if self.everyone.add(&topic) {
+        let first = !peer.topics.contains(&topic) && {
+            peer.topics.add(&topic);
+            self.everyone.add(&topic)
+        };
+        if first || self.verbosity >= Verbosity::Subscriptions {
             self.event(XPubEvent::Subscribe(topic));
         }
     }
 
     fn cancel(&mut self, peer: &mut PeerTopics, topic: Frame) {
-        if peer.topics.remove(&topic) && self.everyone.remove(&topic) {
+        if self.manual {
+            peer.requested.remove(&topic);
+            self.event(XPubEvent::Cancel(topic));
+            return;
+        }
+        if !peer.topics.remove(&topic) {
+            return;
+        }
+        if self.everyone.remove(&topic) || self.verbosity == Verbosity::Everything {
             self.event(XPubEvent::Cancel(topic));
         }
     }
@@ -229,8 +371,14 @@ impl Changes<'_> {
 
     /// A peer is gone: its subscriptions end with it.
     fn forget(&mut self, peer: PeerTopics) {
+        if self.manual {
+            for topic in peer.requested.iter() {
+                self.event(XPubEvent::Cancel(Frame::copy_from_slice(topic)));
+            }
+            return;
+        }
         for topic in peer.topics.iter() {
-            if self.everyone.remove(topic) {
+            if self.everyone.remove(topic) || self.verbosity == Verbosity::Everything {
                 self.event(XPubEvent::Cancel(Frame::copy_from_slice(topic)));
             }
         }
@@ -238,7 +386,7 @@ impl Changes<'_> {
 
     fn event(&mut self, event: XPubEvent) {
         if let Some(events) = self.events {
-            events.push_back(event);
+            events.push_back((self.from, event));
         }
     }
 }
@@ -248,6 +396,8 @@ impl Changes<'_> {
 #[derive(Debug, Default)]
 pub struct Subscriber {
     topics: Topics,
+    /// Whether wanted messages are those matching no topic.
+    invert: bool,
     recv: FairQueue,
     /// The newest peer that has been sent the topics. Keys only grow.
     greeted: Option<PeerKey>,
@@ -318,10 +468,16 @@ impl Subscriber {
             let Poll::Ready((_, message)) = self.recv.poll_recv(peers, cx) else {
                 return Poll::Pending;
             };
-            if self.topics.matches(message.split_first().0) {
+            if self.topics.matches(message.split_first().0) != self.invert {
                 return Poll::Ready(message);
             }
         }
+    }
+
+    /// Whether messages matching no topic are received instead (libzmq's
+    /// `ZMQ_INVERT_MATCHING`).
+    pub fn set_invert_matching(&mut self, on: bool) {
+        self.invert = on;
     }
 
     /// The subscribed topics.
