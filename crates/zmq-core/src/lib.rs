@@ -10,6 +10,8 @@ mod context;
 mod engine;
 mod io_thread;
 mod reconnect;
+mod socket;
 
 pub use context::{Connection, ConnectionConfig, Context, Linger, Listener, ShutdownTimedOut};
 pub use reconnect::Reconnect;
+pub use socket::{FairQueue, LoadBalancer, Peers};

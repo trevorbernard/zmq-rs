@@ -88,6 +88,24 @@ signal again for data it has already reported.
 - Dropping the `Listener` closes the port: the accept queue's
   `Writer::poll_closed` wakes the I/O thread when its reader goes away.
 
+## Sockets
+
+A socket lives in the user's thread and owns a `Peers` set: the connections
+it made with `connect`, plus those its listeners accepted. Routing
+strategies work over that set, as in libzmq:
+
+- `LoadBalancer` (`lb_t`) sends each message to the next peer with room,
+  round robin, and waits while none has room.
+- `FairQueue` (`fq_t`) takes the next message round robin from peers that
+  have one waiting, and drops a peer once its session is gone and
+  everything it delivered has been read.
+
+A socket waits on many pipes at once by polling each with the same waker,
+so blocking calls, `async` methods and `try_` methods share one code path.
+In the `zmq` crate, `Socket<T>` only has the methods its type allows:
+`Socket<Push>` has `send`, `Socket<Pull>` has `recv`, and calling the other
+is a compile error.
+
 ## Status
 
 | Slice | Contents | State |
@@ -95,5 +113,7 @@ signal again for data it has already reported.
 | 1 | Context, I/O threads, TCP connect, NULL handshake, sessions, engines | done |
 | 2 | Bind/listen, accepting peers | done |
 | 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | done |
-| 4 | Load balancing and fair queuing; PUSH/PULL and DEALER/ROUTER; typed sockets in `zmq` | next |
+| 4a | `Peers`, load balancing and fair queuing; PUSH/PULL as typed sockets in `zmq` | done |
+| 4b | DEALER and ROUTER: identity routing and envelopes | next |
+| 4c | REQ and REP | |
 | 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | |

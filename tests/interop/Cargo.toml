@@ -9,6 +9,7 @@ repository.workspace = true
 publish.workspace = true
 
 [dependencies]
+zmq = { path = "../../crates/zmq" }
 zmq-core.workspace = true
 zmq-pipe.workspace = true
 zmtp.workspace = true

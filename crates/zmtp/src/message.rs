@@ -137,8 +137,10 @@ impl<'a> IntoIterator for &'a Message {
     }
 }
 
-impl From<Frame> for Message {
-    fn from(frame: Frame) -> Self {
+/// A single-part message from anything that makes a [`Frame`], such as
+/// `"text"`, a `Vec<u8>` or a `Frame`.
+impl<T: Into<Frame>> From<T> for Message {
+    fn from(frame: T) -> Self {
         Self::new(frame)
     }
 }
@@ -238,7 +240,7 @@ mod tests {
 
     #[test]
     fn empty_frame_list_is_rejected() {
-        assert_eq!(Message::try_from(Vec::new()), Err(EmptyMessage));
+        assert_eq!(Message::try_from(Vec::<Frame>::new()), Err(EmptyMessage));
         assert_eq!(
             EmptyMessage.to_string(),
             "a message must have at least one frame"
@@ -270,6 +272,13 @@ mod tests {
         assert_eq!(borrowed, frames(&["a", "b"]).iter().collect::<Vec<_>>());
         let owned: Vec<Frame> = msg.into_iter().collect();
         assert_eq!(owned, frames(&["a", "b"]));
+    }
+
+    #[test]
+    fn single_part_messages_convert_from_frame_sources() {
+        assert_eq!(Message::from("hi"), Message::new(Frame::from("hi")));
+        assert_eq!(Message::from(b"hi".to_vec()), Message::new("hi"));
+        assert_eq!(Message::from(Frame::from("hi")), Message::new("hi"));
     }
 
     #[test]

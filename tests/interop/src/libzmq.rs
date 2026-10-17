@@ -81,6 +81,8 @@ pub enum Kind {
     Rep = 4,
     Dealer = 5,
     Router = 6,
+    Pull = 7,
+    Push = 8,
     XPub = 9,
 }
 
