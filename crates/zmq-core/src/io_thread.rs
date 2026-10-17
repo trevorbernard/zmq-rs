@@ -11,10 +11,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
 use mio::{Events, Interest, Token};
-use zmq_pipe::{Reader, Writer, pipe};
+use zmq_pipe::{Reader, Writer};
 use zmtp::Message;
 
-use crate::context::PeerSlot;
+use crate::context::{PeerSlot, message_pipe};
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
 use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
@@ -547,8 +547,8 @@ impl EventLoop {
             }
         }
         for stream in accepted {
-            let (tx, outbound) = pipe(config.send_hwm);
-            let (inbound, rx) = pipe(config.recv_hwm);
+            let (tx, outbound) = message_pipe(config.send_hwm, config.conflate_outbound);
+            let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
             let peer = PeerSlot::default();
             let origin = Origin::Accepted(Some(Delivery {
                 listener: id,

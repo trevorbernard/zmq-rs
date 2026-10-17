@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
-use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe};
+use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
 use zmtp::{Established, Frame, Identity, Message, Metadata, SocketType, Version};
 
 use mio::net::TcpListener;
@@ -80,6 +80,12 @@ pub struct ConnectionConfig {
     pub send_hwm: Hwm,
     /// Messages queued from the peer before we stop reading from it.
     pub recv_hwm: Hwm,
+    /// Keep only the latest message from the peer, ignoring `recv_hwm`
+    /// (`ZMQ_CONFLATE`).
+    pub conflate_inbound: bool,
+    /// Keep only the latest message towards the peer, ignoring `send_hwm`
+    /// (`ZMQ_CONFLATE`).
+    pub conflate_outbound: bool,
     /// The largest frame accepted from the peer.
     pub max_frame_size: Option<u64>,
     /// How a connecting session retries. Accepted connections never do.
@@ -296,6 +302,16 @@ impl InprocListener {
 /// Introduces the two ends of an `inproc` connection to each other, as a
 /// handshake would, and returns the server's end. Incompatible socket types
 /// are never paired: dropping the server's end closes the connection.
+/// One direction of a connection: only the latest message if `conflate`,
+/// otherwise up to `hwm`.
+pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader<Message>) {
+    if conflate {
+        pipe_conflated()
+    } else {
+        pipe(hwm)
+    }
+}
+
 fn pair(
     server_config: &ConnectionConfig,
     client_config: &ConnectionConfig,
@@ -354,6 +370,8 @@ impl ConnectionConfig {
             identity: Identity::default(),
             send_hwm: hwm,
             recv_hwm: hwm,
+            conflate_inbound: false,
+            conflate_outbound: false,
             max_frame_size: None,
             reconnect: Reconnect::default(),
             linger: Linger::default(),
@@ -512,8 +530,15 @@ impl Context {
             ),
             None => (config.send_hwm, config.recv_hwm),
         };
-        let (tx, server_rx) = pipe(send_hwm);
-        let (server_tx, rx) = pipe(recv_hwm);
+        let (conflate_out, conflate_in) = match &binding {
+            Some(binding) => (
+                config.conflate_outbound || binding.config.conflate_inbound,
+                config.conflate_inbound || binding.config.conflate_outbound,
+            ),
+            None => (config.conflate_outbound, config.conflate_inbound),
+        };
+        let (tx, server_rx) = message_pipe(send_hwm, conflate_out);
+        let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
         let client = Connection {
             tx,
             rx,
@@ -566,8 +591,8 @@ impl Context {
     }
 
     fn connect_to(&self, addr: Address, config: ConnectionConfig) -> Connection {
-        let (tx, outbound) = pipe(config.send_hwm);
-        let (inbound, rx) = pipe(config.recv_hwm);
+        let (tx, outbound) = message_pipe(config.send_hwm, config.conflate_outbound);
+        let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
         let peer = PeerSlot::default();
         self.io_thread()
             .send(IoCommand::Connect(Box::new(ConnectRequest {

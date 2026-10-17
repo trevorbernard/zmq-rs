@@ -13,7 +13,7 @@ use std::future::poll_fn;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 
@@ -38,20 +38,59 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         Hwm::Messages(n) => Some(n.get() as u64),
     };
     let writer = Writer {
-        sender: Some(sender),
+        sender: Some(Sender::Queue(sender)),
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
         hwm,
     };
     let reader = Reader {
-        receiver,
+        receiver: Receiver::Queue(receiver),
         shared,
         read: 0,
         // libzmq's pipe_t::compute_lwm.
         lwm: hwm.map(|hwm| hwm.div_ceil(2)),
     };
     (writer, reader)
+}
+
+/// Creates a pipe that holds only the latest item, like libzmq's
+/// `ypipe_conflate`: each send replaces whatever the reader has not taken
+/// yet, so the writer never waits.
+pub fn pipe_conflated<T>() -> (Writer<T>, Reader<T>) {
+    let latest = Arc::new(Mutex::new(None));
+    let shared = Arc::new(Shared::default());
+    let writer = Writer {
+        sender: Some(Sender::Latest(latest.clone())),
+        shared: shared.clone(),
+        written: 0,
+        peer_read: 0,
+        hwm: None,
+    };
+    let reader = Reader {
+        receiver: Receiver::Latest(latest),
+        shared,
+        read: 0,
+        lwm: None,
+    };
+    (writer, reader)
+}
+
+/// Where a writer puts items: a queue, or a slot for the latest one.
+#[derive(Debug)]
+enum Sender<T> {
+    Queue(mpsc::Sender<T>),
+    Latest(Arc<Mutex<Option<T>>>),
+}
+
+#[derive(Debug)]
+enum Receiver<T> {
+    Queue(mpsc::Receiver<T>),
+    Latest(Arc<Mutex<Option<T>>>),
+}
+
+fn lock<T>(slot: &Mutex<Option<T>>) -> std::sync::MutexGuard<'_, Option<T>> {
+    slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
 /// State both ends see. Each hot field gets its own cache line, so the
@@ -87,7 +126,7 @@ impl<T> Deref for CachePadded<T> {
 #[derive(Debug)]
 pub struct Writer<T> {
     /// `None` only while dropping, so the reader can see the disconnect.
-    sender: Option<mpsc::Sender<T>>,
+    sender: Option<Sender<T>>,
     shared: Arc<Shared>,
     written: u64,
     /// The reader's progress as last loaded from `Shared::read`. It only
@@ -100,7 +139,7 @@ pub struct Writer<T> {
 /// The receiving end of a pipe.
 #[derive(Debug)]
 pub struct Reader<T> {
-    receiver: mpsc::Receiver<T>,
+    receiver: Receiver<T>,
     shared: Arc<Shared>,
     read: u64,
     lwm: Option<u64>,
@@ -137,12 +176,13 @@ impl<T> Writer<T> {
         if self.is_full() {
             return Err(TrySendError::Full(item));
         }
-        let Some(sender) = &self.sender else {
-            return Err(TrySendError::Closed(item));
-        };
-        sender
-            .send(item)
-            .map_err(|mpsc::SendError(item)| TrySendError::Closed(item))?;
+        match &self.sender {
+            Some(Sender::Queue(sender)) => sender
+                .send(item)
+                .map_err(|mpsc::SendError(item)| TrySendError::Closed(item))?,
+            Some(Sender::Latest(latest)) => *lock(latest) = Some(item),
+            None => return Err(TrySendError::Closed(item)),
+        }
         self.written += 1;
         self.shared.reader_waker.wake();
         Ok(())
@@ -250,7 +290,19 @@ impl<T> Drop for Writer<T> {
 impl<T> Reader<T> {
     /// Takes the next item if one is queued.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        match self.receiver.try_recv() {
+        let received = match &self.receiver {
+            Receiver::Queue(receiver) => receiver.try_recv(),
+            Receiver::Latest(latest) => {
+                // Loaded first: once closed, the last item is already stored.
+                let closed = self.is_closed();
+                match lock(latest).take() {
+                    Some(item) => Ok(item),
+                    None if closed => Err(mpsc::TryRecvError::Disconnected),
+                    None => Err(mpsc::TryRecvError::Empty),
+                }
+            }
+        };
+        match received {
             Ok(item) => {
                 self.read += 1;
                 self.shared.read.store(self.read, Ordering::Release);
@@ -382,6 +434,46 @@ mod tests {
 
     fn wakes(count: &Count) -> usize {
         count.0.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_conflated_pipe_keeps_only_the_latest_item() {
+        let (mut writer, mut reader) = pipe_conflated();
+        for i in 0..100 {
+            writer.try_send(i).unwrap();
+        }
+        assert_eq!(reader.try_recv(), Ok(99));
+        assert_eq!(reader.try_recv(), Err(TryRecvError::Empty));
+        writer.try_send(100).unwrap();
+        assert_eq!(reader.try_recv(), Ok(100));
+    }
+
+    #[test]
+    fn a_conflated_pipe_delivers_its_last_item_after_the_writer_drops() {
+        let (mut writer, mut reader) = pipe_conflated();
+        writer.try_send(1).unwrap();
+        drop(writer);
+        assert!(reader.is_closed());
+        assert_eq!(reader.try_recv(), Ok(1));
+        assert_eq!(reader.try_recv(), Err(TryRecvError::Closed));
+    }
+
+    #[test]
+    fn a_conflated_pipe_wakes_its_reader_and_sees_it_drop() {
+        let (mut writer, mut reader) = pipe_conflated();
+        let (count, waker) = counting_waker();
+        assert_eq!(
+            reader.poll_recv(&mut Context::from_waker(&waker)),
+            Poll::Pending
+        );
+        writer.try_send(1).unwrap();
+        assert_eq!(wakes(&count), 1);
+        assert_eq!(
+            writer.poll_ready(&mut Context::from_waker(&waker)),
+            Poll::Ready(Ok(()))
+        );
+        drop(reader);
+        assert_eq!(writer.try_send(2), Err(TrySendError::Closed(2)));
     }
 
     #[test]

@@ -140,7 +140,13 @@ as the empty one of `ZMQ_PROBE_ROUTER`. As in libzmq, an accepted peer is
 greeted when the socket next takes peers in.
 
 Per-socket-type options are methods on that type, so an option a type
-lacks is a compile error: `set_probe` exists only on ROUTER and DEALER.
+lacks is a compile error: `set_conflate` exists only on the
+`Conflatable` types (PUSH, PULL, PUB, SUB, DEALER), `set_probe` on ROUTER
+and DEALER. Conflation is a one-slot pipe (`pipe_conflated`) in the
+directions that carry messages; unlike libzmq, the subscription direction
+never conflates, so no subscription is lost. Options that shape
+connections, such as conflation, apply to binds and connects made after
+they are set.
 
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a

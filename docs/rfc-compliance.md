@@ -347,6 +347,8 @@ Rules shared by every pattern:
 - A SUB's subscriptions go to a peer as soon as `connect` returns. Its queues towards peers are unbounded, so a subscription is never dropped at the HWM.
 - A session replays the topics it has carried to each new connection after a reconnect, which is the effect of libzmq's hiccup. Cancelled topics are not replayed.
 
+**`CONFLATE`** (PUSH, PULL, PUB, SUB, DEALER): each queue holds only the latest message and the HWM no longer applies. libzmq conflates both directions, which can lose all but the last of a SUB's subscriptions; here the subscription direction never conflates.
+
 ### PIPELINE (RFC 30) and EXPAIR (RFC 31)
 
 - **PUSH** round-robins to available peers. With none available it blocks or errors, and never drops.

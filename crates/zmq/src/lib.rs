@@ -80,6 +80,14 @@
 //! zmq::Proxy::new(&mut frontend, &mut backend);
 //! ```
 //!
+//! Only PUSH, PULL, PUB, SUB and DEALER can conflate:
+//!
+//! ```compile_fail,E0599
+//! let context = zmq::Context::new().unwrap();
+//! let mut router = context.socket::<zmq::Router>();
+//! router.set_conflate(true);
+//! ```
+//!
 //! A ROUTER cannot send without saying to whom:
 //!
 //! ```compile_fail,E0061
@@ -109,7 +117,7 @@ pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, 
 #[doc(hidden)]
 pub use socket::Routing;
 pub use socket::{
-    Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub,
+    Conflatable, Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub,
     UnknownRoutingId, XPub, XSub,
 };
 #[cfg(feature = "draft")]

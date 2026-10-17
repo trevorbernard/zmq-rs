@@ -33,6 +33,56 @@ pub trait SocketType: sealed::Sealed + 'static {
     type Routing: Routing;
 }
 
+/// A socket type that can keep only the latest message, as libzmq's
+/// `ZMQ_CONFLATE`: PUSH, PULL, PUB, SUB and DEALER.
+pub trait Conflatable: SocketType {
+    /// Whether messages from peers conflate.
+    #[doc(hidden)]
+    const INBOUND: bool;
+    /// Whether messages towards peers conflate.
+    #[doc(hidden)]
+    const OUTBOUND: bool;
+}
+
+// Subscriptions are never conflated, unlike libzmq, which can lose all but
+// the last of them.
+impl Conflatable for Push {
+    const INBOUND: bool = false;
+    const OUTBOUND: bool = true;
+}
+
+impl Conflatable for Pull {
+    const INBOUND: bool = true;
+    const OUTBOUND: bool = false;
+}
+
+impl Conflatable for Pub {
+    const INBOUND: bool = false;
+    const OUTBOUND: bool = true;
+}
+
+impl Conflatable for Sub {
+    const INBOUND: bool = true;
+    const OUTBOUND: bool = false;
+}
+
+impl Conflatable for Dealer {
+    const INBOUND: bool = true;
+    const OUTBOUND: bool = true;
+}
+
+impl<T: Conflatable> Socket<T> {
+    /// Whether connections bound or connected from now on keep only the
+    /// latest message in each queue, as libzmq's `ZMQ_CONFLATE`: a newer
+    /// message replaces one not yet delivered, and the high-water marks no
+    /// longer apply. Off by default.
+    pub fn set_conflate(&mut self, on: bool) {
+        let config = self.peers.config_mut();
+        config.conflate_inbound = on && T::INBOUND;
+        config.conflate_outbound = on && T::OUTBOUND;
+    }
+}
+
 /// How a socket type routes messages among its peers.
 #[doc(hidden)]
 pub trait Routing: Default + fmt::Debug + Send {
