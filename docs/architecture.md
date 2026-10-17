@@ -33,6 +33,7 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 | `IoThread` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
 | `IoCommand` | The thread's command type (`Connect`, `Listen`, `Shutdown`, `Stop`) | `command_t` |
 | `Listener` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
+| `InprocListener` | A bound `inproc` name in the context's registry; paired connections arrive the same way | `ctx_t::endpoints`, `pend_connection` |
 | `Session` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
 | `Engine` | One TCP connection: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
 | `TokenWaker` | A pipe waker that queues its session or listener id once and wakes the event loop | `activate_read`, `activate_write` |
@@ -158,6 +159,29 @@ timeout and TTL, and a PING carrying a TTL sets one. An expired deadline is
 a connection error, so a connecting session reconnects. PINGs are sent only
 to ZMTP 3.x peers.
 
+## `inproc`
+
+An `inproc` connection is a pair of pipes and nothing else: no I/O thread,
+no engine, no encoding, so a message's frames move between sockets
+without being copied. Each context keeps a registry of bound names and of
+connections waiting for a name.
+
+- Binding a name that a live listener holds fails with `AddrInUse`.
+  Dropping the listener (its socket) frees the name.
+- Connecting to a bound name pairs at once. Connecting to an unbound name
+  creates the pipes anyway, so messages queue, and parks the far end until
+  the name is bound. A parked connection whose socket is dropped is
+  forgotten.
+- Pairing fills both `PeerSlot`s with what a handshake would have
+  established (ZMTP 3.1, the other side's socket type and identity). An
+  incompatible pair is never paired: the far end is dropped, which closes
+  the connection.
+- As in libzmq, each direction's HWM is the sender's send HWM plus the
+  receiver's receive HWM, unlimited if either is. A connection made
+  before the bind only knows its own side, so it uses its own HWMs.
+- `inproc` connections never reconnect, and security and heartbeats do
+  not apply.
+
 ## Status
 
 | Slice | Contents | State |
@@ -170,4 +194,4 @@ to ZMTP 3.x peers.
 | 4c | REQ and REP | done |
 | 5a | PLAIN on connections, with an `Authenticator` trait | done |
 | 5b | Heartbeats (ZMTP 3.1 PING/PONG) and the handshake deadline | done |
-| 5c | `inproc` | next |
+| 5c | `inproc` | done |

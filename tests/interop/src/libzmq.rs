@@ -218,12 +218,13 @@ impl Socket {
             .unwrap_or_else(|err| panic!("zmq_bind({endpoint}): {err}"));
     }
 
-    /// Connects to a TCP address.
-    pub fn connect(&self, addr: SocketAddr) {
-        let endpoint = CString::new(format!("tcp://{addr}")).unwrap();
-        // SAFETY: `endpoint` is a valid C string for the call.
-        check(unsafe { zmq_connect(self.raw.as_ptr(), endpoint.as_ptr()) })
-            .unwrap_or_else(|err| panic!("zmq_connect({addr}): {err}"));
+    /// Connects to `endpoint`, such as a TCP address.
+    pub fn connect(&self, endpoint: impl Into<zmq::Endpoint>) {
+        let endpoint = endpoint.into();
+        let c_endpoint = CString::new(endpoint.to_string()).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
     }
 
     /// Subscribes a SUB socket to `topic`.

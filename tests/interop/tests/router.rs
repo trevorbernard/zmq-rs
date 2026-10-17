@@ -104,7 +104,7 @@ fn router_generates_routing_ids_for_anonymous_peers() {
     let dealers: Vec<Socket> = (0..2)
         .map(|i| {
             let dealer = Socket::new(Kind::Dealer);
-            dealer.connect(addr);
+            dealer.connect(addr.clone());
             dealer.send(&[format!("from {i}").as_bytes()]).unwrap();
             dealer
         })
@@ -145,7 +145,7 @@ fn router_ignores_a_peer_reusing_an_identity() {
     let addr = router.bind("tcp://127.0.0.1:*").unwrap();
     let first = Socket::new(Kind::Dealer);
     first.set_routing_id(b"same");
-    first.connect(addr);
+    first.connect(addr.clone());
     first.send(&[b"first"]).unwrap();
     let (from, received, router) = within(Duration::from_secs(5), move || {
         let (from, received) = router.recv();
@@ -208,7 +208,7 @@ fn our_router_and_dealer_talk_to_each_other() {
     let mut router = context.socket::<Router>();
     let addr = router.bind("tcp://127.0.0.1:*").unwrap();
     let mut dealer = context.socket_with::<Dealer>(identity("ours"));
-    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    dealer.connect(&addr.to_string()).unwrap();
     dealer.send("ping");
     let (from, ping, mut router) = within(Duration::from_secs(5), move || {
         let (from, ping) = router.recv();
@@ -269,7 +269,7 @@ fn plain_secured_dealer_and_router() {
         security: Security::PlainClient(expected),
         ..identity("secure")
     });
-    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    dealer.connect(&addr.to_string()).unwrap();
     dealer.send("over plain");
     let (from, received) = within(Duration::from_secs(5), move || router.recv());
     assert_eq!(

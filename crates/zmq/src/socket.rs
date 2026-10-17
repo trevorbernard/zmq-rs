@@ -3,7 +3,6 @@
 use std::fmt;
 use std::future::poll_fn;
 use std::marker::PhantomData;
-use std::net::SocketAddr;
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmq_core::{
@@ -12,7 +11,8 @@ use zmq_core::{
 };
 use zmtp::Message;
 
-use crate::{Error, RoutingId, SocketOptions, endpoint, wait};
+use crate::endpoint::Target;
+use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
 
 mod sealed {
     pub trait Sealed {}
@@ -142,20 +142,30 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
-    /// Binds `endpoint`, such as `tcp://*:5555` or `tcp://127.0.0.1:*`, and
-    /// accepts peers on it. Returns the bound address, with the actual port
-    /// when binding to `*`.
-    pub fn bind(&mut self, endpoint: &str) -> Result<SocketAddr, Error> {
-        let addr = endpoint::bind_addr(endpoint)?;
-        self.peers.bind(addr).map_err(Error::Io)
+    /// Binds `endpoint`, such as `tcp://*:5555`, `tcp://127.0.0.1:*` or
+    /// `inproc://name`, and accepts peers on it. Returns where it is bound,
+    /// with the actual port when binding to `*`.
+    pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
+        match endpoint::bind_target(endpoint)? {
+            Target::Tcp(addr) => self.peers.bind(addr).map(Endpoint::Tcp),
+            Target::Inproc(name) => self
+                .peers
+                .bind_inproc(&name)
+                .map(|()| Endpoint::Inproc(name)),
+        }
+        .map_err(Error::Io)
     }
 
-    /// Connects to `endpoint`, such as `tcp://localhost:5555`. Returns at
-    /// once; messages queue until the connection is up, and it reconnects if
-    /// the connection breaks.
+    /// Connects to `endpoint`, such as `tcp://localhost:5555` or
+    /// `inproc://name`. Returns at once; messages queue until the connection
+    /// is up, and a TCP connection reconnects if it breaks. An `inproc`
+    /// connection waits for its name to be bound in this socket's context,
+    /// and ends for good when the bound socket is dropped.
     pub fn connect(&mut self, endpoint: &str) -> Result<(), Error> {
-        let addr = endpoint::connect_addr(endpoint)?;
-        self.peers.connect(addr);
+        match endpoint::connect_target(endpoint)? {
+            Target::Tcp(addr) => self.peers.connect(addr),
+            Target::Inproc(name) => self.peers.connect_inproc(&name),
+        };
         Ok(())
     }
 }

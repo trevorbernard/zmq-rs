@@ -10,10 +10,10 @@ use std::io;
 use std::net::SocketAddr;
 use std::task::{Context as TaskContext, Poll};
 
-use zmq_pipe::{TryRecvError, TrySendError};
+use zmq_pipe::{Reader, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
-use crate::{Connection, ConnectionConfig, Context, Listener};
+use crate::{Connection, ConnectionConfig, Context};
 
 /// A stable name for a peer within one socket. Keys only grow, so peers
 /// stay sorted by key.
@@ -106,7 +106,8 @@ pub struct Peers {
     context: Context,
     config: ConnectionConfig,
     list: PeerList,
-    listeners: Vec<Listener>,
+    /// Accept queues of the socket's TCP and `inproc` listeners.
+    listeners: Vec<Reader<Connection>>,
 }
 
 impl Peers {
@@ -136,8 +137,21 @@ impl Peers {
     pub fn bind(&mut self, addr: SocketAddr) -> io::Result<SocketAddr> {
         let listener = self.context.bind(addr, self.config.clone())?;
         let local = listener.local_addr();
-        self.listeners.push(listener);
+        self.listeners.push(listener.into_queue());
         Ok(local)
+    }
+
+    /// Binds the `inproc` `name` and accepts peers on it.
+    pub fn bind_inproc(&mut self, name: &str) -> io::Result<()> {
+        let listener = self.context.bind_inproc(name, self.config.clone())?;
+        self.listeners.push(listener.into_queue());
+        Ok(())
+    }
+
+    /// Connects to the `inproc` `name`, binding or not.
+    pub fn connect_inproc(&mut self, name: &str) -> PeerKey {
+        let connection = self.context.connect_inproc(name, self.config.clone());
+        self.list.push(connection)
     }
 
     /// How many peers the socket currently has.
@@ -156,7 +170,7 @@ impl Peers {
         let list = &mut self.list;
         self.listeners.retain_mut(|listener| {
             loop {
-                match listener.poll_accept(cx) {
+                match listener.poll_recv(cx) {
                     Poll::Ready(Some(connection)) => {
                         list.push(connection);
                     }

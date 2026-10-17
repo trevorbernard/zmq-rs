@@ -1,5 +1,6 @@
 //! The context: the I/O threads every connection runs on.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::io;
 use std::net::SocketAddr;
@@ -12,7 +13,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe};
-use zmtp::{Established, Identity, Message, SocketType};
+use zmtp::{Established, Frame, Identity, Message, Metadata, SocketType, Version};
 
 use mio::net::TcpListener;
 
@@ -38,6 +39,31 @@ struct Inner {
     io_threads: Vec<IoThread>,
     /// Round-robin choice of I/O thread for new connections.
     next: AtomicUsize,
+    /// The `inproc` names bound in this context, and connections waiting
+    /// for a name to be bound.
+    inproc: Mutex<InprocRegistry>,
+}
+
+#[derive(Debug, Default)]
+struct InprocRegistry {
+    bound: HashMap<String, InprocBinding>,
+    pending: HashMap<String, Vec<PendingConnect>>,
+}
+
+/// A bound `inproc` name. Free again once its listener is dropped.
+#[derive(Debug)]
+struct InprocBinding {
+    config: ConnectionConfig,
+    connections: Writer<Connection>,
+}
+
+/// A connection made before its name was bound. Its pipes already carry
+/// the connector's messages; binding hands `server` to the listener.
+#[derive(Debug)]
+struct PendingConnect {
+    config: ConnectionConfig,
+    server: Connection,
+    client: PeerSlot,
 }
 
 /// How a connection presents itself and buffers messages.
@@ -176,6 +202,88 @@ impl Listener {
     pub fn accept_blocking(&mut self) -> Option<Connection> {
         self.connections.recv_blocking()
     }
+
+    pub(crate) fn into_queue(self) -> Reader<Connection> {
+        self.connections
+    }
+}
+
+/// An `inproc` name bound in a context. Peers that connect to it with a
+/// compatible socket type arrive as [`Connection`]s. Dropping it frees the
+/// name.
+#[derive(Debug)]
+pub struct InprocListener {
+    name: String,
+    connections: Reader<Connection>,
+}
+
+impl InprocListener {
+    /// The bound name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The next connection, if one is waiting.
+    pub fn try_accept(&mut self) -> Result<Connection, TryRecvError> {
+        self.connections.try_recv()
+    }
+
+    /// The next connection, or `None` once the listener has closed.
+    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+        self.connections.poll_recv(cx)
+    }
+
+    /// The next connection, blocking the thread until one arrives.
+    pub fn accept_blocking(&mut self) -> Option<Connection> {
+        self.connections.recv_blocking()
+    }
+
+    pub(crate) fn into_queue(self) -> Reader<Connection> {
+        self.connections
+    }
+}
+
+/// Introduces the two ends of an `inproc` connection to each other, as a
+/// handshake would, and returns the server's end. Incompatible socket types
+/// are never paired: dropping the server's end closes the connection.
+fn pair(
+    server_config: &ConnectionConfig,
+    client_config: &ConnectionConfig,
+    server: Connection,
+    client: &PeerSlot,
+) -> Option<Connection> {
+    if !server_config.socket_type.accepts(client_config.socket_type)
+        || !client_config.socket_type.accepts(server_config.socket_type)
+    {
+        return None;
+    }
+    *server.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(client_config));
+    *client.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(server_config));
+    Some(server)
+}
+
+/// What a handshake with a peer configured as `config` would establish.
+fn introduce(config: &ConnectionConfig) -> Established {
+    Established {
+        version: Version::V3_1,
+        peer_socket_type: Some(config.socket_type),
+        peer_identity: if config.socket_type.sends_identity() {
+            Frame::copy_from_slice(config.identity.as_slice())
+        } else {
+            Frame::new()
+        },
+        metadata: Metadata::default(),
+        authenticated: None,
+        implicit_subscription: false,
+    }
+}
+
+/// The HWM of an `inproc` pipe whose ends have HWMs `a` and `b`.
+fn hwm_sum(a: Hwm, b: Hwm) -> Hwm {
+    match (a, b) {
+        (Hwm::Messages(a), Hwm::Messages(b)) => Hwm::Messages(a.saturating_add(b.get())),
+        _ => Hwm::Unlimited,
+    }
 }
 
 impl ConnectionConfig {
@@ -212,6 +320,7 @@ impl Context {
             inner: Arc::new(Inner {
                 io_threads,
                 next: AtomicUsize::new(0),
+                inproc: Mutex::default(),
             }),
         })
     }
@@ -233,6 +342,97 @@ impl Context {
             local_addr,
             connections,
         })
+    }
+
+    /// Binds the `inproc` `name` in this context. Fails with
+    /// `AddrInUse` if a live listener already has it. Connections that were
+    /// waiting for the name are paired at once.
+    pub fn bind_inproc(&self, name: &str, config: ConnectionConfig) -> io::Result<InprocListener> {
+        let mut registry = self.inproc();
+        if registry
+            .bound
+            .get(name)
+            .is_some_and(|binding| !binding.connections.is_closed())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::AddrInUse,
+                format!("inproc://{name} is already bound"),
+            ));
+        }
+        let (mut writer, connections) = pipe(Hwm::Unlimited);
+        for pending in registry.pending.remove(name).unwrap_or_default() {
+            if let Some(server) = pair(&config, &pending.config, pending.server, &pending.client) {
+                let _ = writer.try_send(server);
+            }
+        }
+        registry.bound.insert(
+            name.to_owned(),
+            InprocBinding {
+                config,
+                connections: writer,
+            },
+        );
+        Ok(InprocListener {
+            name: name.to_owned(),
+            connections,
+        })
+    }
+
+    /// Connects to the `inproc` `name` in this context. If nothing is bound
+    /// yet, the connection waits for a bind; messages sent meanwhile queue.
+    pub fn connect_inproc(&self, name: &str, config: ConnectionConfig) -> Connection {
+        let mut registry = self.inproc();
+        let binding = registry
+            .bound
+            .get_mut(name)
+            .filter(|binding| !binding.connections.is_closed());
+        // Bound: each direction holds what the sender and the receiver
+        // would each have buffered, as in libzmq. Otherwise only our side
+        // is known.
+        let (send_hwm, recv_hwm) = match &binding {
+            Some(binding) => (
+                hwm_sum(config.send_hwm, binding.config.recv_hwm),
+                hwm_sum(config.recv_hwm, binding.config.send_hwm),
+            ),
+            None => (config.send_hwm, config.recv_hwm),
+        };
+        let (tx, server_rx) = pipe(send_hwm);
+        let (server_tx, rx) = pipe(recv_hwm);
+        let client = Connection {
+            tx,
+            rx,
+            peer: PeerSlot::default(),
+        };
+        let server = Connection {
+            tx: server_tx,
+            rx: server_rx,
+            peer: PeerSlot::default(),
+        };
+        match binding {
+            Some(binding) => {
+                if let Some(server) = pair(&binding.config, &config, server, &client.peer) {
+                    let _ = binding.connections.try_send(server);
+                }
+            }
+            None => {
+                let pending = &mut registry.pending.entry(name.to_owned()).or_default();
+                // Forget connections given up on while waiting.
+                pending.retain(|pending| !pending.server.rx.is_closed());
+                pending.push(PendingConnect {
+                    config,
+                    server,
+                    client: client.peer.clone(),
+                });
+            }
+        }
+        client
+    }
+
+    fn inproc(&self) -> std::sync::MutexGuard<'_, InprocRegistry> {
+        self.inner
+            .inproc
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// Connects to a TCP peer in the background and returns the pipes for
@@ -301,3 +501,65 @@ impl fmt::Display for ShutdownTimedOut {
 }
 
 impl std::error::Error for ShutdownTimedOut {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config(socket_type: SocketType) -> ConnectionConfig {
+        ConnectionConfig::new(socket_type)
+    }
+
+    #[test]
+    fn inproc_peers_learn_each_others_type_and_identity() {
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind_inproc("ids", config(SocketType::Router))
+            .unwrap();
+        let client = context.connect_inproc(
+            "ids",
+            ConnectionConfig {
+                identity: Identity::new("me").unwrap(),
+                ..config(SocketType::Dealer)
+            },
+        );
+        let server = listener.try_accept().expect("paired at once");
+        let seen = server.peer().unwrap();
+        assert_eq!(seen.peer_socket_type, Some(SocketType::Dealer));
+        assert_eq!(seen.peer_identity, Frame::from("me"));
+        let seen = client.peer().unwrap();
+        assert_eq!(seen.peer_socket_type, Some(SocketType::Router));
+    }
+
+    #[test]
+    fn a_pending_connect_of_the_wrong_type_is_closed_by_the_bind() {
+        let context = Context::new().unwrap();
+        let client = context.connect_inproc("late", config(SocketType::Push));
+        let mut listener = context
+            .bind_inproc("late", config(SocketType::Push))
+            .unwrap();
+        assert!(listener.try_accept().is_err());
+        assert!(client.tx.is_closed());
+        assert_eq!(client.peer(), None);
+    }
+
+    #[test]
+    fn a_pending_connect_given_up_on_is_forgotten() {
+        let context = Context::new().unwrap();
+        drop(context.connect_inproc("gone", config(SocketType::Push)));
+        let _kept = context.connect_inproc("gone", config(SocketType::Push));
+        assert_eq!(context.inproc().pending["gone"].len(), 1);
+    }
+
+    #[test]
+    fn unlimited_on_either_side_makes_the_inproc_pipe_unlimited() {
+        let two = Hwm::Messages(NonZeroUsize::new(2).unwrap());
+        let five = Hwm::Messages(NonZeroUsize::new(5).unwrap());
+        assert_eq!(
+            hwm_sum(two, Hwm::Messages(NonZeroUsize::new(3).unwrap())),
+            five
+        );
+        assert_eq!(hwm_sum(two, Hwm::Unlimited), Hwm::Unlimited);
+        assert_eq!(hwm_sum(Hwm::Unlimited, two), Hwm::Unlimited);
+    }
+}

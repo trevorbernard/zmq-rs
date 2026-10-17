@@ -1,4 +1,5 @@
-//! Endpoint strings, as libzmq writes them: `tcp://host:port`.
+//! Endpoint strings, as libzmq writes them: `tcp://host:port` and
+//! `inproc://name`.
 
 use std::fmt;
 use std::io;
@@ -15,6 +16,73 @@ pub enum Error {
     UnsupportedTransport(String),
     /// The operating system refused, e.g. the address is in use.
     Io(io::Error),
+}
+
+/// Where a socket is bound, as [`Socket::bind`](crate::Socket::bind)
+/// reports it. Displays as an endpoint string another socket can connect
+/// to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Endpoint {
+    /// A TCP address, with the actual port when bound to `*`.
+    Tcp(SocketAddr),
+    /// An `inproc` name, reachable from sockets of the same context.
+    Inproc(String),
+}
+
+impl Endpoint {
+    /// The TCP address, for a TCP endpoint.
+    pub fn tcp_addr(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Tcp(addr) => Some(*addr),
+            Self::Inproc(_) => None,
+        }
+    }
+}
+
+impl From<SocketAddr> for Endpoint {
+    fn from(addr: SocketAddr) -> Self {
+        Self::Tcp(addr)
+    }
+}
+
+impl fmt::Display for Endpoint {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Tcp(addr) => write!(f, "tcp://{addr}"),
+            Self::Inproc(name) => write!(f, "inproc://{name}"),
+        }
+    }
+}
+
+/// What a bind or connect is aimed at.
+pub(crate) enum Target {
+    Tcp(SocketAddr),
+    Inproc(String),
+}
+
+/// Parses `endpoint` for binding.
+pub(crate) fn bind_target(endpoint: &str) -> Result<Target, Error> {
+    match inproc_name(endpoint)? {
+        Some(name) => Ok(Target::Inproc(name)),
+        None => bind_addr(endpoint).map(Target::Tcp),
+    }
+}
+
+/// Parses `endpoint` for connecting.
+pub(crate) fn connect_target(endpoint: &str) -> Result<Target, Error> {
+    match inproc_name(endpoint)? {
+        Some(name) => Ok(Target::Inproc(name)),
+        None => connect_addr(endpoint).map(Target::Tcp),
+    }
+}
+
+/// The name of an `inproc://name` endpoint, which must not be empty.
+fn inproc_name(endpoint: &str) -> Result<Option<String>, Error> {
+    match endpoint.strip_prefix("inproc://") {
+        Some("") => Err(invalid(endpoint)),
+        Some(name) => Ok(Some(name.to_owned())),
+        None => Ok(None),
+    }
 }
 
 /// The address to bind for `endpoint`. `*` means every interface or, as the
@@ -156,6 +224,21 @@ mod tests {
                 "{endpoint}"
             );
         }
+    }
+
+    #[test]
+    fn inproc_endpoints() {
+        assert!(matches!(bind_target("inproc://work"), Ok(Target::Inproc(n)) if n == "work"));
+        assert!(matches!(connect_target("inproc://a/b"), Ok(Target::Inproc(n)) if n == "a/b"));
+        assert!(matches!(
+            bind_target("inproc://"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+        assert_eq!(Endpoint::Inproc("x".into()).to_string(), "inproc://x");
+        assert_eq!(
+            Endpoint::Tcp(addr("127.0.0.1:5")).to_string(),
+            "tcp://127.0.0.1:5"
+        );
     }
 
     #[test]

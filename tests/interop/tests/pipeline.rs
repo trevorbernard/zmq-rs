@@ -90,7 +90,7 @@ fn pull_fair_queues_across_push_peers() {
     let pushes: Vec<Socket> = (0..3)
         .map(|peer| {
             let push = Socket::new(Kind::Push);
-            push.connect(addr);
+            push.connect(addr.clone());
             for i in 0..5 {
                 push.send(&[format!("{peer}:{i}").as_bytes()]).unwrap();
             }
@@ -135,7 +135,7 @@ fn async_push_and_pull_between_our_sockets() {
     let mut pull = context.socket::<Pull>();
     let addr = pull.bind("tcp://127.0.0.1:*").unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(&addr.to_string()).unwrap();
     let received = within(Duration::from_secs(5), move || {
         block_on(async move {
             for i in 0..100 {
@@ -166,7 +166,7 @@ fn bind_and_connect_report_bad_endpoints() {
     ));
     let addr = push.bind("tcp://127.0.0.1:*").unwrap();
     assert!(matches!(
-        push.bind(&format!("tcp://{addr}")),
+        push.bind(&addr.to_string()),
         Err(zmq::Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
     ));
 }

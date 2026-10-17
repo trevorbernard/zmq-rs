@@ -9,9 +9,9 @@
 //!
 //! let context = Context::new()?;
 //! let mut pull = context.socket::<Pull>();
-//! let addr = pull.bind("tcp://127.0.0.1:*")?;
+//! let bound = pull.bind("tcp://127.0.0.1:*")?;
 //! let mut push = context.socket::<Push>();
-//! push.connect(&format!("tcp://{addr}"))?;
+//! push.connect(&bound.to_string())?;
 //! push.send("hello");
 //! assert_eq!(pull.recv(), "hello".into());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -61,7 +61,7 @@ mod wait;
 
 use std::io;
 
-pub use endpoint::Error;
+pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use socket::{Dealer, Pull, Push, Rep, Req, Request, Router, Socket, SocketType};
 pub use zmq_core::{

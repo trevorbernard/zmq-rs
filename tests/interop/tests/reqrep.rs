@@ -85,7 +85,7 @@ fn our_req_and_rep_talk_to_each_other() {
         }
     });
     let mut req = context.socket::<Req>();
-    req.connect(&format!("tcp://{addr}")).unwrap();
+    req.connect(&addr.to_string()).unwrap();
     let answers = within(FIVE, move || {
         ["a", "b", "c"].map(|q| req.request(q).unwrap())
     });
@@ -202,7 +202,7 @@ fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Receiver<()>) {
         rep.recv().reply("stale");
         rep.recv().reply("fresh");
     });
-    (format!("tcp://{addr}"), done)
+    (addr.to_string(), done)
 }
 
 #[test]
