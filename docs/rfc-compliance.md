@@ -238,7 +238,8 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - CURVE without a handler accepts the connection (encryption only, the "Stonehouse" pattern) unless `ZAP_ENFORCE_DOMAIN` is set.
 
 **Design:**
-- `Authenticator` is a Rust trait over `ZapRequest` → `ZapReply`, so no socket is needed. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. An optional adapter can bind the RFC's inproc endpoint for existing handlers.
+- `Authenticator` is a Rust trait: `authenticate(&self, ZapRequest, ZapResponder)`. The responder may answer at once or later from any thread, so authentication never has to block an I/O thread; a responder dropped unanswered counts as status 500. A closure `Fn(&ZapRequest) -> ZapReply` implements it for the synchronous case. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. An optional adapter can bind the RFC's inproc endpoint for existing handlers.
+- Not yet implemented: ZAP for NULL sockets with a domain, and CURVE.
 - **A single function maps `ZapStatus` to READY, a silent close, or ERROR, and every mechanism goes through it.** libzmq commit ba63f037 fixed a GSSAPI bug where READY was sent despite a rejection; this design rules that bug out.
 - The sans-IO handshake has a `WaitingForZap` state.
 - CURVE server authentication is `CurveAuth::{None, Zap { domain: Option<Domain>, handler }}`.

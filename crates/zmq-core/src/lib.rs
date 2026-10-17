@@ -11,6 +11,7 @@ mod engine;
 mod io_thread;
 mod reconnect;
 mod reqrep;
+mod security;
 mod socket;
 #[cfg(test)]
 mod test_support;
@@ -18,6 +19,7 @@ mod test_support;
 pub use context::{Connection, ConnectionConfig, Context, Linger, Listener, ShutdownTimedOut};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
+pub use security::{Authenticator, Security, ZapResponder};
 pub use socket::{
     FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterTable,
 };

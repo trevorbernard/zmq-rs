@@ -64,9 +64,13 @@ use std::io;
 pub use endpoint::Error;
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use socket::{Dealer, Pull, Push, Rep, Req, Request, Router, Socket, SocketType};
-pub use zmq_core::{Linger, PeerGone, Reconnect, RouteOutcome};
+pub use zmq_core::{
+    Authenticator, Linger, PeerGone, Reconnect, RouteOutcome, Security, ZapResponder,
+};
 pub use zmq_pipe::Hwm;
-pub use zmtp::{Frame, Identity, Message};
+pub use zmtp::{
+    Credential, Frame, Identity, Message, PlainCredentials, ZapCredentials, ZapReply, ZapRequest,
+};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
 #[derive(Debug, Clone)]

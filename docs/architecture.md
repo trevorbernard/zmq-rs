@@ -128,6 +128,24 @@ In the `zmq` crate, `Socket<T>` only has the methods its type allows:
 `Socket<Push>` has `send`, `Socket<Pull>` has `recv`, and calling the other
 is a compile error.
 
+## Security
+
+`ConnectionConfig::security` (and `SocketOptions::security`) selects NULL,
+a PLAIN client with its credentials, or a PLAIN server with an
+`Authenticator`. The engine runs the matching `zmtp` state machine after
+the greeting.
+
+A PLAIN server hands each client's `ZapRequest` to its authenticator with a
+`ZapResponder`, then waits without reading further input. The authenticator
+may answer at once or later from any thread; answering wakes the session.
+A responder dropped unanswered counts as ZAP status 500, so a forgotten
+answer rejects the client rather than hanging the handshake. A closure
+`Fn(&ZapRequest) -> ZapReply` is an authenticator that answers at once.
+
+A failed authentication is a protocol error: the session ends without
+reconnecting, as in libzmq. The authenticated user id and metadata reach
+the socket through `Connection::peer().authenticated`.
+
 ## Status
 
 | Slice | Contents | State |
@@ -138,4 +156,6 @@ is a compile error.
 | 4a | `Peers`, load balancing and fair queuing; PUSH/PULL as typed sockets in `zmq` | done |
 | 4b | DEALER and ROUTER: identity routing and envelopes | done |
 | 4c | REQ and REP | done |
-| 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | next |
+| 5a | PLAIN on connections, with an `Authenticator` trait | done |
+| 5b | Heartbeats (ZMTP 3.1 PING/PONG) | next |
+| 5c | `inproc` | |

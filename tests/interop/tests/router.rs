@@ -239,3 +239,41 @@ fn a_connecting_router_routes_once_the_peer_is_known() {
     assert_eq!(router.send(&from, "hello dealer"), RouteOutcome::Sent);
     assert_eq!(dealer.recv().unwrap(), [b"hello dealer".to_vec()]);
 }
+
+#[test]
+fn plain_secured_dealer_and_router() {
+    use zmq::{Credential, PlainCredentials, Security, ZapCredentials, ZapReply, ZapRequest};
+
+    let expected = PlainCredentials {
+        username: Credential::new("admin").unwrap(),
+        password: Credential::new("hunter2").unwrap(),
+    };
+    let check = expected.clone();
+    let authenticator = move |request: &ZapRequest| {
+        if request.credentials == ZapCredentials::Plain(check.clone()) {
+            ZapReply::Ok {
+                user_id: Frame::from("admin"),
+                metadata: zmtp::Metadata::new(),
+            }
+        } else {
+            ZapReply::AuthenticationFailure
+        }
+    };
+    let context = Context::new().unwrap();
+    let mut router = context.socket_with::<Router>(SocketOptions {
+        security: Security::plain_server("", authenticator),
+        ..SocketOptions::default()
+    });
+    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
+        security: Security::PlainClient(expected),
+        ..identity("secure")
+    });
+    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    dealer.send("over plain");
+    let (from, received) = within(Duration::from_secs(5), move || router.recv());
+    assert_eq!(
+        (from, received),
+        (id("secure"), Message::from("over plain"))
+    );
+}

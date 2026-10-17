@@ -16,8 +16,8 @@ use zmtp::{Established, Identity, Message, SocketType};
 
 use mio::net::TcpListener;
 
-use crate::Reconnect;
 use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
+use crate::{Reconnect, Security};
 
 /// libzmq's default ZMQ_SNDHWM and ZMQ_RCVHWM.
 const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
@@ -55,6 +55,8 @@ pub struct ConnectionConfig {
     /// How long queued messages keep being delivered after the connection's
     /// sender is dropped.
     pub linger: Linger,
+    /// The security mechanism, NULL by default.
+    pub security: Security,
 }
 
 /// How long a closed connection keeps delivering the messages queued on it,
@@ -154,6 +156,7 @@ impl ConnectionConfig {
             max_frame_size: None,
             reconnect: Reconnect::default(),
             linger: Linger::default(),
+            security: Security::default(),
         }
     }
 }

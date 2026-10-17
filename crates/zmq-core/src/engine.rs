@@ -1,4 +1,4 @@
-//! One TCP connection: greeting, NULL handshake, then framed messages.
+//! One TCP connection: greeting, security handshake, then framed messages.
 //!
 //! The engine runs on an I/O thread and moves messages between the TCP
 //! stream and the session's pipes. mio is edge-triggered, so every read and
@@ -7,18 +7,20 @@
 
 use std::io::{self, Read, Write};
 use std::mem;
-use std::sync::PoisonError;
+use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
 
 use mio::net::TcpStream;
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
-    Command, DecodeError, Decoder, DecoderConfig, Encoder, Greeting, GreetingConfig, GreetingError,
-    HandshakeError, Incoming, LegacyPeers, Mechanism, Message, NullHandshake,
+    ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting,
+    GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message, NullHandshake,
+    PeerGreeting, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, Role,
+    ServerStep, ZapReply,
 };
 
-use crate::ConnectionConfig;
 use crate::context::PeerSlot;
+use crate::{ConnectionConfig, Security, ZapResponder};
 
 /// Stop taking messages from the socket while this much output is unsent.
 const MAX_PENDING_OUTPUT: usize = 64 * 1024;
@@ -37,7 +39,7 @@ pub(crate) struct Engine {
 enum State {
     Greeting(Greeting),
     Handshake {
-        handshake: NullHandshake,
+        mechanism: Mechanism,
         decoder: Decoder,
     },
     Active {
@@ -48,6 +50,24 @@ enum State {
     },
     /// Only seen after an error, which ends the engine.
     Failed,
+}
+
+/// The security handshake in progress.
+enum Mechanism {
+    Null(NullHandshake),
+    PlainClient(PlainClient),
+    PlainServer(PlainServer),
+    /// A PLAIN server waiting for its authenticator's answer.
+    Authenticating {
+        pending: PendingAuthentication,
+        reply: mpsc::Receiver<ZapReply>,
+    },
+}
+
+/// Where a handshake step leads.
+enum Step {
+    Continue(Mechanism),
+    Established(Established),
 }
 
 /// Why an engine stopped. The connection is closed.
@@ -84,12 +104,17 @@ pub(crate) struct Pipes<'a> {
 
 impl Engine {
     pub(crate) fn new(stream: TcpStream, config: ConnectionConfig) -> Self {
+        let mechanism = match &config.security {
+            Security::Null => zmtp::Mechanism::Null {
+                legacy_peers: LegacyPeers::Allow,
+            },
+            Security::PlainClient(_) => zmtp::Mechanism::Plain(Role::Client),
+            Security::PlainServer { .. } => zmtp::Mechanism::Plain(Role::Server),
+        };
         let mut greeting = Greeting::new(GreetingConfig {
             socket_type: config.socket_type,
             identity: config.identity.clone(),
-            mechanism: Mechanism::Null {
-                legacy_peers: LegacyPeers::Allow,
-            },
+            mechanism,
         });
         let mut out = Vec::new();
         greeting.write_output(&mut out);
@@ -215,37 +240,9 @@ impl Engine {
     ) -> Result<bool, EngineError> {
         match mem::replace(&mut self.state, State::Failed) {
             State::Greeting(greeting) => self.receive_greeting(greeting),
-            State::Handshake {
-                handshake,
-                mut decoder,
-            } => match decoder.decode().map_err(EngineError::Decode)? {
-                Some(item) => {
-                    let result = handshake.receive(item, &mut self.out);
-                    let established = match result {
-                        Ok(established) => established,
-                        Err(err) => {
-                            // Try to deliver any ERROR before closing.
-                            let _ = self.flush();
-                            return Err(EngineError::Handshake(err));
-                        }
-                    };
-                    let version = established.version;
-                    // Published before any message from this peer can be
-                    // delivered, so a ROUTER always knows who sent it.
-                    *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
-                    self.state = State::Active {
-                        decoder,
-                        encoder: Encoder::new(version),
-                        pending: None,
-                    };
-                    Ok(true)
-                }
-                None => {
-                    let read = self.fill(&mut decoder);
-                    self.state = State::Handshake { handshake, decoder };
-                    read
-                }
-            },
+            State::Handshake { mechanism, decoder } => {
+                self.receive_handshake(mechanism, decoder, pipes, cx)
+            }
             State::Active {
                 mut decoder,
                 encoder,
@@ -284,13 +281,7 @@ impl Engine {
             self.state = State::Greeting(greeting);
             return Ok(true);
         };
-        let handshake = NullHandshake::start(
-            self.config.socket_type,
-            &self.config.identity,
-            &peer,
-            &mut self.out,
-        )
-        .map_err(EngineError::Handshake)?;
+        let mechanism = self.start_mechanism(&peer)?;
         let mut decoder = Decoder::new(
             peer.version(),
             DecoderConfig {
@@ -298,8 +289,151 @@ impl Engine {
             },
         );
         decoder.extend_from_slice(&buf[feed.consumed..n]);
-        self.state = State::Handshake { handshake, decoder };
+        self.state = State::Handshake { mechanism, decoder };
         Ok(true)
+    }
+
+    /// Starts the configured mechanism once the greeting is done.
+    fn start_mechanism(&mut self, peer: &PeerGreeting) -> Result<Mechanism, EngineError> {
+        let config = &self.config;
+        let mechanism = match &config.security {
+            Security::Null => {
+                NullHandshake::start(config.socket_type, &config.identity, peer, &mut self.out)
+                    .map(Mechanism::Null)
+            }
+            Security::PlainClient(credentials) => PlainClient::start(
+                config.socket_type,
+                config.identity.clone(),
+                credentials,
+                peer,
+                &mut self.out,
+            )
+            .map(Mechanism::PlainClient),
+            Security::PlainServer { domain, .. } => {
+                let peer_address = self
+                    .stream
+                    .peer_addr()
+                    .map(|addr| addr.ip().to_string())
+                    .unwrap_or_default();
+                PlainServer::start(
+                    PlainServerConfig {
+                        socket_type: config.socket_type,
+                        identity: config.identity.clone(),
+                        domain: domain.clone(),
+                        peer_address,
+                    },
+                    peer,
+                )
+                .map(Mechanism::PlainServer)
+            }
+        };
+        mechanism.map_err(EngineError::Handshake)
+    }
+
+    /// Advances the handshake: takes an authenticator's answer, or handles
+    /// the next command. Publishes the peer once established.
+    fn receive_handshake(
+        &mut self,
+        mechanism: Mechanism,
+        mut decoder: Decoder,
+        pipes: &mut Pipes<'_>,
+        cx: &mut Context<'_>,
+    ) -> Result<bool, EngineError> {
+        let step = match mechanism {
+            // Nothing is read while the authenticator decides.
+            Mechanism::Authenticating { pending, reply } => {
+                let answer = match reply.try_recv() {
+                    Ok(answer) => answer,
+                    Err(mpsc::TryRecvError::Empty) => {
+                        self.state = State::Handshake {
+                            mechanism: Mechanism::Authenticating { pending, reply },
+                            decoder,
+                        };
+                        return Ok(false);
+                    }
+                    // Dropped unanswered: an internal error, as ZAP's 500.
+                    Err(mpsc::TryRecvError::Disconnected) => ZapReply::InternalError,
+                };
+                let server = pending.reply(answer, &mut self.out);
+                Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))
+            }
+            mechanism => match decoder.decode().map_err(EngineError::Decode)? {
+                Some(item) => self.handshake_step(mechanism, item, cx)?,
+                None => {
+                    let read = self.fill(&mut decoder);
+                    self.state = State::Handshake { mechanism, decoder };
+                    return read;
+                }
+            },
+        };
+        match step {
+            Step::Continue(mechanism) => {
+                self.state = State::Handshake { mechanism, decoder };
+            }
+            Step::Established(established) => {
+                let version = established.version;
+                // Published before any message from this peer can be
+                // delivered, so a ROUTER always knows who sent it.
+                *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
+                self.state = State::Active {
+                    decoder,
+                    encoder: Encoder::new(version),
+                    pending: None,
+                };
+            }
+        }
+        Ok(true)
+    }
+
+    /// Hands one decoded item to the mechanism.
+    fn handshake_step(
+        &mut self,
+        mechanism: Mechanism,
+        item: Incoming,
+        cx: &mut Context<'_>,
+    ) -> Result<Step, EngineError> {
+        Ok(match mechanism {
+            Mechanism::Null(handshake) => {
+                let result = handshake.receive(item, &mut self.out);
+                Step::Established(self.handshake_result(result)?)
+            }
+            Mechanism::PlainClient(client) => {
+                let result = client.receive(item, &mut self.out);
+                match self.handshake_result(result)? {
+                    ClientStep::Continue(client) => Step::Continue(Mechanism::PlainClient(client)),
+                    ClientStep::Established(established) => Step::Established(established),
+                }
+            }
+            Mechanism::PlainServer(server) => {
+                let result = server.receive(item, &mut self.out);
+                match self.handshake_result(result)? {
+                    ServerStep::Authenticate(pending, request) => {
+                        let (answer, reply) = mpsc::channel();
+                        let respond = ZapResponder::new(answer, cx.waker().clone());
+                        if let Security::PlainServer { authenticator, .. } = &self.config.security {
+                            authenticator.authenticate(request, respond);
+                        }
+                        // Without an authenticator the responder is dropped
+                        // unanswered, rejecting the client.
+                        Step::Continue(Mechanism::Authenticating { pending, reply })
+                    }
+                    ServerStep::Established(established) => Step::Established(established),
+                }
+            }
+            // Handled before decoding; nothing is read while waiting.
+            Mechanism::Authenticating { pending, reply } => {
+                Step::Continue(Mechanism::Authenticating { pending, reply })
+            }
+        })
+    }
+
+    /// Passes a successful handshake step through. On failure, tries to
+    /// deliver any ERROR written to the output before reporting it.
+    fn handshake_result<T>(&mut self, result: Result<T, HandshakeError>) -> Result<T, EngineError> {
+        result.map_err(|err| {
+            let _ = self.flush();
+            EngineError::Handshake(err)
+        })
     }
 
     /// Hands decoded messages to the socket until input runs out or the

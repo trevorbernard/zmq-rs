@@ -130,6 +130,7 @@ impl<T: SocketType> Socket<T> {
             linger: options.linger,
             reconnect: options.reconnect,
             max_frame_size: options.max_frame_size,
+            security: options.security,
             ..ConnectionConfig::new(T::KIND)
         };
         Self {

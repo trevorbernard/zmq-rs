@@ -3,7 +3,7 @@
 use std::fmt;
 use std::num::NonZeroUsize;
 
-use zmq_core::{Linger, Reconnect};
+use zmq_core::{Linger, Reconnect, Security};
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Identity};
 
@@ -25,6 +25,9 @@ pub struct SocketOptions {
     pub reconnect: Reconnect,
     /// The largest frame accepted from peers (`ZMQ_MAXMSGSIZE`).
     pub max_frame_size: Option<u64>,
+    /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
+    /// default.
+    pub security: Security,
 }
 
 impl Default for SocketOptions {
@@ -38,6 +41,7 @@ impl Default for SocketOptions {
             linger: Linger::default(),
             reconnect: Reconnect::default(),
             max_frame_size: None,
+            security: Security::default(),
         }
     }
 }
