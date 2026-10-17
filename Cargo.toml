@@ -11,6 +11,7 @@ repository = "https://github.com/trevorbernard/zmq-rs"
 publish = false
 
 [workspace.dependencies]
+atomic-waker = "1"
 bytes = "1"
 zeroize = "1"
 zmtp = { path = "crates/zmtp" }
