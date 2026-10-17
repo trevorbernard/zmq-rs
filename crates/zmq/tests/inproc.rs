@@ -102,8 +102,8 @@ fn dealer_and_router_exchange_identities() {
         "anonymous peers get generated ids"
     );
 
-    router.send(&worker_id, "to worker");
-    router.send(generated, "to anonymous");
+    router.send(&worker_id, "to worker").unwrap();
+    router.send(generated, "to anonymous").unwrap();
     assert_eq!(
         within(FIVE, move || worker.recv()),
         Message::from("to worker")

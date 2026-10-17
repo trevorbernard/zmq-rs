@@ -112,6 +112,8 @@ pub struct Peers {
     list: PeerList,
     /// Accept queues of the socket's TCP and `inproc` listeners.
     listeners: Vec<Reader<Connection>>,
+    /// What each new peer is sent first, if anything.
+    greeting: Option<Message>,
 }
 
 impl Peers {
@@ -122,7 +124,19 @@ impl Peers {
             config,
             list: PeerList::default(),
             listeners: Vec::new(),
+            greeting: None,
         }
+    }
+
+    /// Sends each peer added from now on `greeting` before anything else,
+    /// such as libzmq's `ZMQ_PROBE_ROUTER` empty message or
+    /// `ZMQ_XPUB_WELCOME_MSG`.
+    pub fn set_greeting(&mut self, greeting: Option<Message>) {
+        self.greeting = greeting;
+    }
+
+    fn add(&mut self, connection: Connection) -> PeerKey {
+        add(&mut self.list, self.greeting.as_ref(), connection)
     }
 
     /// The configuration new connections use.
@@ -134,7 +148,7 @@ impl Peers {
     /// the connection is up, as in libzmq.
     pub fn connect(&mut self, addr: SocketAddr) -> PeerKey {
         let connection = self.context.connect(addr, self.config.clone());
-        self.list.push(connection)
+        self.add(connection)
     }
 
     /// Binds `addr` and accepts peers on it. Returns the bound address.
@@ -167,7 +181,7 @@ impl Peers {
     #[cfg(unix)]
     pub fn connect_ipc(&mut self, path: &std::path::Path) -> PeerKey {
         let connection = self.context.connect_ipc(path, self.config.clone());
-        self.list.push(connection)
+        self.add(connection)
     }
 
     /// Binds the `inproc` `name` and accepts peers on it.
@@ -180,7 +194,7 @@ impl Peers {
     /// Connects to the `inproc` `name`, binding or not.
     pub fn connect_inproc(&mut self, name: &str) -> PeerKey {
         let connection = self.context.connect_inproc(name, self.config.clone());
-        self.list.push(connection)
+        self.add(connection)
     }
 
     /// A new monitor of this socket's events, from now on.
@@ -201,12 +215,12 @@ impl Peers {
     /// Adds peers that listeners have accepted. Registers `cx` with every
     /// listener, so a new peer wakes a task waiting for one.
     pub fn accept(&mut self, cx: &mut TaskContext<'_>) {
-        let list = &mut self.list;
+        let (list, greeting) = (&mut self.list, self.greeting.as_ref());
         self.listeners.retain_mut(|listener| {
             loop {
                 match listener.poll_recv(cx) {
                     Poll::Ready(Some(connection)) => {
-                        list.push(connection);
+                        add(list, greeting, connection);
                     }
                     // The context stopped: this listener will accept no more.
                     Poll::Ready(None) => break false,
@@ -234,6 +248,14 @@ impl Peers {
     pub fn list_mut(&mut self) -> &mut PeerList {
         &mut self.list
     }
+}
+
+fn add(list: &mut PeerList, greeting: Option<&Message>, mut connection: Connection) -> PeerKey {
+    if let Some(greeting) = greeting {
+        // A new pipe has room, unless the peer is already gone.
+        let _ = connection.tx.try_send(greeting.clone());
+    }
+    list.push(connection)
 }
 
 /// Round robin over the peers that have room, like libzmq's `lb_t`.
@@ -319,7 +341,8 @@ impl FairQueue {
 /// peer that announced none gets a generated one: `0x00` and a 32-bit
 /// counter starting at a random value. A peer announcing an identity
 /// already in use is ignored: its messages are dropped and nothing can be
-/// sent to it.
+/// sent to it. With [`handover`](Self::set_handover) it takes the identity
+/// over instead, and the peer that had it is disconnected.
 #[derive(Debug)]
 pub struct RouterTable {
     by_identity: HashMap<Box<[u8]>, PeerKey>,
@@ -331,6 +354,7 @@ pub struct RouterTable {
     /// `PeerList::removals` when last synced.
     removals: u64,
     next_generated: u32,
+    handover: bool,
 }
 
 /// What became of a peer's announced identity.
@@ -341,14 +365,23 @@ enum Route {
     Ignored,
 }
 
-/// What happened to a message ROUTER was asked to send.
+/// What happened to a reply REP was asked to send.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RouteOutcome {
     Sent,
-    /// No peer has that routing id. The message was dropped.
+    /// The requester is gone. The reply was dropped.
     NoSuchPeer,
-    /// The peer's queue is full. The message was dropped.
+    /// The requester's queue is full. The reply was dropped.
     PeerFull,
+}
+
+/// Why a ROUTER could not send without waiting. The message is handed back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RouterSendError {
+    /// No peer has that routing id, or it has gone.
+    UnknownRoutingId(Message),
+    /// The peer's queue is full.
+    Full(Message),
 }
 
 impl Default for RouterTable {
@@ -361,14 +394,22 @@ impl Default for RouterTable {
             removals: 0,
             // libzmq starts the generated ids at a random value.
             next_generated: RandomState::new().hash_one(()) as u32,
+            handover: false,
         }
     }
 }
 
 impl RouterTable {
+    /// Whether a peer announcing an identity already in use takes it over,
+    /// disconnecting the peer that had it (libzmq's `ZMQ_ROUTER_HANDOVER`).
+    /// Otherwise the newcomer is ignored.
+    pub fn set_handover(&mut self, on: bool) {
+        self.handover = on;
+    }
+
     /// Identifies peers whose handshake has completed and forgets peers that
     /// are gone.
-    pub fn sync(&mut self, peers: &PeerList) {
+    pub fn sync(&mut self, peers: &mut PeerList) {
         if peers.removals != self.removals {
             self.removals = peers.removals;
             let live: HashSet<PeerKey> = peers.iter().map(Peer::key).collect();
@@ -387,13 +428,13 @@ impl RouterTable {
                 continue;
             };
             match peer.connection.peer() {
-                Some(established) => self.identify(key, established.peer_identity),
+                Some(established) => self.identify(peers, key, established.peer_identity),
                 None => self.waiting.push(key),
             }
         }
     }
 
-    fn identify(&mut self, key: PeerKey, announced: Frame) {
+    fn identify(&mut self, peers: &mut PeerList, key: PeerKey, announced: Frame) {
         let routing_id = if announced.is_empty() {
             let mut generated = [0u8; 5];
             generated[1..].copy_from_slice(&self.next_generated.to_be_bytes());
@@ -402,12 +443,18 @@ impl RouterTable {
         } else {
             announced
         };
-        if self.by_identity.contains_key(routing_id.as_slice()) {
-            self.by_peer.insert(key, Route::Ignored);
-        } else {
-            self.by_identity.insert(routing_id.as_slice().into(), key);
-            self.by_peer.insert(key, Route::Routable(routing_id));
+        if let Some(&holder) = self.by_identity.get(routing_id.as_slice()) {
+            if !self.handover {
+                self.by_peer.insert(key, Route::Ignored);
+                return;
+            }
+            self.by_peer.remove(&holder);
+            if let Ok(index) = peers.peers.binary_search_by_key(&holder, Peer::key) {
+                peers.remove(index);
+            }
         }
+        self.by_identity.insert(routing_id.as_slice().into(), key);
+        self.by_peer.insert(key, Route::Routable(routing_id));
     }
 
     /// The routing id of `peer`, if it has been identified and not ignored.
@@ -419,24 +466,65 @@ impl RouterTable {
     }
 
     /// Sends `message` to the peer with `routing_id` if it is known and has
-    /// room; otherwise drops it. Never blocks.
-    pub fn send(
+    /// room. Never blocks.
+    pub fn try_send(
         &mut self,
         peers: &mut PeerList,
         routing_id: &[u8],
         message: Message,
-    ) -> RouteOutcome {
+    ) -> Result<(), RouterSendError> {
         let Some(peer) = self
             .by_identity
             .get(routing_id)
             .and_then(|&key| peers.get_mut(key))
         else {
-            return RouteOutcome::NoSuchPeer;
+            return Err(RouterSendError::UnknownRoutingId(message));
         };
-        match peer.connection.tx.try_send(message) {
-            Ok(()) => RouteOutcome::Sent,
-            Err(TrySendError::Full(_)) => RouteOutcome::PeerFull,
-            Err(TrySendError::Closed(_)) => RouteOutcome::NoSuchPeer,
+        peer.connection
+            .tx
+            .try_send(message)
+            .map_err(|err| match err {
+                TrySendError::Full(message) => RouterSendError::Full(message),
+                TrySendError::Closed(message) => RouterSendError::UnknownRoutingId(message),
+            })
+    }
+
+    /// Sends the message in `slot` to the peer with `routing_id`, or
+    /// returns `Pending` with `cx` registered while that peer is full. Fails
+    /// with the message if no peer has that routing id or it has gone.
+    pub fn poll_send(
+        &mut self,
+        peers: &mut PeerList,
+        routing_id: &[u8],
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Result<(), Message>> {
+        let Some(message) = slot.take() else {
+            return Poll::Ready(Ok(()));
+        };
+        let Some(peer) = self
+            .by_identity
+            .get(routing_id)
+            .and_then(|&key| peers.get_mut(key))
+        else {
+            return Poll::Ready(Err(message));
+        };
+        let tx = &mut peer.connection.tx;
+        match tx.poll_ready(cx) {
+            Poll::Ready(Ok(())) => {}
+            Poll::Ready(Err(_)) => return Poll::Ready(Err(message)),
+            Poll::Pending => {
+                *slot = Some(message);
+                return Poll::Pending;
+            }
+        }
+        match tx.try_send(message) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(TrySendError::Closed(message)) => Poll::Ready(Err(message)),
+            Err(TrySendError::Full(message)) => {
+                *slot = Some(message);
+                Poll::Pending
+            }
         }
     }
 }
@@ -744,37 +832,31 @@ mod tests {
         sb.establish("bob");
         let mut peers = list(vec![a, b]);
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
+        assert_eq!(table.try_send(&mut peers, b"bob", msg("hi bob")), Ok(()));
         assert_eq!(
-            table.send(&mut peers, b"bob", msg("hi bob")),
-            RouteOutcome::Sent
-        );
-        assert_eq!(
-            table.send(&mut peers, b"alice", msg("hi alice")),
-            RouteOutcome::Sent
+            table.try_send(&mut peers, b"alice", msg("hi alice")),
+            Ok(())
         );
         assert_eq!(drain(&mut sa), [msg("hi alice")]);
         assert_eq!(drain(&mut sb), [msg("hi bob")]);
     }
 
     #[test]
-    fn router_drops_messages_it_cannot_route() {
+    fn router_hands_back_messages_it_cannot_route() {
         let (a, mut sa) = connection(1);
         sa.establish("alice");
         let mut peers = list(vec![a]);
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
         assert_eq!(
-            table.send(&mut peers, b"nobody", msg("x")),
-            RouteOutcome::NoSuchPeer
+            table.try_send(&mut peers, b"nobody", msg("x")),
+            Err(RouterSendError::UnknownRoutingId(msg("x")))
         );
+        assert_eq!(table.try_send(&mut peers, b"alice", msg("1")), Ok(()));
         assert_eq!(
-            table.send(&mut peers, b"alice", msg("1")),
-            RouteOutcome::Sent
-        );
-        assert_eq!(
-            table.send(&mut peers, b"alice", msg("2")),
-            RouteOutcome::PeerFull
+            table.try_send(&mut peers, b"alice", msg("2")),
+            Err(RouterSendError::Full(msg("2")))
         );
         assert_eq!(drain(&mut sa), [msg("1")]);
     }
@@ -782,13 +864,13 @@ mod tests {
     #[test]
     fn router_waits_for_the_handshake_before_routing() {
         let (a, sa) = connection(10);
-        let peers = list(vec![a]);
+        let mut peers = list(vec![a]);
         let key = peers.iter().next().unwrap().key();
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
         assert_eq!(table.routing_id(key), None, "not identified yet");
         sa.establish("late");
-        table.sync(&peers);
+        table.sync(&mut peers);
         assert_eq!(table.routing_id(key), Some(&Frame::from("late")));
     }
 
@@ -798,10 +880,10 @@ mod tests {
         let (b, sb) = connection(10);
         sa.establish("");
         sb.establish("");
-        let peers = list(vec![a, b]);
+        let mut peers = list(vec![a, b]);
         let keys: Vec<PeerKey> = peers.iter().map(Peer::key).collect();
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
         let first = table.routing_id(keys[0]).unwrap().clone();
         let second = table.routing_id(keys[1]).unwrap().clone();
         for id in [&first, &second] {
@@ -821,14 +903,29 @@ mod tests {
         let mut peers = list(vec![a, b]);
         let keys: Vec<PeerKey> = peers.iter().map(Peer::key).collect();
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
         assert_eq!(table.routing_id(keys[1]), None, "the newcomer is ignored");
-        assert_eq!(
-            table.send(&mut peers, b"same", msg("x")),
-            RouteOutcome::Sent
-        );
+        assert_eq!(table.try_send(&mut peers, b"same", msg("x")), Ok(()));
         assert_eq!(drain(&mut sa), [msg("x")]);
         assert!(drain(&mut sb).is_empty());
+    }
+
+    #[test]
+    fn with_handover_a_duplicate_identity_replaces_the_holder() {
+        let (a, sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        sa.establish("same");
+        sb.establish("same");
+        let mut peers = list(vec![a, b]);
+        let keys: Vec<PeerKey> = peers.iter().map(Peer::key).collect();
+        let mut table = RouterTable::default();
+        table.set_handover(true);
+        table.sync(&mut peers);
+        assert_eq!(table.routing_id(keys[0]), None);
+        assert_eq!(table.routing_id(keys[1]), Some(&Frame::from("same")));
+        assert!(peers.get(keys[0]).is_none(), "the holder is disconnected");
+        assert_eq!(table.try_send(&mut peers, b"same", msg("x")), Ok(()));
+        assert_eq!(drain(&mut sb), [msg("x")]);
     }
 
     #[test]
@@ -837,23 +934,25 @@ mod tests {
         sa.establish("gone");
         let mut peers = list(vec![a]);
         let mut table = RouterTable::default();
-        table.sync(&peers);
+        table.sync(&mut peers);
         drop(sa);
-        peers.retain_mut(|peer| !peer.connection.tx.is_closed());
-        table.sync(&peers);
         assert_eq!(
-            table.send(&mut peers, b"gone", msg("x")),
-            RouteOutcome::NoSuchPeer
+            table.try_send(&mut peers, b"gone", msg("w")),
+            Err(RouterSendError::UnknownRoutingId(msg("w"))),
+            "gone but not yet forgotten"
+        );
+        peers.retain_mut(|peer| !peer.connection.tx.is_closed());
+        table.sync(&mut peers);
+        assert_eq!(
+            table.try_send(&mut peers, b"gone", msg("x")),
+            Err(RouterSendError::UnknownRoutingId(msg("x")))
         );
         // A new peer may now take the identity.
         let (b, mut sb) = connection(10);
         sb.establish("gone");
         peers.push(b);
-        table.sync(&peers);
-        assert_eq!(
-            table.send(&mut peers, b"gone", msg("y")),
-            RouteOutcome::Sent
-        );
+        table.sync(&mut peers);
+        assert_eq!(table.try_send(&mut peers, b"gone", msg("y")), Ok(()));
         assert_eq!(drain(&mut sb), [msg("y")]);
     }
 }

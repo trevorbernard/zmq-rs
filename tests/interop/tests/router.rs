@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Identity, Message, RouteOutcome, Router, RoutingId, SocketOptions,
+    Context, Dealer, Frame, Identity, Message, Router, RoutingId, SocketOptions, UnknownRoutingId,
 };
 use zmq_interop::libzmq::{Kind, Socket};
 
@@ -72,7 +72,7 @@ fn our_router_talks_to_a_libzmq_dealer() {
     assert_eq!(from, id("lib"));
     assert_eq!(received, Message::from("hi"));
     let mut router = router;
-    assert_eq!(router.send(&from, "back"), RouteOutcome::Sent);
+    assert_eq!(router.send(&from, "back"), Ok(()));
     assert_eq!(dealer.recv().unwrap(), [b"back".to_vec()]);
 }
 
@@ -92,7 +92,7 @@ fn router_keeps_the_envelope_for_the_application() {
         (from, request, router)
     });
     assert_eq!(request, message(&[b"", b"question"]));
-    router.send(&from, message(&[b"", b"answer"]));
+    router.send(&from, message(&[b"", b"answer"])).unwrap();
     assert_eq!(req.recv().unwrap(), [b"answer".to_vec()]);
 }
 
@@ -119,7 +119,7 @@ fn router_generates_routing_ids_for_anonymous_peers() {
     }
     assert_ne!(received[0].0, received[1].0);
     for (from, sent) in &received {
-        router.send(from, sent.clone());
+        router.send(from, sent.clone()).unwrap();
     }
     for (i, dealer) in dealers.iter().enumerate() {
         assert_eq!(
@@ -135,7 +135,10 @@ fn router_drops_what_it_cannot_route_without_blocking() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.bind("tcp://127.0.0.1:*").unwrap();
-    assert_eq!(router.send(&id("nobody"), "lost"), RouteOutcome::NoSuchPeer);
+    assert_eq!(
+        router.send(&id("nobody"), "lost"),
+        Err(UnknownRoutingId(Message::from("lost")))
+    );
 }
 
 #[test]
@@ -164,7 +167,7 @@ fn router_ignores_a_peer_reusing_an_identity() {
         None,
         "the duplicate's messages are dropped"
     );
-    router.send(&id("same"), "to the first");
+    router.send(&id("same"), "to the first").unwrap();
     assert_eq!(first.recv().unwrap(), [b"to the first".to_vec()]);
 }
 
@@ -215,7 +218,7 @@ fn our_router_and_dealer_talk_to_each_other() {
         (from, ping, router)
     });
     assert_eq!((&from, ping), (&id("ours"), Message::from("ping")));
-    router.send(&from, "pong");
+    router.send(&from, "pong").unwrap();
     assert_eq!(
         within(Duration::from_secs(5), move || dealer.recv()),
         Message::from("pong")
@@ -236,7 +239,7 @@ fn a_connecting_router_routes_once_the_peer_is_known() {
         (from, hello, router)
     });
     assert_eq!((&from, hello), (&id("srv"), Message::from("hello router")));
-    assert_eq!(router.send(&from, "hello dealer"), RouteOutcome::Sent);
+    assert_eq!(router.send(&from, "hello dealer"), Ok(()));
     assert_eq!(dealer.recv().unwrap(), [b"hello dealer".to_vec()]);
 }
 
@@ -276,4 +279,89 @@ fn plain_secured_dealer_and_router() {
         (from, received),
         (id("secure"), Message::from("over plain"))
     );
+}
+
+#[test]
+fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
+    let context = Context::new().unwrap();
+    let mut router = context.socket::<Router>();
+    router.set_handover(true);
+    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let first = Socket::new(Kind::Dealer);
+    first.set_routing_id(b"same");
+    first.connect(addr.clone());
+    first.send(&[b"first"]).unwrap();
+    let router = within(Duration::from_secs(5), move || {
+        assert_eq!(router.recv(), (id("same"), Message::from("first")));
+        router
+    });
+
+    let second = Socket::new(Kind::Dealer);
+    second.set_routing_id(b"same");
+    second.connect(addr);
+    second.send(&[b"second"]).unwrap();
+    let mut router = within(Duration::from_secs(5), move || {
+        let mut router = router;
+        assert_eq!(router.recv(), (id("same"), Message::from("second")));
+        router
+    });
+    router.send(&id("same"), "to the second").unwrap();
+    assert_eq!(second.recv().unwrap(), [b"to the second".to_vec()]);
+}
+
+#[test]
+fn a_probing_libzmq_dealer_is_known_to_our_router_at_once() {
+    let context = Context::new().unwrap();
+    let mut router = context.socket::<Router>();
+    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let dealer = Socket::new(Kind::Dealer);
+    dealer.set_routing_id(b"prober");
+    dealer.set_probe_router();
+    dealer.connect(addr);
+    let received = within(Duration::from_secs(5), move || router.recv());
+    assert_eq!(received, (id("prober"), Message::new(Frame::new())));
+}
+
+#[test]
+fn our_probing_dealer_is_known_to_a_libzmq_router_at_once() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut dealer = context.socket_with::<Dealer>(identity("prober"));
+    dealer.set_probe(true);
+    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    assert_eq!(router.recv().unwrap(), [b"prober".to_vec(), Vec::new()]);
+}
+
+#[test]
+fn our_probing_router_greets_a_libzmq_router_it_connects_to() {
+    let listener = Socket::new(Kind::Router);
+    let addr = listener.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut router = context.socket_with::<Router>(identity("caller"));
+    router.set_probe(true);
+    router.connect(&format!("tcp://{addr}")).unwrap();
+    assert_eq!(listener.recv().unwrap(), [b"caller".to_vec(), Vec::new()]);
+}
+
+#[test]
+fn a_probing_libzmq_router_greets_our_dealer() {
+    let router = Socket::new(Kind::Router);
+    router.set_probe_router();
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut dealer = context.socket::<Dealer>();
+    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    let (done, received) = mpsc::channel();
+    thread::spawn(move || done.send(dealer.recv()));
+    // libzmq writes the probe once its socket attaches the new pipe, which
+    // it does only while the application calls into it.
+    router.set_receive_timeout(Duration::from_millis(50));
+    let received = (0..100)
+        .find_map(|_| {
+            let _ = router.recv();
+            received.try_recv().ok()
+        })
+        .expect("probed within 5 s");
+    assert_eq!(received, Message::new(Frame::new()));
 }

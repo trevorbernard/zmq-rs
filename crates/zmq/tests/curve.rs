@@ -93,7 +93,7 @@ fn the_authenticator_sees_the_clients_public_key() {
     assert_eq!(message, Message::from("let me in"));
     thread::sleep(Duration::from_millis(200));
     assert_eq!(router.try_recv(), None, "the stranger never gets through");
-    router.send(&from, "welcome");
+    router.send(&from, "welcome").unwrap();
     assert_eq!(
         within(FIVE, move || trusted.recv()),
         Message::from("welcome")

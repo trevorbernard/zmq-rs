@@ -299,8 +299,10 @@ Rules shared by every pattern:
 - **DEALER**: round-robin, fair-queue, never drops. libzmq also allows DEALER↔DEALER.
 - **ROUTER**
   - Prefixes received messages with the identity frame.
-  - By default, an unknown or full peer means a silent drop and never a block. `mandatory` returns an error instead.
+  - In libzmq, by default, an unknown or full peer means a silent drop and never a block. `mandatory` returns an error instead.
   - A duplicate identity is ignored, unless `handover` is set.
+  - Here, sending to an unknown routing id always fails, handing the message back (`ZMQ_ROUTER_MANDATORY`). `try_send` also fails when the peer is full; `send` waits for room. Ignoring `try_send`'s error is libzmq's default.
+  - `set_handover` and `set_probe` (also on DEALER) are libzmq's `ROUTER_HANDOVER` and `PROBE_ROUTER`. A probe goes to every new peer, connected or accepted; on reconnection it is not re-sent, as in libzmq, whose pipe also survives.
 - libzmq extensions: `REQ_RELAXED`, `REQ_CORRELATE` (a 4-octet request id before the delimiter), `PROBE_ROUTER`, `CONNECT_ROUTING_ID`.
 
 **Design changes from the initial sketch:**

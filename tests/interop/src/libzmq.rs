@@ -23,7 +23,9 @@ const ZMQ_CURVE_SERVER: c_int = 47;
 const ZMQ_CURVE_PUBLICKEY: c_int = 48;
 const ZMQ_CURVE_SECRETKEY: c_int = 49;
 const ZMQ_CURVE_SERVERKEY: c_int = 50;
+const ZMQ_PROBE_ROUTER: c_int = 51;
 const ZMQ_ZAP_DOMAIN: c_int = 55;
+const ZMQ_ROUTER_HANDOVER: c_int = 56;
 const ZMQ_HEARTBEAT_IVL: c_int = 75;
 const ZMQ_HEARTBEAT_TTL: c_int = 76;
 const ZMQ_HEARTBEAT_TIMEOUT: c_int = 77;
@@ -228,6 +230,17 @@ impl Socket {
     /// The identity announced to peers.
     pub fn set_routing_id(&self, id: &[u8]) {
         self.set_bytes(ZMQ_ROUTING_ID, id);
+    }
+
+    /// Sends each new peer an empty message first (`ZMQ_PROBE_ROUTER`).
+    pub fn set_probe_router(&self) {
+        self.set_int(ZMQ_PROBE_ROUTER, 1);
+    }
+
+    /// Lets a ROUTER peer reusing a routing id take it over
+    /// (`ZMQ_ROUTER_HANDOVER`).
+    pub fn set_router_handover(&self) {
+        self.set_int(ZMQ_ROUTER_HANDOVER, 1);
     }
 
     /// Makes this socket a PLAIN server.

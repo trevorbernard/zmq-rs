@@ -89,7 +89,7 @@ fn a_libzmq_curve_dealer_is_authenticated_by_our_router() {
     });
     assert_eq!(message, Message::from("knock knock"));
     assert_eq!(keys.recv().unwrap(), ZapCredentials::Curve(client_key));
-    router.send(&from, "who's there");
+    router.send(&from, "who's there").unwrap();
     assert_eq!(dealer.recv().unwrap(), [b"who's there"]);
 }
 

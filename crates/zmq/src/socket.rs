@@ -7,8 +7,8 @@ use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmq_core::{
     ConnectionConfig, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting, PeerGone,
-    PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterTable,
-    Subscriber, XPubEvent,
+    PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterSendError,
+    RouterTable, Subscriber, XPubEvent,
 };
 use zmq_pipe::Hwm;
 use zmtp::Message;
@@ -158,8 +158,10 @@ impl SocketType for Pull {
 pub enum Dealer {}
 
 /// Receives from its peers tagged with their [`RoutingId`], and sends to a
-/// peer by routing id (RFC 28). Never blocks on send: a message for an
-/// unknown or full peer is dropped, as libzmq does by default.
+/// peer by routing id (RFC 28). Sending to an unknown routing id fails
+/// rather than dropping the message, as libzmq's `ZMQ_ROUTER_MANDATORY`;
+/// [`try_send`](Socket::try_send) and ignoring the error is libzmq's
+/// default, which drops it.
 #[derive(Debug)]
 pub enum Router {}
 
@@ -636,6 +638,16 @@ impl Socket<Dealer> {
     }
 }
 
+impl Socket<Dealer> {
+    /// Whether each peer connected or accepted from now on is first sent an
+    /// empty message, as libzmq's `ZMQ_PROBE_ROUTER`, so a ROUTER peer
+    /// learns our routing id at once. Off by default.
+    pub fn set_probe(&mut self, on: bool) {
+        self.peers
+            .set_greeting(on.then(|| Message::new(zmtp::Frame::new())));
+    }
+}
+
 impl Socket<Req> {
     /// Tags requests with an id so that a reply to an abandoned request,
     /// such as a dropped [`request_async`](Self::request_async) future, is
@@ -767,17 +779,87 @@ impl fmt::Debug for Request<'_> {
     }
 }
 
+/// A ROUTER could not send: no peer has that routing id, or it went away
+/// while the message waited. The message is handed back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownRoutingId(pub Message);
+
+impl fmt::Display for UnknownRoutingId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("no peer has that routing id")
+    }
+}
+
+impl std::error::Error for UnknownRoutingId {}
+
 impl Socket<Router> {
-    /// Sends `message` to the peer with routing id `to`. Never blocks: if no
-    /// such peer is connected, or its queue is full, the message is dropped
-    /// and the outcome says so.
-    pub fn send(&mut self, to: &RoutingId, message: impl Into<Message>) -> RouteOutcome {
+    /// Sends `message` to the peer with routing id `to` if it is known and
+    /// has room, otherwise hands it back. Never blocks.
+    pub fn try_send(
+        &mut self,
+        to: &RoutingId,
+        message: impl Into<Message>,
+    ) -> Result<(), RouterSendError> {
         self.peers
             .accept(&mut TaskContext::from_waker(Waker::noop()));
         let RouterRouting { table, .. } = &mut self.routing;
         let peers = self.peers.list_mut();
         table.sync(peers);
-        table.send(peers, to.as_bytes(), message.into())
+        table.try_send(peers, to.as_bytes(), message.into())
+    }
+
+    /// Sends `message` to the peer with routing id `to`, blocking while its
+    /// queue is full. Fails if no peer has that routing id, or it goes away
+    /// meanwhile.
+    pub fn send(
+        &mut self,
+        to: &RoutingId,
+        message: impl Into<Message>,
+    ) -> Result<(), UnknownRoutingId> {
+        let mut slot = Some(message.into());
+        wait::block_on(|cx| self.poll_send(to, &mut slot, cx)).map_err(UnknownRoutingId)
+    }
+
+    /// Sends `message` to the peer with routing id `to`, waiting while its
+    /// queue is full. Fails if no peer has that routing id, or it goes away
+    /// meanwhile.
+    pub async fn send_async(
+        &mut self,
+        to: &RoutingId,
+        message: impl Into<Message>,
+    ) -> Result<(), UnknownRoutingId> {
+        let mut slot = Some(message.into());
+        poll_fn(|cx| self.poll_send(to, &mut slot, cx))
+            .await
+            .map_err(UnknownRoutingId)
+    }
+
+    fn poll_send(
+        &mut self,
+        to: &RoutingId,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Result<(), Message>> {
+        self.peers.accept(cx);
+        let RouterRouting { table, .. } = &mut self.routing;
+        let peers = self.peers.list_mut();
+        table.sync(peers);
+        table.poll_send(peers, to.as_bytes(), slot, cx)
+    }
+
+    /// Whether a peer announcing a routing id already in use takes it over,
+    /// disconnecting the peer that had it, as libzmq's
+    /// `ZMQ_ROUTER_HANDOVER`. Off by default: the newcomer is ignored.
+    pub fn set_handover(&mut self, on: bool) {
+        self.routing.table.set_handover(on);
+    }
+
+    /// Whether each peer connected or accepted from now on is first sent an
+    /// empty message, as libzmq's `ZMQ_PROBE_ROUTER`, so a ROUTER peer
+    /// learns our routing id at once. Off by default.
+    pub fn set_probe(&mut self, on: bool) {
+        self.peers
+            .set_greeting(on.then(|| Message::new(zmtp::Frame::new())));
     }
 
     /// The next message and the routing id of the peer that sent it, if

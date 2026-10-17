@@ -108,8 +108,10 @@ strategies work over that set, as in libzmq:
 - `RouterTable` (`router_t`) maps routing ids to peers. A peer's routing id
   is the identity from its handshake; anonymous peers get `0x00` and a
   32-bit counter that starts at a random value; a peer reusing an identity
-  already in use is ignored. ROUTER never blocks on send: a message for an
-  unknown or full peer is dropped and the `RouteOutcome` says so.
+  already in use is ignored, or with handover takes it over and the holder
+  is disconnected. Sending hands the message back for an unknown routing id
+  (`ZMQ_ROUTER_MANDATORY` is the only behaviour): `try_send` also hands it
+  back when the peer is full, and `send` waits for room.
 
 - `Requester` (`req_t`) sends each request, behind an empty delimiter, to
   the next peer with room and accepts a reply only from that peer,
@@ -132,6 +134,13 @@ strategies work over that set, as in libzmq:
 - `Pair` (`pair_t`) keeps the oldest peer and closes every other. When the
   peer's session ends, what it delivered moves to a leftover queue that is
   received first, and the next peer to arrive takes its place.
+
+`Peers` can greet each new peer with a message before anything else, such
+as the empty one of `ZMQ_PROBE_ROUTER`. As in libzmq, an accepted peer is
+greeted when the socket next takes peers in.
+
+Per-socket-type options are methods on that type, so an option a type
+lacks is a compile error: `set_probe` exists only on ROUTER and DEALER.
 
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a

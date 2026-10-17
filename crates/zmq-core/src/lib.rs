@@ -37,7 +37,8 @@ pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};
 pub use socket::{
-    FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterTable,
+    FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterSendError,
+    RouterTable,
 };
 #[cfg(feature = "draft")]
 pub use socket::{ServerSendError, ServerTable};

@@ -369,7 +369,7 @@ impl ProxyEnd for Socket<Router> {
         // ROUTER never blocks: an unroutable or unaddressed message is
         // dropped, as libzmq's ROUTER drops it.
         if let Some((id, body)) = slot.take().and_then(routed) {
-            self.send(&id, body);
+            let _ = self.try_send(&id, body);
         }
         Poll::Ready(())
     }
