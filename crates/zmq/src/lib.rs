@@ -60,6 +60,26 @@
 //! subscriber.send("upstream");
 //! ```
 //!
+//! A proxy's capture socket must be able to send, as libzmq requires, so a
+//! SUB cannot capture:
+//!
+//! ```compile_fail,E0277
+//! let context = zmq::Context::new().unwrap();
+//! let mut frontend = context.socket::<zmq::Router>();
+//! let mut backend = context.socket::<zmq::Dealer>();
+//! let mut capture = context.socket::<zmq::Sub>();
+//! zmq::Proxy::new(&mut frontend, &mut backend).capture(&mut capture);
+//! ```
+//!
+//! and REQ's lockstep cannot be proxied:
+//!
+//! ```compile_fail,E0277
+//! let context = zmq::Context::new().unwrap();
+//! let mut frontend = context.socket::<zmq::Req>();
+//! let mut backend = context.socket::<zmq::Dealer>();
+//! zmq::Proxy::new(&mut frontend, &mut backend);
+//! ```
+//!
 //! A ROUTER cannot send without saying to whom:
 //!
 //! ```compile_fail,E0061
@@ -70,6 +90,7 @@
 
 mod endpoint;
 mod options;
+mod proxy;
 mod socket;
 mod wait;
 
@@ -77,6 +98,7 @@ use std::io;
 
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
+pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
 #[doc(hidden)]
 pub use socket::Routing;
 pub use socket::{

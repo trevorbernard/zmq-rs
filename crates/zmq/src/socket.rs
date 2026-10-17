@@ -16,9 +16,11 @@ use zmtp::Message;
 use crate::endpoint::Target;
 use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
 
-mod sealed {
+pub(crate) mod sealed {
     pub trait Sealed {}
 }
+
+impl<T: SocketType> sealed::Sealed for Socket<T> {}
 
 /// A ZeroMQ socket type. Implemented by [`Push`], [`Pull`] and the other
 /// markers; cannot be implemented outside this crate.
@@ -314,7 +316,11 @@ impl Socket<Push> {
         poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
     }
 
-    fn poll_send(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+    pub(crate) fn poll_send(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
         // PUSH never receives: discard anything peers send, and drop peers
         // that are gone.
         self.peers.prune_send_only();
@@ -358,7 +364,11 @@ impl Socket<Pair> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_send(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+    pub(crate) fn poll_send(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
         self.peers.accept(cx);
         let Some(message) = slot.take() else {
             return Poll::Ready(());
@@ -372,7 +382,7 @@ impl Socket<Pair> {
         }
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -425,7 +435,7 @@ impl Socket<Sub> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -455,7 +465,7 @@ impl Socket<XPub> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
         self.peers.accept(cx);
         self.routing.0.poll_event(self.peers.list_mut(), cx)
     }
@@ -516,7 +526,7 @@ impl Socket<XSub> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -538,7 +548,7 @@ impl Socket<Pull> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         poll_fair_queued(&mut self.peers, &mut self.routing, cx)
     }
 }
@@ -578,11 +588,15 @@ impl Socket<Dealer> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_send(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+    pub(crate) fn poll_send(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
         poll_load_balanced(&mut self.peers, &mut self.routing.send, slot, cx)
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         poll_fair_queued(&mut self.peers, &mut self.routing.recv, cx)
     }
 }
@@ -749,7 +763,7 @@ impl Socket<Router> {
         poll_fn(|cx| self.poll_recv(cx)).await
     }
 
-    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
         self.peers.accept(cx);
         let RouterRouting { recv, table } = &mut self.routing;
         let peers = self.peers.list_mut();

@@ -186,6 +186,33 @@ timeout and TTL, and a PING carrying a TTL sets one. An expired deadline is
 a connection error, so a connecting session reconnects. PINGs are sent only
 to ZMTP 3.x peers.
 
+## Proxy
+
+`zmq::Proxy` is libzmq's `zmq_proxy_steerable`. It borrows a frontend and
+a backend socket and forwards between them in both directions, in libzmq's
+raw message form: a ROUTER's messages carry the routing id as their first
+frame, and an XPUB's events become `0x01`/`0x00`-prefixed messages, which
+an XSUB sends upstream as subscriptions. That raw form makes the classic
+shapes work: ROUTER/DEALER is a shared queue, XSUB/XPUB a forwarder, and
+PULL/PUSH a streamer.
+
+- Which sockets can be ends (`ProxyEnd`: not REQ or REP, whose lockstep
+  does not fit) and which can capture (`Capture`: PUB, DEALER, PUSH and
+  PAIR, as libzmq requires) are traits, so a wrong choice does not compile.
+- Each direction holds at most one message in flight. While the receiving
+  side has no room, that direction stops reading and the other carries on;
+  nothing is lost. libzmq blocks in `send`, holding up both directions.
+- The proxy moves up to 256 messages per direction, then yields, so
+  neither direction starves the other or the control.
+- A capture copy the capture socket has no room for is dropped; a slow tap
+  never holds up the proxy.
+- `ProxyControl` replaces libzmq's control socket: a cloneable handle that
+  pauses, resumes and terminates the proxy, waking it at once, and reads
+  `ProxyStatistics` (libzmq's eight STATISTICS counters, counting each
+  message part).
+- `run` blocks the thread; `run_async` is the same as a future, for any
+  executor.
+
 ## `inproc`
 
 An `inproc` connection is a pair of pipes and nothing else: no I/O thread,
@@ -310,3 +337,4 @@ Also check while on Linux:
 | 7 | `ipc://` | done |
 | 8a | CURVE in `zmtp`: Z85, keys, handshake, MESSAGE boxing | done |
 | 8b | CURVE on connections and sockets | done |
+| 9 | Built-in proxy, with capture and steering | done |

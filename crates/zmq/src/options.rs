@@ -83,6 +83,10 @@ impl RoutingId {
     pub(crate) fn trusted(id: Frame) -> Self {
         Self(id)
     }
+
+    pub(crate) fn into_frame(self) -> Frame {
+        self.0
+    }
 }
 
 impl fmt::Debug for RoutingId {
