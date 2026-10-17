@@ -379,7 +379,7 @@ GitHub CI, which installs Ubuntu's.
 **Done (CLIENT and SERVER):**
 - `Socket<Client>` and `Socket<Server>` send and receive `Frame`s, not `Message`s, so sending a multipart message does not compile. Received multipart messages are dropped.
 - SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect(id)` closes a client's connection.
-- Not yet: libzmq SERVER replying in the interop tests, which needs its draft routing-id API through the FFI.
+- Verified against libzmq's CLIENT and SERVER both ways, a libzmq SERVER replying included, through its draft routing-id API looked up at run time.
 
 **Done (RADIO and DISH):**
 - `Socket<Radio>::send(&group, body)` reaches every DISH peer that joined the group, matched exactly, and never blocks: a full dish misses the message, as in libzmq. It returns how many dishes it was queued for.
@@ -391,6 +391,12 @@ GitHub CI, which installs Ubuntu's.
 **Done (SCATTER and GATHER):**
 - `Socket<Scatter>` load-balances single frames to its GATHER peers and waits while none has room, as PUSH does; `Socket<Gather>` fair-queues them, as PULL does, and drops multipart messages. Sending a multipart message does not compile.
 - Verified against libzmq's SCATTER and GATHER in both directions.
+
+**Done (PEER and CHANNEL):**
+- `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`PeerSendError`), `recv` and `disconnect` mirror SERVER's.
+- `Socket<Channel>` is PAIR in single frames: the first peer is the one, and multipart messages received are dropped.
+- Not supported: libzmq's `ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG` and `ZMQ_HICCUP_MSG` options for PEER.
+- Verified against libzmq's PEER both ways and its CHANNEL.
 - **CHANNEL** has a single peer.
 - **RADIO**
   - Silently drops when full, and never blocks unless `no_drop` is set.

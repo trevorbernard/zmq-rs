@@ -105,3 +105,21 @@ fn our_server_drops_multipart_messages() {
     let (_, frame) = within(FIVE, move || server.recv());
     assert_eq!(frame, Frame::from("single"));
 }
+
+#[test]
+fn a_libzmq_server_replies_to_our_client() {
+    if !libzmq_has_drafts() {
+        return;
+    }
+    let server = Socket::new(Kind::Server);
+    server.set_receive_timeout(FIVE);
+    let addr = server.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut client = context.socket::<Client>();
+    client.connect(&format!("tcp://{addr}")).unwrap();
+    client.send("question");
+    let (id, body) = server.recv_routed().unwrap();
+    assert_eq!(body, b"question");
+    server.send_routed(id, b"answer").unwrap();
+    assert_eq!(within(FIVE, move || client.recv()), Frame::from("answer"));
+}

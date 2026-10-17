@@ -370,3 +370,4 @@ Also check while on Linux:
 | 11a | CLIENT and SERVER (`draft` feature) | done |
 | 11b | RADIO and DISH (`draft` feature) | done |
 | 11c | SCATTER and GATHER (`draft` feature) | done |
+| 11d | PEER and CHANNEL (`draft` feature) | done |

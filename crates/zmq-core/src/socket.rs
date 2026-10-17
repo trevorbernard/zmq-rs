@@ -563,6 +563,12 @@ impl ServerTable {
         }
     }
 
+    /// The id of the peer with `key`, once it is in the list.
+    pub fn id_of(&mut self, peers: &PeerList, key: PeerKey) -> Option<std::num::NonZeroU32> {
+        self.sync(peers);
+        self.by_peer.get(&key).copied()
+    }
+
     /// Closes the connection to the client with `id`. Returns whether there
     /// was one.
     pub fn disconnect(&mut self, peers: &mut PeerList, id: std::num::NonZeroU32) -> bool {

@@ -344,20 +344,19 @@ impl Socket<Server> {
     /// The next message and the id of the client that sent it, if one is
     /// waiting.
     pub fn try_recv(&mut self) -> Option<(ClientId, Frame)> {
-        match self.poll_recv_frame(&mut TaskContext::from_waker(Waker::noop())) {
-            Poll::Ready(received) => Some(received),
-            Poll::Pending => None,
-        }
+        try_recv_routed(self).map(|(id, frame)| (ClientId(id), frame))
     }
 
     /// The next message and its sender's id, blocking until one arrives.
     pub fn recv(&mut self) -> (ClientId, Frame) {
-        wait::block_on(|cx| self.poll_recv_frame(cx))
+        let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
+        (ClientId(id), frame)
     }
 
     /// The next message and its sender's id, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (ClientId, Frame) {
-        poll_fn(|cx| self.poll_recv_frame(cx)).await
+        let (id, frame) = poll_fn(|cx| poll_recv_routed(self, cx)).await;
+        (ClientId(id), frame)
     }
 
     /// Sends `frame` to the client `to` without waiting.
@@ -366,16 +365,14 @@ impl Socket<Server> {
         to: ClientId,
         frame: impl Into<Frame>,
     ) -> Result<(), ServerSendError> {
-        let mut cx = TaskContext::from_waker(Waker::noop());
-        let (peers, table) = self.parts_accepting(&mut cx);
-        table.try_send(peers, to.0, frame.into(), &mut cx)
+        try_send_routed(self, to.0, frame.into())
     }
 
     /// Sends `frame` to the client `to`, blocking while its queue is full.
     /// Fails if no client has that id, or it goes away meanwhile.
     pub fn send(&mut self, to: ClientId, frame: impl Into<Frame>) -> Result<(), NoSuchClient> {
         let mut slot = Some(frame.into());
-        wait::block_on(|cx| self.poll_send_to(to, &mut slot, cx))
+        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchClient)
     }
 
     /// Sends `frame` to the client `to`, waiting while its queue is full.
@@ -386,40 +383,266 @@ impl Socket<Server> {
         frame: impl Into<Frame>,
     ) -> Result<(), NoSuchClient> {
         let mut slot = Some(frame.into());
-        poll_fn(|cx| self.poll_send_to(to, &mut slot, cx)).await
+        poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
+            .await
+            .map_err(NoSuchClient)
     }
 
     /// Closes the connection to the client `to`. Returns whether there was
     /// one.
     pub fn disconnect(&mut self, to: ClientId) -> bool {
-        let mut cx = TaskContext::from_waker(Waker::noop());
-        let (peers, table) = self.parts_accepting(&mut cx);
-        table.disconnect(peers, to.0)
+        disconnect_routed(self, to.0)
+    }
+}
+
+/// Talks to any number of other PEER sockets, each addressed by the
+/// [`PeerId`] this socket gave it (RFC 51), whether it connected or was
+/// accepted. [`connect_peer`](Socket::connect_peer) returns the id at
+/// once, so a message can be sent before the connection is up.
+#[derive(Debug)]
+pub enum Peer {}
+
+/// The id a PEER gives each of its peers: non-zero, and unique among its
+/// current peers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct PeerId(NonZeroU32);
+
+/// A PEER could not send: no peer has that id, or it has gone. The frame
+/// is handed back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NoSuchPeer(pub Frame);
+
+/// Why a PEER could not send without waiting.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PeerSendError {
+    /// No peer has that id, or it has gone. The frame is handed back.
+    NoSuchPeer(Frame),
+    /// The peer's queue is full. The frame is handed back.
+    Full(Frame),
+}
+
+impl sealed::Sealed for Peer {}
+impl SocketType for Peer {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Peer;
+    type Routing = ServerTable;
+}
+
+impl PeerId {
+    /// The id `id`, unless it is zero, which is never a peer's.
+    pub fn new(id: u32) -> Option<Self> {
+        NonZeroU32::new(id).map(Self)
     }
 
-    fn poll_send_to(
+    /// The id as a number.
+    pub fn get(self) -> u32 {
+        self.0.get()
+    }
+}
+
+impl Socket<Peer> {
+    /// Connects to the PEER at `endpoint` and returns its id. Messages to
+    /// it queue until the connection is up.
+    pub fn connect_peer(&mut self, endpoint: &str) -> Result<PeerId, crate::Error> {
+        let key = self.connect_key(endpoint)?;
+        let mut cx = TaskContext::from_waker(Waker::noop());
+        let (peers, table) = self.parts_accepting(&mut cx);
+        let id = table
+            .id_of(peers, key)
+            .expect("a peer just connected has an id");
+        Ok(PeerId(id))
+    }
+
+    /// The next message and the id of the peer that sent it, if one is
+    /// waiting.
+    pub fn try_recv(&mut self) -> Option<(PeerId, Frame)> {
+        try_recv_routed(self).map(|(id, frame)| (PeerId(id), frame))
+    }
+
+    /// The next message and its sender's id, blocking until one arrives.
+    pub fn recv(&mut self) -> (PeerId, Frame) {
+        let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
+        (PeerId(id), frame)
+    }
+
+    /// The next message and its sender's id, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> (PeerId, Frame) {
+        let (id, frame) = poll_fn(|cx| poll_recv_routed(self, cx)).await;
+        (PeerId(id), frame)
+    }
+
+    /// Sends `frame` to the peer `to` without waiting.
+    pub fn try_send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), PeerSendError> {
+        try_send_routed(self, to.0, frame.into()).map_err(|err| match err {
+            ServerSendError::NoSuchClient(frame) => PeerSendError::NoSuchPeer(frame),
+            ServerSendError::Full(frame) => PeerSendError::Full(frame),
+        })
+    }
+
+    /// Sends `frame` to the peer `to`, blocking while its queue is full.
+    /// Fails if no peer has that id, or it goes away meanwhile.
+    pub fn send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), NoSuchPeer> {
+        let mut slot = Some(frame.into());
+        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchPeer)
+    }
+
+    /// Sends `frame` to the peer `to`, waiting while its queue is full.
+    /// Fails if no peer has that id, or it goes away meanwhile.
+    pub async fn send_async(
         &mut self,
-        to: ClientId,
-        slot: &mut Option<Frame>,
+        to: PeerId,
+        frame: impl Into<Frame>,
+    ) -> Result<(), NoSuchPeer> {
+        let mut slot = Some(frame.into());
+        poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
+            .await
+            .map_err(NoSuchPeer)
+    }
+
+    /// Closes the connection to the peer `to`. Returns whether there was
+    /// one.
+    pub fn disconnect(&mut self, to: PeerId) -> bool {
+        disconnect_routed(self, to.0)
+    }
+}
+
+// SERVER and PEER route the same way, by the ids their table gives peers.
+
+fn try_recv_routed<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+) -> Option<(NonZeroU32, Frame)> {
+    match poll_recv_routed(socket, &mut TaskContext::from_waker(Waker::noop())) {
+        Poll::Ready(received) => Some(received),
+        Poll::Pending => None,
+    }
+}
+
+fn poll_recv_routed<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+    cx: &mut TaskContext<'_>,
+) -> Poll<(NonZeroU32, Frame)> {
+    let (peers, table) = socket.parts_accepting(cx);
+    table.poll_recv(peers, cx)
+}
+
+fn try_send_routed<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+    to: NonZeroU32,
+    frame: Frame,
+) -> Result<(), ServerSendError> {
+    let mut cx = TaskContext::from_waker(Waker::noop());
+    let (peers, table) = socket.parts_accepting(&mut cx);
+    table.try_send(peers, to, frame, &mut cx)
+}
+
+/// Sends the frame in `slot` to `to`, waiting while it is full. Fails with
+/// the frame if there is no such peer.
+fn poll_send_routed<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+    to: NonZeroU32,
+    slot: &mut Option<Frame>,
+    cx: &mut TaskContext<'_>,
+) -> Poll<Result<(), Frame>> {
+    let frame = slot.take().expect("polled again after completing");
+    let (peers, table) = socket.parts_accepting(cx);
+    match table.try_send(peers, to, frame, cx) {
+        Ok(()) => Poll::Ready(Ok(())),
+        Err(ServerSendError::NoSuchClient(frame)) => Poll::Ready(Err(frame)),
+        Err(ServerSendError::Full(frame)) => {
+            *slot = Some(frame);
+            Poll::Pending
+        }
+    }
+}
+
+fn disconnect_routed<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+    to: NonZeroU32,
+) -> bool {
+    let mut cx = TaskContext::from_waker(Waker::noop());
+    let (peers, table) = socket.parts_accepting(&mut cx);
+    table.disconnect(peers, to)
+}
+
+/// Talks to exactly one other CHANNEL socket, both ways, in single-part
+/// messages (RFC 52), as PAIR does: the first peer is the one, and others
+/// are turned away until it leaves. Waits while there is no peer or no
+/// room; multipart messages received are dropped.
+#[derive(Debug)]
+pub enum Channel {}
+
+impl sealed::Sealed for Channel {}
+impl SocketType for Channel {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Channel;
+    type Routing = zmq_core::Pair;
+}
+
+impl Socket<Channel> {
+    /// Sends `frame` if there is a peer with room, otherwise hands it back.
+    pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
+        let mut slot = Some(Message::new(frame.into()));
+        let _ = self.poll_channel_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+    }
+
+    /// Sends `frame`, blocking until there is a peer with room.
+    pub fn send(&mut self, frame: impl Into<Frame>) {
+        let mut slot = Some(Message::new(frame.into()));
+        wait::block_on(|cx| self.poll_channel_send(&mut slot, cx));
+    }
+
+    /// Sends `frame`, waiting until there is a peer with room.
+    pub async fn send_async(&mut self, frame: impl Into<Frame>) {
+        let mut slot = Some(Message::new(frame.into()));
+        poll_fn(|cx| self.poll_channel_send(&mut slot, cx)).await;
+    }
+
+    /// The next message, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Frame> {
+        match self.poll_channel_recv(&mut TaskContext::from_waker(Waker::noop())) {
+            Poll::Ready(frame) => Some(frame),
+            Poll::Pending => None,
+        }
+    }
+
+    /// The next message, blocking until one arrives.
+    pub fn recv(&mut self) -> Frame {
+        wait::block_on(|cx| self.poll_channel_recv(cx))
+    }
+
+    /// The next message, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Frame {
+        poll_fn(|cx| self.poll_channel_recv(cx)).await
+    }
+
+    fn poll_channel_send(
+        &mut self,
+        slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
-    ) -> Poll<Result<(), NoSuchClient>> {
-        let frame = slot.take().expect("polled again after completing");
-        let (peers, table) = self.parts_accepting(cx);
-        match table.try_send(peers, to.0, frame, cx) {
-            Ok(()) => Poll::Ready(Ok(())),
-            Err(ServerSendError::NoSuchClient(frame)) => Poll::Ready(Err(NoSuchClient(frame))),
-            Err(ServerSendError::Full(frame)) => {
-                *slot = Some(frame);
+    ) -> Poll<()> {
+        let Some(message) = slot.take() else {
+            return Poll::Ready(());
+        };
+        let (peers, pair) = self.parts_accepting(cx);
+        match pair.poll_send(peers, message, cx) {
+            Ok(()) => Poll::Ready(()),
+            Err(message) => {
+                *slot = Some(message);
                 Poll::Pending
             }
         }
     }
 
-    fn poll_recv_frame(&mut self, cx: &mut TaskContext<'_>) -> Poll<(ClientId, Frame)> {
-        let (peers, table) = self.parts_accepting(cx);
-        table
-            .poll_recv(peers, cx)
-            .map(|(id, frame)| (ClientId(id), frame))
+    fn poll_channel_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        let (peers, pair) = self.parts_accepting(cx);
+        loop {
+            let Poll::Ready(message) = pair.poll_recv(peers, cx) else {
+                return Poll::Pending;
+            };
+            let (frame, rest) = message.split_first();
+            if rest.is_empty() {
+                return Poll::Ready(frame.clone());
+            }
+        }
     }
 }
 
@@ -432,6 +655,20 @@ impl fmt::Display for ClientId {
         self.0.fmt(f)
     }
 }
+
+impl fmt::Display for PeerId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
+impl fmt::Display for NoSuchPeer {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("no peer has that id")
+    }
+}
+
+impl std::error::Error for NoSuchPeer {}
 
 impl fmt::Display for NoSuchClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

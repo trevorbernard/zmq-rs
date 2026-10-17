@@ -312,7 +312,12 @@ impl<T: SocketType> Socket<T> {
     /// connection waits for its name to be bound in this socket's context,
     /// and ends for good when the bound socket is dropped.
     pub fn connect(&mut self, endpoint: &str) -> Result<(), Error> {
-        match endpoint::connect_target(endpoint)? {
+        self.connect_key(endpoint).map(drop)
+    }
+
+    /// Connects to `endpoint` and returns the new peer.
+    pub(crate) fn connect_key(&mut self, endpoint: &str) -> Result<zmq_core::PeerKey, Error> {
+        let key = match endpoint::connect_target(endpoint)? {
             Target::Tcp(addr) => self.peers.connect(addr),
             #[cfg(unix)]
             Target::Ipc(path) => self.peers.connect_ipc(&path),
@@ -322,7 +327,7 @@ impl<T: SocketType> Socket<T> {
             Target::Inproc(name) => self.peers.connect_inproc(&name),
         };
         self.routing.connected(self.peers.list_mut());
-        Ok(())
+        Ok(key)
     }
 }
 

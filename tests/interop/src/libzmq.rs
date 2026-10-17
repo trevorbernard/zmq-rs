@@ -131,6 +131,8 @@ pub enum Kind {
     Dish = 15,
     Gather = 16,
     Scatter = 17,
+    Peer = 19,
+    Channel = 20,
 }
 
 /// A libzmq context, shared by sockets that talk over `inproc`, such as a
@@ -314,6 +316,69 @@ impl Socket {
                 zmq_msg_close(&mut msg);
             }
             sent.map(drop)
+        }
+    }
+
+    /// Connects a PEER socket to `endpoint`, returning the routing id of
+    /// the new peer. Needs a libzmq with drafts.
+    pub fn connect_peer(&self, endpoint: impl Into<zmq::Endpoint>) -> u32 {
+        let endpoint = CString::new(endpoint.into().to_string()).unwrap();
+        // SAFETY: zmq_connect_peer has this signature in zmq.h's draft API.
+        let connect_peer: unsafe extern "C" fn(*mut c_void, *const c_char) -> u32 =
+            unsafe { std::mem::transmute(draft_function("zmq_connect_peer")) };
+        // SAFETY: the socket is open and `endpoint` is a valid C string.
+        let id = unsafe { connect_peer(self.raw.as_ptr(), endpoint.as_ptr()) };
+        assert_ne!(id, 0, "zmq_connect_peer: {}", last_error());
+        id
+    }
+
+    /// Sends `body` to the peer with routing id `id`, from a SERVER or
+    /// PEER socket. Needs a libzmq with drafts.
+    pub fn send_routed(&self, id: u32, body: &[u8]) -> io::Result<()> {
+        // SAFETY: zmq_msg_set_routing_id has this signature in zmq.h's draft
+        // API.
+        let set_routing_id: unsafe extern "C" fn(*mut RawMsg, u32) -> c_int =
+            unsafe { std::mem::transmute(draft_function("zmq_msg_set_routing_id")) };
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is sized for `body`, filled, addressed and sent,
+        // which takes it; it is closed if anything fails first.
+        unsafe {
+            check(zmq_msg_init_size(&mut msg, body.len()))?;
+            let data = zmq_msg_data(&mut msg).cast::<u8>();
+            std::ptr::copy_nonoverlapping(body.as_ptr(), data, body.len());
+            let sent = check(set_routing_id(&mut msg, id))
+                .and_then(|_| check(zmq_msg_send(&mut msg, self.raw.as_ptr(), 0)));
+            if sent.is_err() {
+                zmq_msg_close(&mut msg);
+            }
+            sent.map(drop)
+        }
+    }
+
+    /// Receives a message and the routing id of its sender, on a SERVER or
+    /// PEER socket. Needs a libzmq with drafts.
+    pub fn recv_routed(&self) -> io::Result<(u32, Vec<u8>)> {
+        // SAFETY: zmq_msg_routing_id has this signature in zmq.h's draft API.
+        let routing_id: unsafe extern "C" fn(*mut RawMsg) -> u32 =
+            unsafe { std::mem::transmute(draft_function("zmq_msg_routing_id")) };
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is initialized before use and closed afterwards;
+        // its id and data are copied out while it is still open.
+        unsafe {
+            check(zmq_msg_init(&mut msg))?;
+            if let Err(err) = check(zmq_msg_recv(&mut msg, self.raw.as_ptr(), 0)) {
+                zmq_msg_close(&mut msg);
+                return Err(err);
+            }
+            let id = routing_id(&mut msg);
+            let size = zmq_msg_size(&msg);
+            let body = if size == 0 {
+                Vec::new()
+            } else {
+                std::slice::from_raw_parts(zmq_msg_data(&mut msg).cast::<u8>(), size).to_vec()
+            };
+            zmq_msg_close(&mut msg);
+            Ok((id, body))
         }
     }
 
