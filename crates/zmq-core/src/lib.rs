@@ -21,7 +21,7 @@ pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
     ShutdownTimedOut,
 };
-pub use pubsub::{Publisher, Subscriber, Topics};
+pub use pubsub::{Publisher, Subscriber, Topics, XPubEvent};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};

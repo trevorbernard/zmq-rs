@@ -7,7 +7,7 @@ use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmq_core::{
     ConnectionConfig, FairQueue, LoadBalancer, Outstanding, PeerGone, PeerList, Peers, Publisher,
-    Received, Replier, Requester, RouteOutcome, RouterTable, Subscriber,
+    Received, Replier, Requester, RouteOutcome, RouterTable, Subscriber, XPubEvent,
 };
 use zmq_pipe::Hwm;
 use zmtp::Message;
@@ -44,6 +44,7 @@ impl Routing for Replier {}
 impl Routing for DealerRouting {}
 impl Routing for RouterRouting {}
 impl Routing for Publisher {}
+impl Routing for XPubRouting {}
 
 impl Routing for Subscriber {
     /// Subscriptions go to a peer as soon as it is connected, as in libzmq,
@@ -65,6 +66,41 @@ pub enum Pub {}
 /// dropped: its queues towards peers are unbounded, whatever its send HWM.
 #[derive(Debug)]
 pub enum Sub {}
+
+/// A PUB that also receives: each topic's first subscription and last
+/// cancellation across its peers, and whatever XSUB peers send upstream,
+/// as [`XPubEvent`]s (RFC 29). Used to build proxies and to see what
+/// subscribers want.
+#[derive(Debug)]
+pub enum XPub {}
+
+/// A SUB that also sends: [`send`](Socket::send) goes to every publisher
+/// (RFC 29). Used with [`XPub`] to build proxies.
+#[derive(Debug)]
+pub enum XSub {}
+
+/// XPUB's routing: a publisher that keeps its peers' events.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct XPubRouting(Publisher);
+
+impl Default for XPubRouting {
+    fn default() -> Self {
+        Self(Publisher::with_events())
+    }
+}
+
+impl sealed::Sealed for XPub {}
+impl SocketType for XPub {
+    const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
+    type Routing = XPubRouting;
+}
+
+impl sealed::Sealed for XSub {}
+impl SocketType for XSub {
+    const KIND: zmtp::SocketType = zmtp::SocketType::XSub;
+    type Routing = Subscriber;
+}
 
 impl sealed::Sealed for Pub {}
 impl SocketType for Pub {
@@ -174,8 +210,9 @@ impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
-            // A SUB only sends subscriptions, which must never be dropped.
-            send_hwm: if matches!(T::KIND, zmtp::SocketType::Sub) {
+            // Subscriptions must never be dropped, so SUB and XSUB queue
+            // without limit towards their peers.
+            send_hwm: if matches!(T::KIND, zmtp::SocketType::Sub | zmtp::SocketType::XSub) {
                 Hwm::Unlimited
             } else {
                 options.send_hwm
@@ -283,6 +320,97 @@ impl Socket<Sub> {
             .accept(&mut TaskContext::from_waker(Waker::noop()));
         self.routing
             .unsubscribe(self.peers.list_mut(), topic.as_ref())
+    }
+
+    /// The next message on a subscribed topic, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Message> {
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+    }
+
+    /// The next message on a subscribed topic, blocking until one arrives.
+    pub fn recv(&mut self) -> Message {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message on a subscribed topic, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Message {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        self.peers.accept(cx);
+        self.routing.poll_recv(self.peers.list_mut(), cx)
+    }
+}
+
+impl Socket<XPub> {
+    /// Sends `message` to every subscriber that wants it and has room.
+    /// Never blocks. Returns how many subscribers it was queued for.
+    pub fn send(&mut self, message: impl Into<Message>) -> usize {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing.0.send(self.peers.list_mut(), message.into())
+    }
+
+    /// The next event, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<XPubEvent> {
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+    }
+
+    /// The next event, blocking until one arrives.
+    pub fn recv(&mut self) -> XPubEvent {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next event, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> XPubEvent {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
+        self.peers.accept(cx);
+        self.routing.0.poll_event(self.peers.list_mut(), cx)
+    }
+}
+
+impl Socket<XSub> {
+    /// Subscribes to messages whose first frame starts with `topic`, as
+    /// [`Socket<Sub>::subscribe`] does.
+    pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing
+            .subscribe(self.peers.list_mut(), topic.as_ref());
+    }
+
+    /// Removes one subscription to `topic`. Returns whether there was one.
+    pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing
+            .unsubscribe(self.peers.list_mut(), topic.as_ref())
+    }
+
+    /// Sends `message` to every publisher. Never blocks. As in libzmq, a
+    /// single frame starting with `0x01` or `0x00` is a subscription and
+    /// subscribes or unsubscribes to the rest.
+    pub fn send(&mut self, message: impl Into<Message>) {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.routing
+            .send_upstream(self.peers.list_mut(), message.into());
+    }
+
+    /// Passes on what an [`XPub`] heard, as a proxy does: subscriptions
+    /// become ours, and messages are sent upstream.
+    pub fn forward(&mut self, event: XPubEvent) {
+        match event {
+            XPubEvent::Subscribe(topic) => self.subscribe(topic),
+            XPubEvent::Cancel(topic) => {
+                self.unsubscribe(topic);
+            }
+            XPubEvent::Message(message) => self.send(message),
+        }
     }
 
     /// The next message on a subscribed topic, if one is waiting.

@@ -119,10 +119,14 @@ strategies work over that set, as in libzmq:
   subscription messages as it sends, and queues a message for every peer
   subscribed to a prefix of its first frame that has room. It never
   blocks. A ZMTP 1.0 peer, which sends no subscriptions, is subscribed to
-  everything.
+  everything. For XPUB it also counts the peers subscribed to each topic
+  and queues `XPubEvent`s: a topic's first subscription and last cancel
+  (including one caused by a peer leaving), and any other message a peer
+  sent.
 - `Subscriber` (`xsub_t`) counts its topics, sends them to each new peer
   and every change to all peers, and drops arriving messages that match no
-  topic. `Topics` does the prefix matching for both.
+  topic. `Topics` does the prefix matching for both. XSUB uses it too,
+  with `send_upstream` for messages to every publisher.
 
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a
@@ -207,4 +211,4 @@ connections waiting for a name.
 | 5b | Heartbeats (ZMTP 3.1 PING/PONG) and the handshake deadline | done |
 | 5c | `inproc` | done |
 | 6a | PUB and SUB; subscriptions on the wire and replayed after reconnecting | done |
-| 6b | XPUB and XSUB | next |
+| 6b | XPUB and XSUB | done |

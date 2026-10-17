@@ -5,10 +5,9 @@
 //! subscribed to a prefix of its first frame. Subscribers filter too, so
 //! publishers that do not (ZMTP 1.0) are harmless.
 
-use std::collections::HashMap;
-use std::task::{Context as TaskContext, Poll};
+use std::collections::{HashMap, VecDeque};
+use std::task::{Context as TaskContext, Poll, Waker};
 
-use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
@@ -79,14 +78,33 @@ impl Topics {
     }
 }
 
-/// PUB's routing: each peer's topics, and fan-out to the peers that match.
+/// What an XPUB socket hears from its peers. As in libzmq, a topic's
+/// subscriptions are reported once across all peers: `Subscribe` when the
+/// first peer subscribes, `Cancel` when the last one cancels or goes away.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum XPubEvent {
+    /// The first subscription to this topic.
+    Subscribe(Frame),
+    /// The last subscription to this topic is gone.
+    Cancel(Frame),
+    /// Anything else a peer sent, such as an XSUB's own messages.
+    Message(Message),
+}
+
+/// PUB's and XPUB's routing: each peer's topics, and fan-out to the peers
+/// that match.
 #[derive(Debug, Default)]
 pub struct Publisher {
     subscribers: HashMap<PeerKey, PeerTopics>,
+    /// How many peers subscribe to each topic.
+    everyone: Topics,
+    /// What XPUB has yet to receive. `None` for PUB, which discards it.
+    events: Option<VecDeque<XPubEvent>>,
 }
 
 #[derive(Debug, Default)]
 struct PeerTopics {
+    /// A set, as in libzmq's XPUB: subscribing twice is one subscription.
     topics: Topics,
     /// Whether its handshake has been looked at for an implicit
     /// subscription.
@@ -94,10 +112,43 @@ struct PeerTopics {
 }
 
 impl Publisher {
+    /// A publisher that reports what its peers send as [`XPubEvent`]s, for
+    /// XPUB. A plain PUB discards it.
+    pub fn with_events() -> Self {
+        Self {
+            events: Some(VecDeque::new()),
+            ..Self::default()
+        }
+    }
+
+    /// The next event, or `Pending` with `cx` registered on every peer.
+    /// Always `Pending` for a publisher made without events.
+    pub fn poll_event(
+        &mut self,
+        peers: &mut PeerList,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<XPubEvent> {
+        self.drain(peers, cx);
+        match self.events.as_mut().and_then(VecDeque::pop_front) {
+            Some(event) => Poll::Ready(event),
+            None => Poll::Pending,
+        }
+    }
+
     /// Applies the subscriptions peers have sent, and forgets peers that
-    /// are gone. Anything else peers send is discarded.
+    /// are gone.
     pub fn sync(&mut self, peers: &mut PeerList) {
-        let subscribers = &mut self.subscribers;
+        self.drain(peers, &mut TaskContext::from_waker(Waker::noop()));
+    }
+
+    /// Reads everything peers have sent, registering `cx` with each.
+    fn drain(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) {
+        let Self {
+            subscribers,
+            everyone,
+            events,
+        } = self;
+        let mut changes = Changes { everyone, events };
         peers.retain_mut(|peer| {
             let entry = subscribers.entry(peer.key()).or_default();
             if !entry.settled
@@ -107,20 +158,26 @@ impl Publisher {
                 // A ZMTP 1.0 subscriber filters for itself and never says
                 // what it wants, so it gets everything.
                 if established.implicit_subscription {
-                    entry.topics.add(b"");
+                    changes.subscribe(entry, Frame::new());
                 }
             }
             loop {
-                match peer.connection.rx.try_recv() {
-                    Ok(message) => entry.apply(&message),
-                    Err(TryRecvError::Empty) => break true,
-                    Err(TryRecvError::Closed) => break false,
+                match peer.connection.rx.poll_recv(cx) {
+                    Poll::Ready(Some(message)) => match Subscription::from_message(&message) {
+                        Some(Subscription::Subscribe(topic)) => changes.subscribe(entry, topic),
+                        Some(Subscription::Cancel(topic)) => changes.cancel(entry, topic),
+                        None => changes.message(message),
+                    },
+                    Poll::Pending => break true,
+                    Poll::Ready(None) => {
+                        if let Some(entry) = subscribers.remove(&peer.key()) {
+                            changes.forget(entry);
+                        }
+                        break false;
+                    }
                 }
             }
         });
-        if subscribers.len() > peers.len() {
-            subscribers.retain(|&key, _| peers.get(key).is_some());
-        }
     }
 
     /// Sends `message` to every peer subscribed to it that has room.
@@ -143,20 +200,45 @@ impl Publisher {
     }
 }
 
-impl PeerTopics {
-    /// Applies a subscription from the peer. A peer's topics are a set, as
-    /// in libzmq's XPUB: subscribing twice is one subscription.
-    fn apply(&mut self, message: &Message) {
-        match Subscription::from_message(message) {
-            Some(Subscription::Subscribe(topic)) => {
-                if !self.topics.contains(&topic) {
-                    self.topics.add(&topic);
-                }
+/// Applies what one peer sent to the topics of all peers, noting events.
+struct Changes<'a> {
+    everyone: &'a mut Topics,
+    events: &'a mut Option<VecDeque<XPubEvent>>,
+}
+
+impl Changes<'_> {
+    fn subscribe(&mut self, peer: &mut PeerTopics, topic: Frame) {
+        if peer.topics.contains(&topic) {
+            return;
+        }
+        peer.topics.add(&topic);
+        if self.everyone.add(&topic) {
+            self.event(XPubEvent::Subscribe(topic));
+        }
+    }
+
+    fn cancel(&mut self, peer: &mut PeerTopics, topic: Frame) {
+        if peer.topics.remove(&topic) && self.everyone.remove(&topic) {
+            self.event(XPubEvent::Cancel(topic));
+        }
+    }
+
+    fn message(&mut self, message: Message) {
+        self.event(XPubEvent::Message(message));
+    }
+
+    /// A peer is gone: its subscriptions end with it.
+    fn forget(&mut self, peer: PeerTopics) {
+        for topic in peer.topics.iter() {
+            if self.everyone.remove(topic) {
+                self.event(XPubEvent::Cancel(Frame::copy_from_slice(topic)));
             }
-            Some(Subscription::Cancel(topic)) => {
-                self.topics.remove(&topic);
-            }
-            None => {}
+        }
+    }
+
+    fn event(&mut self, event: XPubEvent) {
+        if let Some(events) = self.events {
+            events.push_back(event);
         }
     }
 }
@@ -194,6 +276,24 @@ impl Subscriber {
             tell_all(peers, &Subscription::Cancel(Frame::copy_from_slice(topic)));
         }
         true
+    }
+
+    /// Sends `message` to every peer, as XSUB does. A subscription in the
+    /// message form subscribes or unsubscribes instead, as in libzmq, so
+    /// the topics stay counted.
+    pub fn send_upstream(&mut self, peers: &mut PeerList, message: Message) {
+        match Subscription::from_message(&message) {
+            Some(Subscription::Subscribe(topic)) => self.subscribe(peers, &topic),
+            Some(Subscription::Cancel(topic)) => {
+                self.unsubscribe(peers, &topic);
+            }
+            None => {
+                self.greet(peers);
+                for peer in peers.iter_mut() {
+                    let _ = peer.connection.tx.try_send(message.clone());
+                }
+            }
+        }
     }
 
     /// Sends the topics to peers that arrived since the last call.
@@ -243,6 +343,7 @@ fn tell_all(peers: &mut PeerList, subscription: &Subscription) {
 mod tests {
     use super::*;
     use crate::test_support::*;
+    use std::sync::atomic::Ordering;
 
     fn subscribe(topic: &'static str) -> Message {
         Subscription::Subscribe(Frame::from(topic)).to_message()
@@ -372,6 +473,156 @@ mod tests {
         sa.establish_legacy_subscriber();
         assert_eq!(publisher.send(&mut peers, msg("x")), 1);
         assert_eq!(drain(&mut sa), [msg("x")]);
+    }
+
+    fn next_event(publisher: &mut Publisher, peers: &mut PeerList) -> Option<XPubEvent> {
+        match publisher.poll_event(peers, &mut TaskContext::from_waker(Waker::noop())) {
+            Poll::Ready(event) => Some(event),
+            Poll::Pending => None,
+        }
+    }
+
+    fn events(publisher: &mut Publisher, peers: &mut PeerList) -> Vec<XPubEvent> {
+        std::iter::from_fn(|| next_event(publisher, peers)).collect()
+    }
+
+    fn subscribed(topic: &'static str) -> XPubEvent {
+        XPubEvent::Subscribe(Frame::from(topic))
+    }
+
+    fn cancelled(topic: &'static str) -> XPubEvent {
+        XPubEvent::Cancel(Frame::from(topic))
+    }
+
+    #[test]
+    fn xpub_reports_a_topics_first_subscription_and_last_cancel() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        sb.to_socket.try_send(subscribe("x")).unwrap();
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+        sa.to_socket.try_send(cancel("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), []);
+        sb.to_socket.try_send(cancel("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("x")]);
+    }
+
+    #[test]
+    fn xpub_ignores_cancels_for_topics_never_subscribed() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(cancel("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), []);
+    }
+
+    #[test]
+    fn a_peer_cannot_cancel_another_peers_subscription() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        sb.to_socket.try_send(cancel("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+        assert_eq!(publisher.send(&mut peers, msg("x")), 1);
+        assert_eq!(drain(&mut sa), [msg("x")]);
+    }
+
+    #[test]
+    fn xpub_cancels_the_topics_of_a_peer_that_goes_away() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(subscribe("mine")).unwrap();
+        sa.to_socket.try_send(subscribe("shared")).unwrap();
+        sb.to_socket.try_send(subscribe("shared")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers).len(), 2);
+        drop(sa);
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("mine")]);
+        assert_eq!(peers.len(), 1);
+        assert_eq!(publisher.send(&mut peers, msg("shared")), 1);
+        assert_eq!(drain(&mut sb), [msg("shared")]);
+    }
+
+    #[test]
+    fn xpub_receives_other_messages_and_pub_discards_them() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut xpub = Publisher::with_events();
+        sa.to_socket.try_send(msg("upstream")).unwrap();
+        assert_eq!(
+            events(&mut xpub, &mut peers),
+            [XPubEvent::Message(msg("upstream"))]
+        );
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![b]);
+        let mut publisher = Publisher::default();
+        sb.to_socket.try_send(msg("upstream")).unwrap();
+        sb.to_socket.try_send(subscribe("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), []);
+        assert_eq!(publisher.send(&mut peers, msg("x")), 1);
+    }
+
+    #[test]
+    fn xpub_events_queued_while_sending_are_kept() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert_eq!(publisher.send(&mut peers, msg("x")), 1);
+        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+    }
+
+    #[test]
+    fn xpub_waits_for_events() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        assert_eq!(publisher.poll_event(&mut peers, &mut cx), Poll::Pending);
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert!(
+            count.0.load(Ordering::SeqCst) > 0,
+            "a subscription wakes it"
+        );
+        assert_eq!(
+            publisher.poll_event(&mut peers, &mut cx),
+            Poll::Ready(subscribed("x"))
+        );
+    }
+
+    #[test]
+    fn xpub_reports_a_legacy_peers_implicit_subscription() {
+        let (a, sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        sa.establish_legacy_subscriber();
+        assert_eq!(events(&mut publisher, &mut peers), [subscribed("")]);
+        drop(sa);
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("")]);
+    }
+
+    #[test]
+    fn xsub_sends_messages_to_every_peer_and_counts_subscriptions() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut subscriber = Subscriber::default();
+        subscriber.send_upstream(&mut peers, msg("hello"));
+        subscriber.send_upstream(&mut peers, subscribe("x"));
+        subscriber.send_upstream(&mut peers, subscribe("x"));
+        subscriber.send_upstream(&mut peers, cancel("x"));
+        subscriber.send_upstream(&mut peers, cancel("never"));
+        assert!(subscriber.topics().contains(b"x"));
+        let expected = [msg("hello"), subscribe("x"), subscribe("x")];
+        assert_eq!(drain(&mut sa), expected);
+        assert_eq!(drain(&mut sb), expected);
     }
 
     #[test]

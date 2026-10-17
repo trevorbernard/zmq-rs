@@ -311,10 +311,18 @@ Rules shared by every pattern:
 - libzmq extensions: `XPUB_NODROP` (errors instead of dropping, opt-in), `VERBOSE`/`VERBOSER`, `MANUAL`, `WELCOME_MSG`, `INVERT_MATCHING`, `ONLY_FIRST_SUBSCRIBE`, `CONFLATE`.
 
 **Design changes:**
-- `XPub` receives `XPubEvent::{Subscribe(Topic), Unsubscribe(Topic), Message(Message)}`.
-- `SubscriptionEvent` has a wire form for XPUB↔XSUB proxies.
-- Add an `XSub` type that sends `SubscriptionEvent | Message` and receives `Message`.
+- `Socket<XPub>` receives `XPubEvent::{Subscribe(Frame), Cancel(Frame), Message(Message)}` rather than libzmq's `01`/`00`-prefixed messages.
+- `Socket<XSub>` has `subscribe`, `unsubscribe`, `send` and `recv`, and `forward(XPubEvent)` for proxies, so an XPUB's events pass straight upstream.
 - `Pub::send` never returns an HWM error unless `no_drop` is set.
+
+**Done (XPUB and XSUB):**
+- XPUB reports a topic's first subscription and last cancel across all peers, as libzmq does without `XPUB_VERBOSE`. A peer that disconnects cancels its topics. Anything else a peer sends is delivered as `XPubEvent::Message`.
+- Two differences from libzmq:
+  - A cancel for a topic the peer never subscribed to is ignored. libzmq notifies anyway (`rm_result == not_found`; its code marks this with a TODO).
+  - A ZMTP 1.0 subscriber's implicit subscription is reported as `Subscribe("")`. libzmq reports nothing on arrival, yet still sends the cancel when the peer leaves.
+- XSUB `send`: a single frame starting with `01` or `00` subscribes or unsubscribes, as libzmq does, so the topics stay counted. Multi-frame messages are always user messages. libzmq would also read a subscription from their first frame.
+- XSUB, like SUB, queues without limit towards its peers, so neither subscriptions nor upstream messages are dropped at the HWM. libzmq's `dist_t` drops at the HWM.
+- Not yet: `XPUB_VERBOSE`/`VERBOSER`, `MANUAL`, `WELCOME_MSG`, `INVERT_MATCHING`, `NODROP`, `ONLY_FIRST_SUBSCRIBE`.
 
 **Done (PUB and SUB):**
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.

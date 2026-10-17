@@ -89,6 +89,7 @@ pub enum Kind {
     Pull = 7,
     Push = 8,
     XPub = 9,
+    XSub = 10,
 }
 
 /// A libzmq context, shared by sockets that talk over `inproc`, such as a
