@@ -369,3 +369,4 @@ Also check while on Linux:
 | 10 | Socket monitoring | done |
 | 11a | CLIENT and SERVER (`draft` feature) | done |
 | 11b | RADIO and DISH (`draft` feature) | done |
+| 11c | SCATTER and GATHER (`draft` feature) | done |

@@ -253,6 +253,13 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
+    /// Drops peers that are gone and discards what peers sent, for
+    /// patterns that never receive.
+    #[cfg(feature = "draft")]
+    pub(crate) fn prune_send_only(&mut self) {
+        self.peers.prune_send_only();
+    }
+
     /// Takes in peers the socket's listeners accepted, registering `cx`
     /// with them, then lends out the peers and the routing state together.
     #[cfg(feature = "draft")]

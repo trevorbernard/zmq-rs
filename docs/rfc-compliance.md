@@ -387,6 +387,10 @@ GitHub CI, which installs Ubuntu's.
 - On the wire, messages are `group (MORE) | body` and membership changes are JOIN and LEAVE commands, whatever the ZMTP 3.x version, as libzmq's DISH sends them. Inside the process, DISH writes `zmtp::Membership` in a `0x01`/`0x00` message form, as SUB does subscriptions; engines convert, and a session replays its groups after reconnecting.
 - The interop tests drive libzmq's RADIO and DISH through its draft API (`zmq_join`, `zmq_msg_set_group`, `zmq_msg_group`), looked up at run time: a libzmq without drafts exports them only under C++-mangled names.
 - Not supported: UDP, RADIO/DISH's other transport.
+
+**Done (SCATTER and GATHER):**
+- `Socket<Scatter>` load-balances single frames to its GATHER peers and waits while none has room, as PUSH does; `Socket<Gather>` fair-queues them, as PULL does, and drops multipart messages. Sending a multipart message does not compile.
+- Verified against libzmq's SCATTER and GATHER in both directions.
 - **CHANNEL** has a single peer.
 - **RADIO**
   - Silently drops when full, and never blocks unless `no_drop` is set.

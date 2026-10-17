@@ -129,6 +129,8 @@ pub enum Kind {
     Client = 13,
     Radio = 14,
     Dish = 15,
+    Gather = 16,
+    Scatter = 17,
 }
 
 /// A libzmq context, shared by sockets that talk over `inproc`, such as a

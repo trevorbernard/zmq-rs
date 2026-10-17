@@ -204,32 +204,139 @@ impl Socket<Client> {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        let Some(message) = slot.take() else {
-            return Poll::Ready(());
-        };
         let (peers, routing) = self.parts_accepting(cx);
-        match routing.send.poll_send(peers, message, cx) {
-            Ok(_) => Poll::Ready(()),
-            Err(message) => {
-                *slot = Some(message);
-                Poll::Pending
-            }
+        poll_load_balanced(peers, &mut routing.send, slot, cx)
+    }
+
+    fn poll_recv_frame(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        let (peers, routing) = self.parts_accepting(cx);
+        poll_single_part(peers, &mut routing.recv, cx)
+    }
+}
+
+/// Sends the message in `slot` to the next peer with room, putting it back
+/// and returning `Pending` if none has room.
+fn poll_load_balanced(
+    peers: &mut zmq_core::PeerList,
+    balancer: &mut LoadBalancer,
+    slot: &mut Option<Message>,
+    cx: &mut TaskContext<'_>,
+) -> Poll<()> {
+    let Some(message) = slot.take() else {
+        return Poll::Ready(());
+    };
+    match balancer.poll_send(peers, message, cx) {
+        Ok(_) => Poll::Ready(()),
+        Err(message) => {
+            *slot = Some(message);
+            Poll::Pending
+        }
+    }
+}
+
+/// The next single-part message, fairly queued. Multipart ones are dropped,
+/// as the draft RFCs require.
+fn poll_single_part(
+    peers: &mut zmq_core::PeerList,
+    queue: &mut FairQueue,
+    cx: &mut TaskContext<'_>,
+) -> Poll<Frame> {
+    loop {
+        let Poll::Ready((_, message)) = queue.poll_recv(peers, cx) else {
+            return Poll::Pending;
+        };
+        let (frame, rest) = message.split_first();
+        if rest.is_empty() {
+            return Poll::Ready(frame.clone());
+        }
+    }
+}
+
+/// Sends single-part messages round robin to its GATHER peers (RFC 49), as
+/// PUSH does. Waits while no peer has room; never drops a message.
+///
+/// A SCATTER cannot receive, and a GATHER cannot send:
+///
+/// ```compile_fail,E0599
+/// let context = zmq::Context::new().unwrap();
+/// context.socket::<zmq::Scatter>().recv();
+/// ```
+///
+/// ```compile_fail,E0599
+/// let context = zmq::Context::new().unwrap();
+/// context.socket::<zmq::Gather>().send("upstream");
+/// ```
+#[derive(Debug)]
+pub enum Scatter {}
+
+/// Receives single-part messages fairly from its SCATTER peers (RFC 49), as
+/// PULL does. Multipart messages are dropped.
+#[derive(Debug)]
+pub enum Gather {}
+
+impl sealed::Sealed for Scatter {}
+impl SocketType for Scatter {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Scatter;
+    type Routing = LoadBalancer;
+}
+
+impl sealed::Sealed for Gather {}
+impl SocketType for Gather {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Gather;
+    type Routing = FairQueue;
+}
+
+impl Socket<Scatter> {
+    /// Sends `frame` if a gather has room, otherwise hands it back.
+    pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
+        let mut slot = Some(Message::new(frame.into()));
+        let _ = self.poll_scatter(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+    }
+
+    /// Sends `frame`, blocking while no gather has room.
+    pub fn send(&mut self, frame: impl Into<Frame>) {
+        let mut slot = Some(Message::new(frame.into()));
+        wait::block_on(|cx| self.poll_scatter(&mut slot, cx));
+    }
+
+    /// Sends `frame`, waiting while no gather has room.
+    pub async fn send_async(&mut self, frame: impl Into<Frame>) {
+        let mut slot = Some(Message::new(frame.into()));
+        poll_fn(|cx| self.poll_scatter(&mut slot, cx)).await;
+    }
+
+    fn poll_scatter(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        // SCATTER never receives: discard anything peers send, and drop
+        // peers that are gone.
+        self.prune_send_only();
+        let (peers, balancer) = self.parts_accepting(cx);
+        poll_load_balanced(peers, balancer, slot, cx)
+    }
+}
+
+impl Socket<Gather> {
+    /// The next message, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Frame> {
+        match self.poll_gather(&mut TaskContext::from_waker(Waker::noop())) {
+            Poll::Ready(frame) => Some(frame),
+            Poll::Pending => None,
         }
     }
 
-    /// The next single-part message. Multipart ones are dropped, as RFC 41
-    /// requires.
-    fn poll_recv_frame(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        let (peers, routing) = self.parts_accepting(cx);
-        loop {
-            let Poll::Ready((_, message)) = routing.recv.poll_recv(peers, cx) else {
-                return Poll::Pending;
-            };
-            let (frame, rest) = message.split_first();
-            if rest.is_empty() {
-                return Poll::Ready(frame.clone());
-            }
-        }
+    /// The next message, blocking until one arrives.
+    pub fn recv(&mut self) -> Frame {
+        wait::block_on(|cx| self.poll_gather(cx))
+    }
+
+    /// The next message, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Frame {
+        poll_fn(|cx| self.poll_gather(cx)).await
+    }
+
+    fn poll_gather(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        let (peers, queue) = self.parts_accepting(cx);
+        poll_single_part(peers, queue, cx)
     }
 }
 

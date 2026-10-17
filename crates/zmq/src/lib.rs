@@ -99,7 +99,7 @@ mod wait;
 use std::io;
 
 #[cfg(feature = "draft")]
-pub use draft::{Client, ClientId, Dish, NoSuchClient, Radio, Server};
+pub use draft::{Client, ClientId, Dish, Gather, NoSuchClient, Radio, Scatter, Server};
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
