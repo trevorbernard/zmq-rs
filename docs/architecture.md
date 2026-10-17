@@ -31,9 +31,9 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 |---|---|---|
 | `Context` | Shared handle to N I/O threads; dropping the last clone stops and joins them | `ctx_t` |
 | `IoThread` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
-| `IoCommand` | The thread's command type (`Connect`, `Listen`, `Stop`) | `command_t` |
+| `IoCommand` | The thread's command type (`Connect`, `Listen`, `Shutdown`, `Stop`) | `command_t` |
 | `Listener` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
-| `Session` | One per peer: owns both pipe ends; will own reconnection | `session_base_t` |
+| `Session` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
 | `Engine` | One TCP connection: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
 | `TokenWaker` | A pipe waker that queues its session or listener id once and wakes the event loop | `activate_read`, `activate_write` |
 
@@ -60,10 +60,26 @@ signal again for data it has already reported.
 
 - A connection's pipes exist as soon as `connect` returns, so messages sent
   before the handshake are queued and delivered once it completes.
-- When a connection ends (peer closed, error, incompatible peer), the session
-  drops its pipe ends: the socket sees the receive pipe close and sends fail.
-- Dropping a socket's pipe ends closes the TCP stream.
-- Dropping the context stops every I/O thread, closing all connections.
+- A connecting session outlives its TCP connections. After a connection
+  error (I/O error, peer closed, refused) it reconnects on its `Reconnect`
+  schedule, keeping its pipes and any messages queued in them. As in libzmq
+  (`session_base_t::engine_error`), a protocol error such as a failed
+  handshake or an incompatible peer ends the session instead, closing its
+  pipes. Accepted sessions never reconnect.
+- `Reconnect::Fixed` waits the interval plus random jitter below it, and
+  `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
+  handshake succeeds; both follow libzmq's `get_new_reconnect_ivl`.
+- Dropping a connection's sender starts its linger: queued messages keep
+  being delivered, across reconnects, until the queue is written or the
+  `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at
+  once. Dropping only the receiver discards incoming messages but keeps the
+  connection sending.
+- `Context::shutdown(timeout)` closes listeners and every session, lets each
+  deliver its queue within its linger and the timeout, then joins the I/O
+  threads. Connections still delivering or still disconnected at the
+  deadline are reported as abandoned.
+- Dropping the last `Context` clone without `shutdown` closes everything at
+  once. Unlike libzmq's `zmq_ctx_term`, nothing ever blocks on drop.
 - `bind` binds immediately, so errors such as an address in use are reported
   to the caller, then hands the listener to an I/O thread.
 - An accepted connection reaches the `Listener` only once its handshake has
@@ -78,6 +94,6 @@ signal again for data it has already reported.
 |---|---|---|
 | 1 | Context, I/O threads, TCP connect, NULL handshake, sessions, engines | done |
 | 2 | Bind/listen, accepting peers | done |
-| 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | next |
-| 4 | Load balancing and fair queuing; PUSH/PULL and DEALER/ROUTER; typed sockets in `zmq` | |
+| 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | done |
+| 4 | Load balancing and fair queuing; PUSH/PULL and DEALER/ROUTER; typed sockets in `zmq` | next |
 | 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | |

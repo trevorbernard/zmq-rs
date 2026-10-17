@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq_core::{Connection, ConnectionConfig, Context};
+use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect, ShutdownTimedOut};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{ConnectError, Peer, Security};
 use zmq_pipe::Hwm;
@@ -55,6 +55,7 @@ fn defaults_match_libzmq() {
     assert_eq!(config.recv_hwm, thousand);
     assert_eq!(config.identity, Identity::default());
     assert_eq!(config.max_frame_size, None);
+    assert_eq!(config.linger, Linger::Forever);
 }
 
 #[test]
@@ -149,7 +150,11 @@ fn peer_disconnect_closes_the_pipes() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let mut connection = context.connect(addr, dealer("gone"));
+    let config = ConnectionConfig {
+        reconnect: Reconnect::Never,
+        ..dealer("gone")
+    };
+    let mut connection = context.connect(addr, config);
     connection.tx.send_blocking(message(&[b"hi"])).unwrap();
     router.recv().unwrap();
     drop(router);
@@ -194,7 +199,11 @@ fn refused_connection_closes_the_pipes() {
         .unwrap();
     // The listener is dropped, so nothing accepts on `addr`.
     let context = Context::new().unwrap();
-    let connection = context.connect(addr, dealer("nobody"));
+    let config = ConnectionConfig {
+        reconnect: Reconnect::Never,
+        ..dealer("nobody")
+    };
+    let connection = context.connect(addr, config);
     let (_connection, next) = recv(connection);
     assert_eq!(next, None);
 }
@@ -232,4 +241,223 @@ fn dropping_the_context_stops_threads_and_closes_connections() {
     within(Duration::from_secs(5), move || drop(context));
     let (_connection, next) = recv(connection);
     assert_eq!(next, None);
+}
+
+#[test]
+fn reconnects_after_the_peer_restarts_and_delivers_queued_messages() {
+    let first = Socket::new(Kind::Router);
+    let addr = first.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut connection = context.connect(addr, dealer("back"));
+    connection.tx.send_blocking(message(&[b"before"])).unwrap();
+    assert_eq!(first.recv().unwrap(), [&b"back"[..], b"before"]);
+
+    drop(first);
+    thread::sleep(Duration::from_millis(50));
+    // Sent while the peer is down: queued in the session's pipe.
+    connection.tx.send_blocking(message(&[b"during"])).unwrap();
+    assert!(
+        !connection.tx.is_closed(),
+        "the session outlives the connection"
+    );
+
+    let second = Socket::new(Kind::Router);
+    second.bind(&format!("tcp://{addr}"));
+    assert_eq!(second.recv().unwrap(), [&b"back"[..], b"during"]);
+    second.send(&[b"back", b"welcome back"]).unwrap();
+    let (_connection, reply) = recv(connection);
+    assert_eq!(reply, Some(message(&[b"welcome back"])));
+}
+
+#[test]
+fn keeps_retrying_until_a_peer_listens() {
+    let addr = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let context = Context::new().unwrap();
+    let config = ConnectionConfig {
+        reconnect: Reconnect::Backoff {
+            initial: Duration::from_millis(20),
+            max: Duration::from_millis(100),
+        },
+        ..dealer("patient")
+    };
+    let mut connection = context.connect(addr, config);
+    connection.tx.send_blocking(message(&[b"anyone?"])).unwrap();
+    thread::sleep(Duration::from_millis(300));
+
+    let router = Socket::new(Kind::Router);
+    router.bind(&format!("tcp://{addr}"));
+    assert_eq!(router.recv().unwrap(), [&b"patient"[..], b"anyone?"]);
+}
+
+#[test]
+fn protocol_errors_do_not_reconnect() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    // The default policy reconnects, but an incompatible peer is a protocol
+    // error, which ends the connection as in libzmq.
+    let connection = context.connect(addr, ConnectionConfig::new(SocketType::Sub));
+    let (connection, next) = recv(connection);
+    assert_eq!(next, None);
+    assert!(connection.tx.is_closed());
+}
+
+/// A port with nothing listening on it yet.
+fn free_port() -> std::net::SocketAddr {
+    TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+}
+
+fn eager(identity: &str) -> ConnectionConfig {
+    ConnectionConfig {
+        reconnect: Reconnect::Backoff {
+            initial: Duration::from_millis(10),
+            max: Duration::from_millis(50),
+        },
+        ..dealer(identity)
+    }
+}
+
+#[test]
+fn a_dropped_connection_lingers_until_its_messages_are_delivered() {
+    let addr = free_port();
+    let context = Context::new().unwrap();
+    let mut connection = context.connect(addr, eager("linger"));
+    for part in [&b"one"[..], b"two", b"three"] {
+        connection.tx.send_blocking(message(&[part])).unwrap();
+    }
+    drop(connection);
+    thread::sleep(Duration::from_millis(200));
+
+    let router = Socket::new(Kind::Router);
+    router.bind(&format!("tcp://{addr}"));
+    for part in [&b"one"[..], b"two", b"three"] {
+        assert_eq!(router.recv().unwrap(), [&b"linger"[..], part]);
+    }
+}
+
+#[test]
+fn zero_linger_discards_queued_messages() {
+    let addr = free_port();
+    let context = Context::new().unwrap();
+    let config = ConnectionConfig {
+        linger: Linger::For(Duration::ZERO),
+        ..eager("discard")
+    };
+    let mut connection = context.connect(addr, config);
+    connection.tx.send_blocking(message(&[b"lost"])).unwrap();
+    drop(connection);
+    thread::sleep(Duration::from_millis(100));
+
+    let router = Socket::new(Kind::Router);
+    router.set_receive_timeout(Duration::from_millis(500));
+    router.bind(&format!("tcp://{addr}"));
+    assert!(router.recv().is_err(), "nothing is delivered");
+}
+
+#[test]
+fn linger_gives_up_at_its_deadline() {
+    let addr = free_port();
+    let context = Context::new().unwrap();
+    let config = ConnectionConfig {
+        linger: Linger::For(Duration::from_millis(100)),
+        ..eager("deadline")
+    };
+    let mut connection = context.connect(addr, config);
+    connection.tx.send_blocking(message(&[b"late"])).unwrap();
+    drop(connection);
+    thread::sleep(Duration::from_millis(400));
+
+    let router = Socket::new(Kind::Router);
+    router.set_receive_timeout(Duration::from_millis(500));
+    router.bind(&format!("tcp://{addr}"));
+    assert!(
+        router.recv().is_err(),
+        "the connection gave up before the peer appeared"
+    );
+}
+
+#[test]
+fn dropping_only_the_receiver_keeps_the_connection_sending() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let Connection { mut tx, rx } = context.connect(addr, dealer("half"));
+    drop(rx);
+    tx.send_blocking(message(&[b"first"])).unwrap();
+    assert_eq!(router.recv().unwrap(), [&b"half"[..], b"first"]);
+    // Replies go nowhere, but do not break the connection.
+    router.send(&[b"half", b"ignored"]).unwrap();
+    thread::sleep(Duration::from_millis(50));
+    tx.send_blocking(message(&[b"second"])).unwrap();
+    assert_eq!(router.recv().unwrap(), [&b"half"[..], b"second"]);
+}
+
+#[test]
+fn shutdown_delivers_queued_messages_first() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut connection = context.connect(addr, dealer("drain"));
+    let total = 1_000u32;
+    for i in 0..total {
+        connection
+            .tx
+            .send_blocking(message(&[&i.to_be_bytes()]))
+            .unwrap();
+    }
+    let result = within(Duration::from_secs(10), move || {
+        context.shutdown(Duration::from_secs(5))
+    });
+    assert_eq!(result, Ok(()));
+    for i in 0..total {
+        assert_eq!(router.recv().unwrap(), [&b"drain"[..], &i.to_be_bytes()]);
+    }
+    let (_connection, next) = recv(connection);
+    assert_eq!(next, None, "shutdown closed the connection");
+}
+
+#[test]
+fn shutdown_reports_what_it_had_to_abandon() {
+    let context = Context::new().unwrap();
+    let mut connection = context.connect(free_port(), eager("stuck"));
+    connection
+        .tx
+        .send_blocking(message(&[b"undeliverable"]))
+        .unwrap();
+    let started = std::time::Instant::now();
+    let result = within(Duration::from_secs(5), move || {
+        context.shutdown(Duration::from_millis(200))
+    });
+    assert_eq!(result, Err(ShutdownTimedOut { abandoned: 1 }));
+    assert!(started.elapsed() >= Duration::from_millis(200));
+}
+
+#[test]
+fn shutdown_closes_listeners_and_later_work() {
+    let context = Context::new().unwrap();
+    let listener = context
+        .bind(
+            "127.0.0.1:0".parse().unwrap(),
+            ConnectionConfig::new(SocketType::Router),
+        )
+        .unwrap();
+    let shut = context.clone();
+    within(Duration::from_secs(5), move || {
+        shut.shutdown(Duration::from_secs(1))
+    })
+    .unwrap();
+    let accepted = within(Duration::from_secs(5), move || {
+        let mut listener = listener;
+        listener.accept_blocking()
+    });
+    assert!(accepted.is_none(), "the listener closed");
+    let after = context.connect(free_port(), dealer("after"));
+    let (_after, next) = recv(after);
+    assert_eq!(next, None, "a stopped context closes new connections");
 }

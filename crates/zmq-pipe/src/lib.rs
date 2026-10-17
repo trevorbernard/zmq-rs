@@ -63,6 +63,8 @@ struct Shared {
     read: CachePadded<AtomicU64>,
     /// Set by the reader before it goes away.
     reader_closed: AtomicBool,
+    /// Set by the writer before it goes away.
+    writer_closed: AtomicBool,
     reader_waker: CachePadded<AtomicWaker>,
     writer_waker: CachePadded<AtomicWaker>,
 }
@@ -240,6 +242,7 @@ impl<T> Drop for Writer<T> {
     fn drop(&mut self) {
         // Disconnect first, so a reader woken here sees the pipe closed.
         drop(self.sender.take());
+        self.shared.writer_closed.store(true, Ordering::Release);
         self.shared.reader_waker.wake();
     }
 }
@@ -269,6 +272,25 @@ impl<T> Reader<T> {
         // Register, then check again so a send in between is not missed.
         self.shared.reader_waker.register(cx.waker());
         self.ready()
+    }
+
+    /// Whether the writer is gone. Items it sent may still be queued.
+    pub fn is_closed(&self) -> bool {
+        self.shared.writer_closed.load(Ordering::Acquire)
+    }
+
+    /// Ready once the writer is gone, even if items are still queued.
+    pub fn poll_closed(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        if self.is_closed() {
+            return Poll::Ready(());
+        }
+        // Register, then check again so a drop in between is not missed.
+        self.shared.reader_waker.register(cx.waker());
+        if self.is_closed() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
     }
 
     /// The next item, waiting while the pipe is empty.
@@ -455,6 +477,22 @@ mod tests {
         assert_eq!(wakes(&count), 1);
         assert_eq!(writer.poll_closed(&mut cx), Poll::Ready(()));
         block_on(writer.closed());
+    }
+
+    #[test]
+    fn reader_learns_the_writer_is_gone_before_draining() {
+        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
+        writer.try_send(1).unwrap();
+        let (count, waker) = counting_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(!reader.is_closed());
+        assert_eq!(reader.poll_closed(&mut cx), Poll::Pending);
+        drop(writer);
+        assert_eq!(wakes(&count), 1);
+        assert!(reader.is_closed());
+        assert_eq!(reader.poll_closed(&mut cx), Poll::Ready(()));
+        assert_eq!(reader.try_recv(), Ok(1), "queued items are still there");
+        assert_eq!(reader.try_recv(), Err(TryRecvError::Closed));
     }
 
     #[test]

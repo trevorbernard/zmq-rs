@@ -9,5 +9,7 @@
 mod context;
 mod engine;
 mod io_thread;
+mod reconnect;
 
-pub use context::{Connection, ConnectionConfig, Context, Listener};
+pub use context::{Connection, ConnectionConfig, Context, Linger, Listener, ShutdownTimedOut};
+pub use reconnect::Reconnect;

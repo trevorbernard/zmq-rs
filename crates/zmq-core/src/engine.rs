@@ -28,6 +28,8 @@ pub(crate) struct Engine {
     state: State,
     out: Vec<u8>,
     out_pos: usize,
+    /// The last look at the socket's pipe found it empty or closed.
+    outbound_empty: bool,
 }
 
 enum State {
@@ -58,8 +60,14 @@ pub(crate) enum EngineError {
     Greeting(GreetingError),
     Handshake(HandshakeError),
     Decode(DecodeError),
-    /// The socket dropped its end of a pipe.
-    SocketClosed,
+}
+
+impl EngineError {
+    /// Whether the connection broke, rather than the peer misbehaving.
+    /// libzmq reconnects after the former but not the latter.
+    pub(crate) fn is_connection_error(&self) -> bool {
+        matches!(self, Self::Io(_) | Self::PeerClosed)
+    }
 }
 
 /// The session's pipe ends, lent to the engine while it runs.
@@ -88,6 +96,7 @@ impl Engine {
             state: State::Greeting(greeting),
             out,
             out_pos: 0,
+            outbound_empty: false,
         }
     }
 
@@ -98,6 +107,12 @@ impl Engine {
     /// Whether the handshake has completed and messages are flowing.
     pub(crate) fn is_established(&self) -> bool {
         matches!(self.state, State::Active { .. })
+    }
+
+    /// Whether everything the socket queued has been written to the stream:
+    /// the pipe was empty at the last look and no output is pending.
+    pub(crate) fn caught_up(&self) -> bool {
+        self.is_established() && self.outbound_empty && self.out.is_empty()
     }
 
     /// Does all the work currently possible: writing, taking messages from
@@ -174,10 +189,15 @@ impl Engine {
             match pipes.outbound.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
                     encoder.encode(&message, &mut self.out);
+                    self.outbound_empty = false;
                     progressed = true;
                 }
-                Poll::Ready(None) => return Err(EngineError::SocketClosed),
-                Poll::Pending => break,
+                // Empty, or closed and drained: the session decides when a
+                // closed connection is finished.
+                Poll::Ready(None) | Poll::Pending => {
+                    self.outbound_empty = true;
+                    break;
+                }
             }
         }
         Ok(progressed)
@@ -340,7 +360,8 @@ impl Engine {
 }
 
 /// Offers `message` to the socket. Returns it if the pipe is full, in which
-/// case the pipe's waker will bring the engine back.
+/// case the pipe's waker will bring the engine back. If the socket dropped
+/// its receiver the message is discarded, so lingering sends carry on.
 fn deliver(
     inbound: &mut Writer<Message>,
     message: Message,
@@ -348,11 +369,10 @@ fn deliver(
 ) -> Result<Option<Message>, EngineError> {
     match inbound.poll_ready(cx) {
         Poll::Ready(Ok(())) => match inbound.try_send(message) {
-            Ok(()) => Ok(None),
+            Ok(()) | Err(TrySendError::Closed(_)) => Ok(None),
             Err(TrySendError::Full(message)) => Ok(Some(message)),
-            Err(TrySendError::Closed(_)) => Err(EngineError::SocketClosed),
         },
-        Poll::Ready(Err(())) => Err(EngineError::SocketClosed),
+        Poll::Ready(Err(())) => Ok(None),
         Poll::Pending => Ok(Some(message)),
     }
 }

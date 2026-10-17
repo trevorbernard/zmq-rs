@@ -1,18 +1,22 @@
 //! The context: the I/O threads every connection runs on.
 
+use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
+use std::sync::mpsc;
 use std::task::Poll;
+use std::time::{Duration, Instant};
 
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe};
 use zmtp::{Identity, Message, SocketType};
 
 use mio::net::TcpListener;
 
+use crate::Reconnect;
 use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
 
 /// libzmq's default ZMQ_SNDHWM and ZMQ_RCVHWM.
@@ -46,6 +50,31 @@ pub struct ConnectionConfig {
     pub recv_hwm: Hwm,
     /// The largest frame accepted from the peer.
     pub max_frame_size: Option<u64>,
+    /// How a connecting session retries. Accepted connections never do.
+    pub reconnect: Reconnect,
+    /// How long queued messages keep being delivered after the connection's
+    /// sender is dropped.
+    pub linger: Linger,
+}
+
+/// How long a closed connection keeps delivering the messages queued on it,
+/// like libzmq's `ZMQ_LINGER`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Linger {
+    /// Until every message is sent, or the context is dropped. libzmq's
+    /// default (-1).
+    #[default]
+    Forever,
+    /// At most this long. `Duration::ZERO` discards queued messages at once.
+    For(Duration),
+}
+
+/// [`Context::shutdown`] gave up on connections that were still delivering,
+/// or still disconnected, when its timeout ran out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShutdownTimedOut {
+    /// How many connections were cut off.
+    pub abandoned: usize,
 }
 
 /// One connection's message pipes, as seen from the socket.
@@ -106,6 +135,8 @@ impl ConnectionConfig {
             send_hwm: hwm,
             recv_hwm: hwm,
             max_frame_size: None,
+            reconnect: Reconnect::default(),
+            linger: Linger::default(),
         }
     }
 }
@@ -163,9 +194,52 @@ impl Context {
         Connection { tx, rx }
     }
 
+    /// Closes every listener and connection, lets connections deliver their
+    /// queued messages for up to `timeout` (or less, per their [`Linger`]),
+    /// then stops the I/O threads. Affects every clone of this context.
+    ///
+    /// Dropping the last clone without calling this closes everything at
+    /// once, discarding queued messages.
+    pub fn shutdown(&self, timeout: Duration) -> Result<(), ShutdownTimedOut> {
+        let deadline = Instant::now() + timeout;
+        let reports: Vec<mpsc::Receiver<usize>> = self
+            .inner
+            .io_threads
+            .iter()
+            .map(|thread| {
+                let (done, report) = mpsc::channel();
+                thread.send(IoCommand::Shutdown { deadline, done });
+                report
+            })
+            .collect();
+        let mut abandoned = 0;
+        for (thread, report) in self.inner.io_threads.iter().zip(reports) {
+            // A thread already stopped by an earlier shutdown reports nothing.
+            abandoned += report.recv().unwrap_or(0);
+            thread.join();
+        }
+        if abandoned == 0 {
+            Ok(())
+        } else {
+            Err(ShutdownTimedOut { abandoned })
+        }
+    }
+
     /// The next I/O thread, round robin.
     fn io_thread(&self) -> &IoThread {
         let threads = &self.inner.io_threads;
         &threads[self.inner.next.fetch_add(1, Ordering::Relaxed) % threads.len()]
     }
 }
+
+impl fmt::Display for ShutdownTimedOut {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "shutdown timed out with {} connections unfinished",
+            self.abandoned
+        )
+    }
+}
+
+impl std::error::Error for ShutdownTimedOut {}

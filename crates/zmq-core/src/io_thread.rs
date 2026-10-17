@@ -1,13 +1,15 @@
 //! I/O threads: one mio event loop each, driven by socket readiness, pipe
 //! wakeups and commands from other threads.
 
-use std::collections::HashMap;
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::io;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Wake, Waker};
 use std::thread::{self, JoinHandle};
+use std::time::Instant;
 
 use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Token};
@@ -15,7 +17,8 @@ use zmq_pipe::{Reader, Writer, pipe};
 use zmtp::Message;
 
 use crate::engine::{Engine, EngineError, Pipes};
-use crate::{Connection, ConnectionConfig};
+use crate::reconnect::Retry;
+use crate::{Connection, ConnectionConfig, Linger};
 
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
@@ -26,7 +29,13 @@ pub(crate) enum IoCommand {
     Connect(Box<ConnectRequest>),
     /// Accept peers on a bound listener.
     Listen(Box<ListenRequest>),
-    /// Close every connection and listener, and exit.
+    /// Close listeners, let connections deliver what they have queued until
+    /// `deadline`, then exit and report how many were cut off.
+    Shutdown {
+        deadline: Instant,
+        done: mpsc::Sender<usize>,
+    },
+    /// Close every connection and listener at once, and exit.
     Stop,
 }
 
@@ -50,7 +59,7 @@ pub(crate) struct ListenRequest {
 pub(crate) struct IoThread {
     commands: mpsc::Sender<IoCommand>,
     waker: Arc<mio::Waker>,
-    thread: Option<JoinHandle<()>>,
+    thread: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl IoThread {
@@ -67,6 +76,8 @@ impl IoThread {
             ready_rx,
             sessions: HashMap::new(),
             listeners: HashMap::new(),
+            timers: BinaryHeap::new(),
+            shutdown: None,
             next_id: WAKER.0 + 1,
         };
         let thread = thread::Builder::new()
@@ -75,7 +86,7 @@ impl IoThread {
         Ok(Self {
             commands,
             waker,
-            thread: Some(thread),
+            thread: Mutex::new(Some(thread)),
         })
     }
 
@@ -86,14 +97,24 @@ impl IoThread {
             let _ = self.waker.wake();
         }
     }
+
+    /// Waits for the thread to exit, if it has not been joined already.
+    pub(crate) fn join(&self) {
+        let thread = self
+            .thread
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take();
+        if let Some(thread) = thread {
+            let _ = thread.join();
+        }
+    }
 }
 
 impl Drop for IoThread {
     fn drop(&mut self) {
         self.send(IoCommand::Stop);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
+        self.join();
     }
 }
 
@@ -106,6 +127,11 @@ struct EventLoop {
     ready_rx: mpsc::Receiver<usize>,
     sessions: HashMap<usize, Session>,
     listeners: HashMap<usize, ListenerEntry>,
+    /// Deadlines, such as reconnection attempts. A timer for something that
+    /// has since changed state is harmless: driving it finds nothing to do.
+    timers: BinaryHeap<Reverse<(Instant, usize)>>,
+    /// Set once shutdown starts: when it must end, and where to report.
+    shutdown: Option<(Instant, mpsc::Sender<usize>)>,
     /// Ids are never reused, so a late wakeup for something closed cannot
     /// reach a newcomer.
     next_id: usize,
@@ -116,7 +142,11 @@ impl EventLoop {
         let mut events = Events::with_capacity(256);
         let mut due = Vec::new();
         loop {
-            if let Err(err) = self.poll.poll(&mut events, None) {
+            let timeout = self
+                .timers
+                .peek()
+                .map(|Reverse((at, _))| at.saturating_duration_since(Instant::now()));
+            if let Err(err) = self.poll.poll(&mut events, timeout) {
                 if err.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
@@ -129,10 +159,23 @@ impl EventLoop {
                     .filter(|&token| token != WAKER)
                     .map(|token| token.0),
             );
+            let now = Instant::now();
+            while let Some(&Reverse((at, id))) = self.timers.peek()
+                && at <= now
+            {
+                self.timers.pop();
+                due.push(id);
+            }
             loop {
                 match self.commands.try_recv() {
+                    // Once shutting down, new work is dropped, closing its pipes.
+                    Ok(IoCommand::Connect(_) | IoCommand::Listen(_)) if self.shutdown.is_some() => {
+                    }
                     Ok(IoCommand::Connect(request)) => due.extend(self.connect(*request)),
                     Ok(IoCommand::Listen(request)) => due.extend(self.listen(*request)),
+                    Ok(IoCommand::Shutdown { deadline, done }) => {
+                        due.extend(self.start_shutdown(deadline, done));
+                    }
                     Ok(IoCommand::Stop) | Err(mpsc::TryRecvError::Disconnected) => return,
                     Err(mpsc::TryRecvError::Empty) => break,
                 }
@@ -155,7 +198,47 @@ impl EventLoop {
                     self.drive_listener(id);
                 }
             }
+            if let Some((deadline, done)) = &self.shutdown {
+                let finished = self.sessions.is_empty();
+                if finished || Instant::now() >= *deadline {
+                    let _ = done.send(self.sessions.len());
+                    return;
+                }
+            }
         }
+    }
+
+    /// Closes the listeners and starts closing every session: each delivers
+    /// what it has queued, within its linger and the shutdown deadline.
+    fn start_shutdown(&mut self, deadline: Instant, done: mpsc::Sender<usize>) -> Vec<usize> {
+        for (_, mut entry) in self.listeners.drain() {
+            let _ = self.poll.registry().deregister(&mut entry.listener);
+        }
+        let now = Instant::now();
+        let mut due = Vec::with_capacity(self.sessions.len());
+        for (&id, session) in &mut self.sessions {
+            // Sessions still open at the shutdown deadline count as cut off,
+            // so only a shorter linger gets a deadline of its own.
+            let linger = match session.config.linger {
+                Linger::Forever => None,
+                Linger::For(linger) => Some(now + linger).filter(|&at| at < deadline),
+            };
+            let at = match session.closing {
+                Some(Closing {
+                    deadline: Some(existing),
+                }) => Some(existing),
+                _ => linger,
+            };
+            session.closing = Some(Closing { deadline: at });
+            if let Some(at) = at {
+                self.timers.push(Reverse((at, id)));
+            }
+            due.push(id);
+        }
+        // Wake at the deadline even if no session has a timer of its own.
+        self.timers.push(Reverse((deadline, WAKER.0)));
+        self.shutdown = Some((deadline, done));
+        due
     }
 
     fn take_id(&mut self) -> usize {
@@ -173,7 +256,8 @@ impl EventLoop {
         })
     }
 
-    /// Starts a connection. On failure the pipes are dropped, closing them.
+    /// Adds a session that connects to `addr`; driving it makes the first
+    /// attempt straight away.
     fn connect(&mut self, request: ConnectRequest) -> Option<usize> {
         let ConnectRequest {
             addr,
@@ -181,8 +265,7 @@ impl EventLoop {
             inbound,
             outbound,
         } = request;
-        let stream = TcpStream::connect(addr).ok()?;
-        self.add_session(stream, config, inbound, outbound, None)
+        self.add_session(Origin::Connect(addr), None, config, inbound, outbound)
     }
 
     fn listen(&mut self, request: ListenRequest) -> Option<usize> {
@@ -210,13 +293,39 @@ impl EventLoop {
 
     fn add_session(
         &mut self,
-        mut stream: TcpStream,
+        origin: Origin,
+        stream: Option<TcpStream>,
         config: ConnectionConfig,
         inbound: Writer<Message>,
         outbound: Reader<Message>,
-        delivery: Option<Delivery>,
     ) -> Option<usize> {
         let id = self.take_id();
+        let waker = self.token_waker(id);
+        let mut session = Session {
+            engine: None,
+            retry: Retry::new(config.reconnect),
+            reconnect_at: None,
+            closing: None,
+            origin,
+            config,
+            inbound,
+            outbound,
+            task_waker: Waker::from(waker.clone()),
+            waker,
+        };
+        if let Some(stream) = stream {
+            session.engine = Some(self.start_engine(id, stream, &session.config)?);
+        }
+        self.sessions.insert(id, session);
+        Some(id)
+    }
+
+    fn start_engine(
+        &self,
+        id: usize,
+        mut stream: TcpStream,
+        config: &ConnectionConfig,
+    ) -> Option<Engine> {
         self.poll
             .registry()
             .register(
@@ -225,34 +334,107 @@ impl EventLoop {
                 Interest::READABLE | Interest::WRITABLE,
             )
             .ok()?;
-        let waker = self.token_waker(id);
-        let session = Session {
-            engine: Engine::new(stream, config),
-            inbound,
-            outbound,
-            delivery,
-            task_waker: Waker::from(waker.clone()),
-            waker,
-        };
-        self.sessions.insert(id, session);
-        Some(id)
+        Some(Engine::new(stream, config.clone()))
     }
 
     fn drive_session(&mut self, id: usize) {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        if session.drive().is_err() {
+        let now = Instant::now();
+        if session.closing.is_none() {
+            // The socket dropped its sender: deliver what is queued, within
+            // the linger, then close.
+            let mut cx = Context::from_waker(&session.task_waker);
+            if session.outbound.poll_closed(&mut cx).is_ready() {
+                let deadline = match session.config.linger {
+                    Linger::For(linger) if linger.is_zero() => {
+                        self.close_session(id);
+                        return;
+                    }
+                    Linger::For(linger) => Some(now + linger),
+                    Linger::Forever => None,
+                };
+                if let Some(at) = deadline {
+                    self.timers.push(Reverse((at, id)));
+                }
+                session.closing = Some(Closing { deadline });
+            }
+        }
+        if session
+            .closing
+            .as_ref()
+            .and_then(|closing| closing.deadline)
+            .is_some_and(|at| at <= now)
+        {
             self.close_session(id);
             return;
         }
+        if session.engine.is_none() {
+            if session.reconnect_at.is_some_and(|at| at > now) {
+                return;
+            }
+            session.reconnect_at = None;
+            let Origin::Connect(addr) = session.origin else {
+                // Accepted sessions always have an engine until they end.
+                self.close_session(id);
+                return;
+            };
+            let config = session.config.clone();
+            let engine = TcpStream::connect(addr)
+                .ok()
+                .and_then(|stream| self.start_engine(id, stream, &config));
+            let Some(session) = self.sessions.get_mut(&id) else {
+                return;
+            };
+            match engine {
+                Some(engine) => session.engine = Some(engine),
+                None => {
+                    self.retry_later(id);
+                    return;
+                }
+            }
+        }
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        match session.drive() {
+            Ok(()) => {}
+            Err(err) => {
+                if let Some(mut engine) = session.engine.take() {
+                    let _ = self.poll.registry().deregister(engine.stream());
+                }
+                // libzmq reconnects after connection errors but not after
+                // protocol errors such as a failed handshake.
+                let reconnects =
+                    matches!(session.origin, Origin::Connect(_)) && err.is_connection_error();
+                if reconnects {
+                    self.retry_later(id);
+                } else {
+                    self.close_session(id);
+                }
+                return;
+            }
+        }
+        // A closing session is finished once everything queued is written.
+        // Shutdown also finishes sessions whose socket is still open.
+        let caught_up = session.engine.as_ref().is_some_and(Engine::caught_up);
+        if caught_up && (session.outbound.is_closed() || self.shutdown.is_some()) {
+            self.close_session(id);
+            return;
+        }
+        let established = session.engine.as_ref().is_some_and(Engine::is_established);
+        if !established {
+            return;
+        }
+        session.retry.reset();
         // An accepted connection reaches its listener's owner only once the
         // handshake has succeeded, as in libzmq.
-        if session.engine.is_established()
+        if let Origin::Accepted(delivery) = &mut session.origin
             && let Some(Delivery {
                 listener,
                 connection,
-            }) = session.delivery.take()
+            }) = delivery.take()
         {
             let delivered = self
                 .listeners
@@ -264,9 +446,27 @@ impl EventLoop {
         }
     }
 
+    /// Schedules the session's next connection attempt, or closes it if its
+    /// policy gives up.
+    fn retry_later(&mut self, id: usize) {
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        match session.retry.next_delay() {
+            Some(delay) => {
+                let at = Instant::now() + delay;
+                session.reconnect_at = Some(at);
+                self.timers.push(Reverse((at, id)));
+            }
+            None => self.close_session(id),
+        }
+    }
+
     fn close_session(&mut self, id: usize) {
-        if let Some(mut session) = self.sessions.remove(&id) {
-            let _ = self.poll.registry().deregister(session.engine.stream());
+        if let Some(session) = self.sessions.remove(&id)
+            && let Some(mut engine) = session.engine
+        {
+            let _ = self.poll.registry().deregister(engine.stream());
         }
     }
 
@@ -296,12 +496,12 @@ impl EventLoop {
         for stream in accepted {
             let (tx, outbound) = pipe(config.send_hwm);
             let (inbound, rx) = pipe(config.recv_hwm);
-            let delivery = Delivery {
+            let origin = Origin::Accepted(Some(Delivery {
                 listener: id,
                 connection: Connection { tx, rx },
-            };
+            }));
             if let Some(session) =
-                self.add_session(stream, config.clone(), inbound, outbound, Some(delivery))
+                self.add_session(origin, Some(stream), config.clone(), inbound, outbound)
             {
                 self.drive_session(session);
             }
@@ -309,17 +509,38 @@ impl EventLoop {
     }
 }
 
-/// A connection and the pipes it serves. Dropping it closes the stream and
-/// both pipes.
+/// A peer's pipes and, while connected, its engine. A connecting session
+/// outlives individual connections: its pipes, and any messages queued in
+/// them, survive until it gives up or is closed. Dropping it closes the
+/// stream and both pipes.
 struct Session {
-    engine: Engine,
+    engine: Option<Engine>,
+    origin: Origin,
+    config: ConnectionConfig,
+    retry: Retry,
+    /// When the next connection attempt is due, while disconnected.
+    reconnect_at: Option<Instant>,
+    /// Set once the socket has dropped its sender, or shutdown has begun.
+    closing: Option<Closing>,
     inbound: Writer<Message>,
     outbound: Reader<Message>,
-    /// For an accepted connection: the socket's end of the pipes, handed to
-    /// the listener once the handshake succeeds.
-    delivery: Option<Delivery>,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
+}
+
+/// A session delivering its last queued messages.
+struct Closing {
+    /// When to give up; `None` lingers until done.
+    deadline: Option<Instant>,
+}
+
+/// How a session came about, which decides whether it reconnects.
+enum Origin {
+    /// We connected to this address, and reconnect to it.
+    Connect(SocketAddr),
+    /// A listener accepted it. It never reconnects, and its pipes go to the
+    /// listener's owner once the handshake succeeds.
+    Accepted(Option<Delivery>),
 }
 
 struct Delivery {
@@ -329,12 +550,15 @@ struct Delivery {
 
 impl Session {
     fn drive(&mut self) -> Result<(), EngineError> {
+        let Some(engine) = &mut self.engine else {
+            return Ok(());
+        };
         let mut cx = Context::from_waker(&self.task_waker);
         let mut pipes = Pipes {
             inbound: &mut self.inbound,
             outbound: &mut self.outbound,
         };
-        self.engine.drive(&mut pipes, &mut cx)
+        engine.drive(&mut pipes, &mut cx)
     }
 }
 
