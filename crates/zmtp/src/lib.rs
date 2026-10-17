@@ -7,6 +7,7 @@
 //! Specs: RFC 13, 15, 23, 24, 25, 26, 27, 32, 37. See `docs/rfc-compliance.md`.
 
 mod codec;
+mod command;
 mod frame;
 mod greeting;
 mod identity;
@@ -15,6 +16,10 @@ mod message;
 mod socket_type;
 
 pub use codec::{CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming};
+pub use command::{
+    Command, CommandError, CommandName, ErrorReason, Group, InvalidGroup, InvalidName, Metadata,
+    Ping, PingContext, PropertyName, TooLong, Ttl,
+};
 pub use frame::Frame;
 pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, Replay, Version};
 pub use identity::{Identity, InvalidIdentity};
