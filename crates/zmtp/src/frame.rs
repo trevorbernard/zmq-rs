@@ -53,7 +53,7 @@ impl Frame {
     }
 
     /// Wraps `bytes` without copying, unless it is small enough to inline.
-    fn from_shared(bytes: Bytes) -> Self {
+    pub(crate) fn from_shared(bytes: Bytes) -> Self {
         Self::inline(&bytes).unwrap_or(Self(Repr::Shared(bytes)))
     }
 
