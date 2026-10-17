@@ -25,3 +25,4 @@ nix flake check    # tests, clippy, rustfmt
 | `zmq-pipe` | Lock-free SPSC pipes with high-water marks |
 | `zmq-core` | I/O threads, transports, sessions, socket patterns |
 | `zmq` | Public, type-safe API |
+| `tests/interop` | Interoperability tests against the reference libzmq |

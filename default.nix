@@ -13,6 +13,9 @@ in
     };
     cargoBuildFlags = ["--workspace"];
     cargoTestFlags = ["--workspace" "--all-features"];
+    # The interop tests link the reference libzmq through pkg-config.
+    nativeBuildInputs = [pkgs.pkg-config];
+    buildInputs = [pkgs.zeromq];
     meta = with pkgs.lib; {
       description = "Idiomatic, type-safe ZeroMQ for Rust";
       homepage = "https://github.com/trevorbernard/zmq-rs";
