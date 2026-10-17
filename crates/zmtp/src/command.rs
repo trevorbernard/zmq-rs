@@ -167,51 +167,42 @@ impl Command {
         }
     }
 
+    /// The command name.
+    pub fn name(&self) -> &[u8] {
+        match self {
+            Self::Ready(_) => b"READY",
+            Self::Error(_) => b"ERROR",
+            Self::Ping(_) => b"PING",
+            Self::Pong(_) => b"PONG",
+            Self::Subscribe(_) => b"SUBSCRIBE",
+            Self::Cancel(_) => b"CANCEL",
+            Self::Join(_) => b"JOIN",
+            Self::Leave(_) => b"LEAVE",
+            Self::Other { name, .. } => name.as_slice(),
+        }
+    }
+
     /// Appends the command body (name length, name, data) to `out`, ready
     /// for [`Encoder::encode_command`](crate::Encoder::encode_command).
     pub fn encode(&self, out: &mut Vec<u8>) {
+        put_name(out, self.name());
         match self {
             Self::Ready(metadata) => {
-                put_name(out, b"READY");
                 for (name, value) in metadata.iter() {
                     put_name(out, name.as_slice());
                     out.extend_from_slice(&(value.len() as u32).to_be_bytes());
                     out.extend_from_slice(value);
                 }
             }
-            Self::Error(reason) => {
-                put_name(out, b"ERROR");
-                put_name(out, reason.as_slice());
-            }
+            Self::Error(reason) => put_name(out, reason.as_slice()),
             Self::Ping(ping) => {
-                put_name(out, b"PING");
                 out.extend_from_slice(&ping.ttl.deciseconds().to_be_bytes());
                 out.extend_from_slice(ping.context.as_slice());
             }
-            Self::Pong(context) => {
-                put_name(out, b"PONG");
-                out.extend_from_slice(context.as_slice());
-            }
-            Self::Subscribe(topic) => {
-                put_name(out, b"SUBSCRIBE");
-                out.extend_from_slice(topic);
-            }
-            Self::Cancel(topic) => {
-                put_name(out, b"CANCEL");
-                out.extend_from_slice(topic);
-            }
-            Self::Join(group) => {
-                put_name(out, b"JOIN");
-                out.extend_from_slice(group.as_slice());
-            }
-            Self::Leave(group) => {
-                put_name(out, b"LEAVE");
-                out.extend_from_slice(group.as_slice());
-            }
-            Self::Other { name, data } => {
-                put_name(out, name.as_slice());
-                out.extend_from_slice(data);
-            }
+            Self::Pong(context) => out.extend_from_slice(context.as_slice()),
+            Self::Subscribe(topic) | Self::Cancel(topic) => out.extend_from_slice(topic),
+            Self::Join(group) | Self::Leave(group) => out.extend_from_slice(group.as_slice()),
+            Self::Other { data, .. } => out.extend_from_slice(data),
         }
     }
 }
@@ -327,6 +318,12 @@ impl ErrorReason {
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
+
+    /// A reason known to fit.
+    pub(crate) fn from_static(reason: &'static str) -> Self {
+        debug_assert!(reason.len() <= MAX_SHORT);
+        Self(Frame::from(reason))
+    }
 }
 
 impl Group {
@@ -374,6 +371,12 @@ impl PropertyName {
     pub fn as_slice(&self) -> &[u8] {
         &self.0
     }
+
+    /// A name known to be valid.
+    pub(crate) fn from_static(name: &'static str) -> Self {
+        debug_assert!(Self::new(name).is_ok());
+        Self(Frame::from(name))
+    }
 }
 
 impl PartialEq for PropertyName {
@@ -419,6 +422,12 @@ impl Metadata {
             .iter()
             .find(|(n, _)| n.as_slice().eq_ignore_ascii_case(name))
             .map(|(_, value)| value)
+    }
+
+    /// Appends a property whose value is known to fit.
+    pub(crate) fn push(&mut self, name: PropertyName, value: Frame) {
+        debug_assert!(value.len() <= MAX_PROPERTY_VALUE);
+        self.properties.push((name, value));
     }
 
     /// The properties in order.
@@ -573,6 +582,25 @@ mod tests {
                 "{command:?}"
             );
         }
+    }
+
+    #[test]
+    fn names() {
+        let commands = all_commands();
+        let names: Vec<&[u8]> = commands.iter().map(|c| c.name()).collect();
+        let expected: [&[u8]; 10] = [
+            b"READY",
+            b"READY",
+            b"ERROR",
+            b"PING",
+            b"PONG",
+            b"SUBSCRIBE",
+            b"CANCEL",
+            b"JOIN",
+            b"LEAVE",
+            b"HELLO",
+        ];
+        assert_eq!(names, expected);
     }
 
     #[test]

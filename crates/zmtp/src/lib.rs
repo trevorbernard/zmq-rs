@@ -10,6 +10,7 @@ mod codec;
 mod command;
 mod frame;
 mod greeting;
+mod handshake;
 mod identity;
 mod mechanism;
 mod message;
@@ -22,6 +23,7 @@ pub use command::{
 };
 pub use frame::Frame;
 pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, Replay, Version};
+pub use handshake::{Established, HandshakeError, NullHandshake};
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use message::{EmptyMessage, IntoIter, Iter, Message};

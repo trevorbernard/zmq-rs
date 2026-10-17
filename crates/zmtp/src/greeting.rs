@@ -75,7 +75,7 @@ pub enum Version {
 }
 
 /// Octets of a ZMTP 1.0 peer's identity frame read during the greeting.
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Default)]
 pub struct Replay {
     buf: [u8; SIGNATURE_LEN],
     len: usize,
