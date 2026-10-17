@@ -19,6 +19,9 @@ use mio::net::TcpListener;
 use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
 use crate::{Reconnect, Security};
 
+/// libzmq's default ZMQ_HANDSHAKE_IVL.
+const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// libzmq's default ZMQ_SNDHWM and ZMQ_RCVHWM.
 const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
@@ -57,6 +60,37 @@ pub struct ConnectionConfig {
     pub linger: Linger,
     /// The security mechanism, NULL by default.
     pub security: Security,
+    /// ZMTP 3.1 heartbeats, off by default.
+    pub heartbeat: Option<Heartbeat>,
+    /// How long the greeting and security handshake may take before the
+    /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s).
+    pub handshake_timeout: Option<Duration>,
+}
+
+/// ZMTP 3.1 heartbeats: libzmq's `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT`
+/// and `ZMQ_HEARTBEAT_TTL`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Heartbeat {
+    /// How often to send a PING once the handshake is done.
+    pub interval: Duration,
+    /// How long to wait for any traffic after a PING before giving up on the
+    /// connection.
+    pub timeout: Duration,
+    /// How long the peer should wait for traffic from us before giving up,
+    /// announced in each PING. Zero announces none.
+    pub ttl: Duration,
+}
+
+impl Heartbeat {
+    /// A PING every `interval`, timing out after the same interval and
+    /// announcing no TTL, like libzmq's defaults.
+    pub fn every(interval: Duration) -> Self {
+        Self {
+            interval,
+            timeout: interval,
+            ttl: Duration::ZERO,
+        }
+    }
 }
 
 /// How long a closed connection keeps delivering the messages queued on it,
@@ -157,6 +191,8 @@ impl ConnectionConfig {
             reconnect: Reconnect::default(),
             linger: Linger::default(),
             security: Security::default(),
+            heartbeat: None,
+            handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
         }
     }
 }

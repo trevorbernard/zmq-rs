@@ -16,7 +16,9 @@ mod socket;
 #[cfg(test)]
 mod test_support;
 
-pub use context::{Connection, ConnectionConfig, Context, Linger, Listener, ShutdownTimedOut};
+pub use context::{
+    Connection, ConnectionConfig, Context, Heartbeat, Linger, Listener, ShutdownTimedOut,
+};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};

@@ -318,6 +318,7 @@ impl EventLoop {
             retry: Retry::new(config.reconnect),
             reconnect_at: None,
             closing: None,
+            scheduled: None,
             origin,
             config,
             inbound,
@@ -429,6 +430,7 @@ impl EventLoop {
                 return;
             }
         }
+        session.schedule_deadline(id, &mut self.timers);
         // A closing session is finished once everything queued is written.
         // Shutdown also finishes sessions whose socket is still open.
         let caught_up = session.engine.as_ref().is_some_and(Engine::caught_up);
@@ -543,6 +545,8 @@ struct Session {
     reconnect_at: Option<Instant>,
     /// Set once the socket has dropped its sender, or shutdown has begun.
     closing: Option<Closing>,
+    /// The engine deadline a timer is already set for.
+    scheduled: Option<Instant>,
     inbound: Writer<Message>,
     outbound: Reader<Message>,
     /// Shared with the socket's [`Connection`].
@@ -579,6 +583,23 @@ struct Delivery {
 }
 
 impl Session {
+    /// Sets a timer for the engine's next deadline unless one is already
+    /// set for it or earlier, so busy connections do not flood the heap.
+    fn schedule_deadline(&mut self, id: usize, timers: &mut BinaryHeap<Reverse<(Instant, usize)>>) {
+        let Some(deadline) = self.engine.as_ref().and_then(Engine::next_deadline) else {
+            return;
+        };
+        let now = Instant::now();
+        if self
+            .scheduled
+            .is_some_and(|scheduled| scheduled > now && scheduled <= deadline)
+        {
+            return;
+        }
+        self.scheduled = Some(deadline);
+        timers.push(Reverse((deadline, id)));
+    }
+
     fn drive(&mut self) -> Result<(), EngineError> {
         let Some(engine) = &mut self.engine else {
             return Ok(());

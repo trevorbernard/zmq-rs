@@ -163,7 +163,9 @@ with both. Messages flow only after READY has been both sent and received.
   - Malformed commands are silently ignored.
 
 **Design:** reject a PING body shorter than 2 octets. Hold the TTL as a
-`Duration`. Any decoded frame resets the liveness timers.
+`Duration`. Any decoded frame resets the liveness deadlines. `Heartbeat`
+sets the interval, timeout and TTL we announce; an expired deadline is a
+connection error, so a connecting session reconnects.
 
 ### Subscriptions on the wire
 

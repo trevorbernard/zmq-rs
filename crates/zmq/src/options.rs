@@ -3,7 +3,9 @@
 use std::fmt;
 use std::num::NonZeroUsize;
 
-use zmq_core::{Linger, Reconnect, Security};
+use std::time::Duration;
+
+use zmq_core::{Heartbeat, Linger, Reconnect, Security};
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Identity};
 
@@ -28,6 +30,11 @@ pub struct SocketOptions {
     /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
     /// default.
     pub security: Security,
+    /// ZMTP 3.1 heartbeats (`ZMQ_HEARTBEAT_IVL` and friends), off by
+    /// default.
+    pub heartbeat: Option<Heartbeat>,
+    /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
+    pub handshake_timeout: Option<Duration>,
 }
 
 impl Default for SocketOptions {
@@ -42,6 +49,8 @@ impl Default for SocketOptions {
             reconnect: Reconnect::default(),
             max_frame_size: None,
             security: Security::default(),
+            heartbeat: None,
+            handshake_timeout: Some(Duration::from_secs(30)),
         }
     }
 }

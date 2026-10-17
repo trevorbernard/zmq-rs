@@ -9,18 +9,22 @@ use std::io::{self, Read, Write};
 use std::mem;
 use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
+use std::time::{Duration, Instant};
 
 use mio::net::TcpStream;
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting,
     GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message, NullHandshake,
-    PeerGreeting, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, Role,
-    ServerStep, ZapReply,
+    PeerGreeting, PendingAuthentication, Ping, PingContext, PlainClient, PlainServer,
+    PlainServerConfig, Role, ServerStep, Ttl, Version, ZapReply,
 };
 
 use crate::context::PeerSlot;
 use crate::{ConnectionConfig, Security, ZapResponder};
+
+/// The shortest PING interval, so a zero interval cannot spin.
+const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Stop taking messages from the socket while this much output is unsent.
 const MAX_PENDING_OUTPUT: usize = 64 * 1024;
@@ -34,6 +38,43 @@ pub(crate) struct Engine {
     out_pos: usize,
     /// The last look at the socket's pipe found it empty or closed.
     outbound_empty: bool,
+    deadlines: Deadlines,
+}
+
+/// When the engine must act or give up, all `None` while not applicable.
+#[derive(Debug, Default)]
+struct Deadlines {
+    /// The greeting and handshake must finish by then.
+    handshake: Option<Instant>,
+    /// The next PING is due.
+    next_ping: Option<Instant>,
+    /// Traffic must arrive by then, after we sent a PING.
+    ping_timeout: Option<Instant>,
+    /// Traffic must arrive by then, per the TTL in the peer's last PING.
+    ttl: Option<Instant>,
+}
+
+impl Deadlines {
+    fn earliest(&self) -> Option<Instant> {
+        [self.handshake, self.next_ping, self.ping_timeout, self.ttl]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
+    /// Whether the peer has failed one of its deadlines at `now`.
+    fn expired(&self, now: Instant) -> bool {
+        [self.handshake, self.ping_timeout, self.ttl]
+            .into_iter()
+            .flatten()
+            .any(|deadline| deadline <= now)
+    }
+
+    /// Any frame from the peer shows it is alive.
+    fn heard_from_peer(&mut self) {
+        self.ping_timeout = None;
+        self.ttl = None;
+    }
 }
 
 enum State {
@@ -82,13 +123,16 @@ pub(crate) enum EngineError {
     Greeting(GreetingError),
     Handshake(HandshakeError),
     Decode(DecodeError),
+    /// The handshake took too long, or the peer went quiet past a heartbeat
+    /// deadline.
+    Timeout,
 }
 
 impl EngineError {
     /// Whether the connection broke, rather than the peer misbehaving.
     /// libzmq reconnects after the former but not the latter.
     pub(crate) fn is_connection_error(&self) -> bool {
-        matches!(self, Self::Io(_) | Self::PeerClosed)
+        matches!(self, Self::Io(_) | Self::PeerClosed | Self::Timeout)
     }
 }
 
@@ -126,11 +170,43 @@ impl Engine {
             out,
             out_pos: 0,
             outbound_empty: false,
+            deadlines: Deadlines::default(),
         }
     }
 
     pub(crate) fn stream(&mut self) -> &mut TcpStream {
         &mut self.stream
+    }
+
+    /// When the engine next needs driving even without I/O: a PING is due,
+    /// or a deadline expires.
+    pub(crate) fn next_deadline(&self) -> Option<Instant> {
+        self.deadlines.earliest()
+    }
+
+    /// Sends a PING if one is due, and starts waiting for traffic.
+    fn maybe_ping(&mut self, now: Instant) {
+        let (Some(heartbeat), Some(due)) = (self.config.heartbeat, self.deadlines.next_ping) else {
+            return;
+        };
+        if due > now {
+            return;
+        }
+        let State::Active { encoder, .. } = &self.state else {
+            return;
+        };
+        let ping = Command::Ping(Ping {
+            ttl: Ttl::from_duration(heartbeat.ttl),
+            context: PingContext::default(),
+        });
+        let mut body = Vec::new();
+        ping.encode(&mut body);
+        if encoder.encode_command(&body, &mut self.out).is_ok() {
+            self.deadlines.next_ping = Some(now + heartbeat.interval.max(MIN_PING_INTERVAL));
+            self.deadlines
+                .ping_timeout
+                .get_or_insert(now + heartbeat.timeout);
+        }
     }
 
     /// Whether the handshake has completed and messages are flowing.
@@ -154,6 +230,11 @@ impl Engine {
         if !self.connected && !self.finish_connect()? {
             return Ok(());
         }
+        let now = Instant::now();
+        if self.deadlines.expired(now) {
+            return Err(EngineError::Timeout);
+        }
+        self.maybe_ping(now);
         loop {
             let wrote = self.flush()?;
             let pulled = self.pull_outbound(pipes, cx)?;
@@ -174,6 +255,11 @@ impl Engine {
                 // libzmq disables Nagle; batching happens in the encoder.
                 let _ = self.stream.set_nodelay(true);
                 self.connected = true;
+                // As libzmq, the handshake clock starts once connected.
+                self.deadlines.handshake = self
+                    .config
+                    .handshake_timeout
+                    .map(|timeout| Instant::now() + timeout);
                 Ok(true)
             }
             Err(err) if err.kind() == io::ErrorKind::NotConnected => Ok(false),
@@ -372,6 +458,14 @@ impl Engine {
             }
             Step::Established(established) => {
                 let version = established.version;
+                self.deadlines.handshake = None;
+                // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
+                if matches!(version, Version::V3_0 | Version::V3_1) {
+                    self.deadlines.next_ping = self
+                        .config
+                        .heartbeat
+                        .map(|heartbeat| Instant::now() + heartbeat.interval);
+                }
                 // Published before any message from this peer can be
                 // delivered, so a ROUTER always knows who sent it.
                 *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
@@ -455,7 +549,11 @@ impl Engine {
             progressed = true;
         }
         loop {
-            match decoder.decode().map_err(EngineError::Decode)? {
+            let item = decoder.decode().map_err(EngineError::Decode)?;
+            if item.is_some() {
+                self.deadlines.heard_from_peer();
+            }
+            match item {
                 Some(Incoming::Message(message)) => {
                     if let Some(refused) = deliver(pipes.inbound, message, cx)? {
                         *pending = Some(refused);
@@ -482,6 +580,11 @@ impl Engine {
             .map_err(|err| EngineError::Handshake(HandshakeError::MalformedCommand(err)))?;
         // Answer heartbeats; subscriptions and the rest belong to patterns.
         if let Command::Ping(ping) = command {
+            if ping.ttl != Ttl::ZERO {
+                self.deadlines
+                    .ttl
+                    .get_or_insert(Instant::now() + ping.ttl.as_duration());
+            }
             let mut pong = Vec::new();
             Command::Pong(ping.context).encode(&mut pong);
             let _ = encoder.encode_command(&pong, &mut self.out);

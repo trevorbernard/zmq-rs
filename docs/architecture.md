@@ -146,6 +146,18 @@ A failed authentication is a protocol error: the session ends without
 reconnecting, as in libzmq. The authenticated user id and metadata reach
 the socket through `Connection::peer().authenticated`.
 
+## Heartbeats and deadlines
+
+An engine keeps deadlines rather than timers: the handshake deadline
+(`handshake_timeout`, 30 s by default, starting once TCP connects), the next
+PING, the PING timeout, and the TTL from the peer's last PING. Each drive
+checks them, sends a PING if one is due, and reports the earliest; the
+session sets an event-loop timer for it only when it is earlier than the
+one already pending. As in libzmq, any frame from the peer clears the PING
+timeout and TTL, and a PING carrying a TTL sets one. An expired deadline is
+a connection error, so a connecting session reconnects. PINGs are sent only
+to ZMTP 3.x peers.
+
 ## Status
 
 | Slice | Contents | State |
@@ -157,5 +169,5 @@ the socket through `Connection::peer().authenticated`.
 | 4b | DEALER and ROUTER: identity routing and envelopes | done |
 | 4c | REQ and REP | done |
 | 5a | PLAIN on connections, with an `Authenticator` trait | done |
-| 5b | Heartbeats (ZMTP 3.1 PING/PONG) | next |
-| 5c | `inproc` | |
+| 5b | Heartbeats (ZMTP 3.1 PING/PONG) and the handshake deadline | done |
+| 5c | `inproc` | next |

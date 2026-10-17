@@ -19,6 +19,9 @@ const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
 const ZMQ_PLAIN_PASSWORD: c_int = 46;
 const ZMQ_ZAP_DOMAIN: c_int = 55;
+const ZMQ_HEARTBEAT_IVL: c_int = 75;
+const ZMQ_HEARTBEAT_TTL: c_int = 76;
+const ZMQ_HEARTBEAT_TIMEOUT: c_int = 77;
 const ZMQ_SNDMORE: c_int = 2;
 
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
@@ -191,6 +194,15 @@ impl Socket {
     pub fn set_plain_client(&self, username: &[u8], password: &[u8]) {
         self.set_bytes(ZMQ_PLAIN_USERNAME, username);
         self.set_bytes(ZMQ_PLAIN_PASSWORD, password);
+    }
+
+    /// Sends a PING every `interval`, gives up after `timeout` without
+    /// traffic, and asks peers to give up after `ttl`.
+    pub fn set_heartbeat(&self, interval: Duration, timeout: Duration, ttl: Duration) {
+        let millis = |d: Duration| c_int::try_from(d.as_millis()).unwrap_or(c_int::MAX);
+        self.set_int(ZMQ_HEARTBEAT_IVL, millis(interval));
+        self.set_int(ZMQ_HEARTBEAT_TIMEOUT, millis(timeout));
+        self.set_int(ZMQ_HEARTBEAT_TTL, millis(ttl));
     }
 
     /// The ZAP domain this server authenticates in.

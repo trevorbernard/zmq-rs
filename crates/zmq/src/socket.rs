@@ -131,6 +131,8 @@ impl<T: SocketType> Socket<T> {
             reconnect: options.reconnect,
             max_frame_size: options.max_frame_size,
             security: options.security,
+            heartbeat: options.heartbeat,
+            handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
         };
         Self {

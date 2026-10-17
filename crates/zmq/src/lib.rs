@@ -65,7 +65,7 @@ pub use endpoint::Error;
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use socket::{Dealer, Pull, Push, Rep, Req, Request, Router, Socket, SocketType};
 pub use zmq_core::{
-    Authenticator, Linger, PeerGone, Reconnect, RouteOutcome, Security, ZapResponder,
+    Authenticator, Heartbeat, Linger, PeerGone, Reconnect, RouteOutcome, Security, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
