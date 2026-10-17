@@ -43,9 +43,16 @@ pub(crate) enum IoCommand {
 pub(crate) struct ConnectRequest {
     pub(crate) addr: Address,
     pub(crate) config: ConnectionConfig,
-    pub(crate) inbound: Writer<Message>,
-    pub(crate) outbound: Reader<Message>,
-    pub(crate) peer: PeerSlot,
+    pub(crate) pipes: ConnectPipes,
+}
+
+/// The pipes a connecting session serves.
+pub(crate) enum ConnectPipes {
+    /// The same pipes for the session's whole life.
+    Now(SessionPipes),
+    /// New pipes for each completed handshake, delivered here
+    /// (`ZMQ_IMMEDIATE`).
+    Immediate(Writer<Connection>),
 }
 
 /// A bound listener to serve, and where to deliver accepted connections.
@@ -271,17 +278,25 @@ impl EventLoop {
         let ConnectRequest {
             addr,
             config,
-            inbound,
-            outbound,
-            peer,
+            pipes,
         } = request;
-        let pipes = SessionPipes {
-            inbound,
-            outbound,
-            peer,
-        };
         let endpoint = addr.to_string();
-        self.add_session(Origin::Connect(addr), None, config, pipes, endpoint)
+        let (pipes, immediate) = match pipes {
+            ConnectPipes::Now(pipes) => (pipes, None),
+            ConnectPipes::Immediate(connections) => {
+                let (pending, pipes) = SessionPipes::new(&config);
+                let immediate = Immediate {
+                    connections,
+                    pending: Some(pending),
+                };
+                (pipes, Some(immediate))
+            }
+        };
+        let id = self.add_session(Origin::Connect(addr), None, config, pipes, endpoint)?;
+        if let Some(session) = self.sessions.get_mut(&id) {
+            session.immediate = immediate;
+        }
+        Some(id)
     }
 
     fn listen(&mut self, request: ListenRequest) -> Option<usize> {
@@ -338,6 +353,7 @@ impl EventLoop {
             outbound,
             peer,
             subscriptions: Topics::default(),
+            immediate: None,
             endpoint,
             progress: Progress::default(),
             task_waker: Waker::from(waker.clone()),
@@ -373,9 +389,17 @@ impl EventLoop {
         };
         let now = Instant::now();
         if session.closing.is_none() {
+            let mut cx = Context::from_waker(&session.task_waker);
+            // The socket is gone while it holds none of our pipes.
+            if let Some(immediate) = &mut session.immediate
+                && immediate.connections.poll_closed(&mut cx).is_ready()
+                && immediate.pending.is_some()
+            {
+                self.close_session(id);
+                return;
+            }
             // The socket dropped its sender: deliver what is queued, within
             // the linger, then close.
-            let mut cx = Context::from_waker(&session.task_waker);
             if session.outbound.poll_closed(&mut cx).is_ready() {
                 let deadline = match session.config.linger {
                     Linger::For(linger) if linger.is_zero() => {
@@ -443,6 +467,11 @@ impl EventLoop {
                 let reconnects =
                     matches!(session.origin, Origin::Connect(_)) && err.is_connection_error();
                 if reconnects {
+                    if session.immediate.is_some() {
+                        // The socket's pipes close, discarding what it
+                        // queued; the next connection gets new ones.
+                        session.renew_pipes();
+                    }
                     self.retry_later(id);
                 } else {
                     self.close_session(id);
@@ -463,6 +492,13 @@ impl EventLoop {
             return;
         }
         session.retry.reset();
+        if let Some(immediate) = &mut session.immediate
+            && let Some(connection) = immediate.pending.take()
+            && immediate.connections.try_send(connection).is_err()
+        {
+            self.close_session(id);
+            return;
+        }
         // An accepted connection reaches its listener's owner only once the
         // handshake has succeeded, as in libzmq.
         if let Origin::Accepted(delivery) = &mut session.origin
@@ -547,22 +583,11 @@ impl EventLoop {
             }
         }
         for stream in accepted {
-            let (tx, outbound) = message_pipe(config.send_hwm, config.conflate_outbound);
-            let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
-            let peer = PeerSlot::default();
+            let (connection, pipes) = SessionPipes::new(&config);
             let origin = Origin::Accepted(Some(Delivery {
                 listener: id,
-                connection: Connection {
-                    tx,
-                    rx,
-                    peer: peer.clone(),
-                },
+                connection,
             }));
-            let pipes = SessionPipes {
-                inbound,
-                outbound,
-                peer,
-            };
             if let Some(session) = self.add_session(
                 origin,
                 Some(stream),
@@ -597,6 +622,8 @@ struct Session {
     peer: PeerSlot,
     /// Subscriptions sent so far, replayed after reconnecting.
     subscriptions: Topics,
+    /// Set for `ZMQ_IMMEDIATE` connections.
+    immediate: Option<Immediate>,
     /// What monitor events call this connection.
     endpoint: String,
     /// How far the current engine has got, as monitors have been told.
@@ -613,10 +640,40 @@ struct Progress {
 }
 
 /// The session's ends of a connection, and the slot for its peer.
-struct SessionPipes {
+pub(crate) struct SessionPipes {
     inbound: Writer<Message>,
     outbound: Reader<Message>,
     peer: PeerSlot,
+}
+
+impl SessionPipes {
+    /// New pipes for a connection configured as `config`: the socket's
+    /// ends, and the session's.
+    pub(crate) fn new(config: &ConnectionConfig) -> (Connection, Self) {
+        let (tx, outbound) = message_pipe(config.send_hwm, config.conflate_outbound);
+        let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
+        let peer = PeerSlot::default();
+        let connection = Connection {
+            tx,
+            rx,
+            peer: peer.clone(),
+        };
+        let pipes = Self {
+            inbound,
+            outbound,
+            peer,
+        };
+        (connection, pipes)
+    }
+}
+
+/// A `ZMQ_IMMEDIATE` session's way to the socket.
+struct Immediate {
+    /// Where each established connection's pipes go.
+    connections: Writer<Connection>,
+    /// The socket's ends of the current pipes, until the handshake on them
+    /// completes.
+    pending: Option<Connection>,
 }
 
 /// A session delivering its last queued messages.
@@ -640,6 +697,20 @@ struct Delivery {
 }
 
 impl Session {
+    /// Replaces the pipes with new ones for the next connection, closing
+    /// those the socket holds.
+    fn renew_pipes(&mut self) {
+        let (connection, pipes) = SessionPipes::new(&self.config);
+        self.inbound = pipes.inbound;
+        self.outbound = pipes.outbound;
+        self.peer = pipes.peer;
+        // The socket greets the new pipes as a new peer.
+        self.subscriptions = Topics::default();
+        if let Some(immediate) = &mut self.immediate {
+            immediate.pending = Some(connection);
+        }
+    }
+
     /// Sets a timer for the engine's next deadline unless one is already
     /// set for it or earlier, so busy connections do not flood the heap.
     fn schedule_deadline(&mut self, id: usize, timers: &mut BinaryHeap<Reverse<(Instant, usize)>>) {

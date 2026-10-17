@@ -148,6 +148,18 @@ never conflates, so no subscription is lost. Options that shape
 connections, such as conflation, apply to binds and connects made after
 they are set.
 
+### `ZMQ_IMMEDIATE`
+
+With `SocketOptions::immediate`, a TCP or IPC connecting session has no
+pipes until a handshake completes. It then makes a fresh pipe pair and
+hands the socket's end over an accept queue, as a listener does. When the
+connection breaks, the session drops those pipes, so the socket loses the
+peer and what was queued on it, and makes new ones for the next
+connection. Its subscription replay starts afresh, since the socket greets
+the new pipes as a new peer. Like an accepted peer, a new connection
+reaches the socket only when the socket next takes peers in, which is what
+libzmq does too. `inproc` and PEER's `connect_peer` ignore the option.
+
 In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
 takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a
 `Request<'_>` that borrows the socket until `reply(self, ..)` consumes it.

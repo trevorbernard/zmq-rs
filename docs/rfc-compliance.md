@@ -349,6 +349,8 @@ Rules shared by every pattern:
 
 **`CONFLATE`** (PUSH, PULL, PUB, SUB, DEALER): each queue holds only the latest message and the HWM no longer applies. libzmq conflates both directions, which can lose all but the last of a SUB's subscriptions; here the subscription direction never conflates.
 
+**`IMMEDIATE`** (`SocketOptions::immediate`): a TCP or IPC connection is a peer only while its handshake has completed, so messages are not queued for peers that are not there, and what was queued on a connection that breaks is discarded. As in libzmq, `inproc` ignores it, and a new connection reaches the socket only when the socket is next used, so an idle SUB subscribes on it then. PEER's `connect_peer`, which libzmq refuses with `IMMEDIATE`, ignores it.
+
 ### PIPELINE (RFC 30) and EXPAIR (RFC 31)
 
 - **PUSH** round-robins to available peers. With none available it blocks or errors, and never drops.

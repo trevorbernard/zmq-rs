@@ -13,6 +13,7 @@ use std::task::{Context as TaskContext, Poll};
 use zmq_pipe::{Reader, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
+use crate::transport::Address;
 use crate::{Connection, ConnectionConfig, Context};
 
 /// A stable name for a peer within one socket. Keys only grow, so peers
@@ -145,10 +146,21 @@ impl Peers {
     }
 
     /// Connects to `addr`. The peer is usable at once: messages queue until
-    /// the connection is up, as in libzmq.
-    pub fn connect(&mut self, addr: SocketAddr) -> PeerKey {
-        let connection = self.context.connect(addr, self.config.clone());
-        self.add(connection)
+    /// the connection is up, as in libzmq. With
+    /// [`immediate`](ConnectionConfig::immediate) there is no peer until
+    /// then, so no key.
+    pub fn connect(&mut self, addr: SocketAddr) -> Option<PeerKey> {
+        self.connect_to(Address::Tcp(addr))
+    }
+
+    fn connect_to(&mut self, addr: Address) -> Option<PeerKey> {
+        if self.config.immediate {
+            let connections = self.context.connect_immediate(addr, self.config.clone());
+            self.listeners.push(connections);
+            return None;
+        }
+        let connection = self.context.connect_to(addr, self.config.clone());
+        Some(self.add(connection))
     }
 
     /// Binds `addr` and accepts peers on it. Returns the bound address.
@@ -177,11 +189,11 @@ impl Peers {
     }
 
     /// Connects to the Unix domain socket at `path`, retrying until it is
-    /// bound.
+    /// bound. No key with [`immediate`](ConnectionConfig::immediate), as
+    /// for [`connect`](Self::connect).
     #[cfg(unix)]
-    pub fn connect_ipc(&mut self, path: &std::path::Path) -> PeerKey {
-        let connection = self.context.connect_ipc(path, self.config.clone());
-        self.add(connection)
+    pub fn connect_ipc(&mut self, path: &std::path::Path) -> Option<PeerKey> {
+        self.connect_to(Address::Ipc(path.to_owned()))
     }
 
     /// Binds the `inproc` `name` and accepts peers on it.
@@ -191,7 +203,8 @@ impl Peers {
         Ok(())
     }
 
-    /// Connects to the `inproc` `name`, binding or not.
+    /// Connects to the `inproc` `name`, binding or not. `inproc` ignores
+    /// [`immediate`](ConnectionConfig::immediate), as libzmq does.
     pub fn connect_inproc(&mut self, name: &str) -> PeerKey {
         let connection = self.context.connect_inproc(name, self.config.clone());
         self.add(connection)

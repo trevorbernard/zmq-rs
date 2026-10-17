@@ -443,7 +443,9 @@ impl Socket<Peer> {
     /// Connects to the PEER at `endpoint` and returns its id. Messages to
     /// it queue until the connection is up.
     pub fn connect_peer(&mut self, endpoint: &str) -> Result<PeerId, crate::Error> {
-        let key = self.connect_key(endpoint)?;
+        let key = self
+            .connect_key(endpoint)?
+            .expect("PEER never connects with ZMQ_IMMEDIATE");
         let mut cx = TaskContext::from_waker(Waker::noop());
         let (peers, table) = self.parts_accepting(&mut cx);
         let id = table

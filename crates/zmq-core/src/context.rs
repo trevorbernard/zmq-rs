@@ -19,7 +19,9 @@ use mio::net::TcpListener;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 
-use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
+use crate::io_thread::{
+    ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
+};
 use crate::transport::{Address, IpcCleanup, StreamListener};
 use crate::{EventKind, MonitorSink, Reconnect, Security};
 
@@ -90,6 +92,11 @@ pub struct ConnectionConfig {
     pub max_frame_size: Option<u64>,
     /// How a connecting session retries. Accepted connections never do.
     pub reconnect: Reconnect,
+    /// Whether a TCP or IPC connection reaches the socket only once its
+    /// handshake completes, and leaves it whenever it breaks, discarding
+    /// what was queued on it (`ZMQ_IMMEDIATE`). Otherwise its pipes exist,
+    /// and queue, from the start and across reconnections.
+    pub immediate: bool,
     /// How long queued messages keep being delivered after the connection's
     /// sender is dropped.
     pub linger: Linger,
@@ -374,6 +381,7 @@ impl ConnectionConfig {
             conflate_outbound: false,
             max_frame_size: None,
             reconnect: Reconnect::default(),
+            immediate: false,
             linger: Linger::default(),
             security: Security::default(),
             heartbeat: None,
@@ -590,19 +598,34 @@ impl Context {
         self.connect_to(Address::Ipc(path.to_owned()), config)
     }
 
-    fn connect_to(&self, addr: Address, config: ConnectionConfig) -> Connection {
-        let (tx, outbound) = message_pipe(config.send_hwm, config.conflate_outbound);
-        let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
-        let peer = PeerSlot::default();
+    pub(crate) fn connect_to(&self, addr: Address, config: ConnectionConfig) -> Connection {
+        let (connection, pipes) = SessionPipes::new(&config);
         self.io_thread()
             .send(IoCommand::Connect(Box::new(ConnectRequest {
                 addr,
                 config,
-                inbound,
-                outbound,
-                peer: peer.clone(),
+                pipes: ConnectPipes::Now(pipes),
             })));
-        Connection { tx, rx, peer }
+        connection
+    }
+
+    /// Connects to `addr` in the background, as `ZMQ_IMMEDIATE`: each time
+    /// a handshake completes, a new [`Connection`] arrives on the returned
+    /// queue, and it closes when that connection breaks. The queue's
+    /// reader going away ends the session.
+    pub(crate) fn connect_immediate(
+        &self,
+        addr: Address,
+        config: ConnectionConfig,
+    ) -> Reader<Connection> {
+        let (writer, connections) = pipe(Hwm::Unlimited);
+        self.io_thread()
+            .send(IoCommand::Connect(Box::new(ConnectRequest {
+                addr,
+                config,
+                pipes: ConnectPipes::Immediate(writer),
+            })));
+        connections
     }
 
     /// Closes every listener and connection, lets connections deliver their

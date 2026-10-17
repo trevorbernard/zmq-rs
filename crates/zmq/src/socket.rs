@@ -275,6 +275,16 @@ pub struct Socket<T: SocketType> {
     _type: PhantomData<T>,
 }
 
+#[cfg(feature = "draft")]
+fn is_peer(kind: zmtp::SocketType) -> bool {
+    kind == zmtp::SocketType::Peer
+}
+
+#[cfg(not(feature = "draft"))]
+fn is_peer(_: zmtp::SocketType) -> bool {
+    false
+}
+
 impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
@@ -290,6 +300,8 @@ impl<T: SocketType> Socket<T> {
                 options.send_hwm
             },
             recv_hwm: options.recv_hwm,
+            // PEER's connect_peer names the peer at once.
+            immediate: options.immediate && !is_peer(T::KIND),
             linger: options.linger,
             reconnect: options.reconnect,
             max_frame_size: options.max_frame_size,
@@ -367,8 +379,12 @@ impl<T: SocketType> Socket<T> {
         self.connect_key(endpoint).map(drop)
     }
 
-    /// Connects to `endpoint` and returns the new peer.
-    pub(crate) fn connect_key(&mut self, endpoint: &str) -> Result<zmq_core::PeerKey, Error> {
+    /// Connects to `endpoint` and returns the new peer, unless
+    /// [`immediate`](SocketOptions::immediate) defers it.
+    pub(crate) fn connect_key(
+        &mut self,
+        endpoint: &str,
+    ) -> Result<Option<zmq_core::PeerKey>, Error> {
         let key = match endpoint::connect_target(endpoint)? {
             Target::Tcp(addr) => self.peers.connect(addr),
             #[cfg(unix)]
@@ -376,7 +392,7 @@ impl<T: SocketType> Socket<T> {
             #[cfg(not(unix))]
             Target::Ipc(_) => unreachable!("ipc is refused when parsing"),
             Target::IpcAnywhere => unreachable!("refused when parsing"),
-            Target::Inproc(name) => self.peers.connect_inproc(&name),
+            Target::Inproc(name) => Some(self.peers.connect_inproc(&name)),
         };
         self.routing.connected(self.peers.list_mut());
         Ok(key)

@@ -25,6 +25,12 @@ pub struct SocketOptions {
     pub linger: Linger,
     /// How connections retry (`ZMQ_RECONNECT_IVL`, default 100 ms).
     pub reconnect: Reconnect,
+    /// Whether a TCP or IPC connection becomes a peer only once its
+    /// handshake completes, and stops being one whenever it breaks,
+    /// discarding what was queued on it (`ZMQ_IMMEDIATE`, default off). Off,
+    /// messages queue on it from [`connect`](crate::Socket::connect) on and
+    /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
+    pub immediate: bool,
     /// The largest frame accepted from peers (`ZMQ_MAXMSGSIZE`).
     pub max_frame_size: Option<u64>,
     /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
@@ -47,6 +53,7 @@ impl Default for SocketOptions {
             recv_hwm: hwm,
             linger: Linger::default(),
             reconnect: Reconnect::default(),
+            immediate: false,
             max_frame_size: None,
             security: Security::default(),
             heartbeat: None,
