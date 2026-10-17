@@ -261,10 +261,11 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
 
 **Design:**
 - `Authenticator` is a Rust trait: `authenticate(&self, ZapRequest, ZapResponder)`. The responder may answer at once or later from any thread, so authentication never has to block an I/O thread; a responder dropped unanswered counts as status 500. A closure `Fn(&ZapRequest) -> ZapReply` implements it for the synchronous case. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. An optional adapter can bind the RFC's inproc endpoint for existing handlers.
-- Not yet implemented: ZAP for NULL sockets with a domain, and CURVE.
+- NULL with ZAP is `Security::null_authenticated(domain, authenticator)`: before sending READY, the socket asks the authenticator about the peer (`ZapCredentials::Null`, its address), as libzmq does for a NULL socket with a ZAP domain. Success sends READY and records the user id; 400 and 500 send ERROR, and 300 closes silently. ZMTP 1.0 and 2.0 peers are refused at the greeting, as libzmq refuses them whenever ZAP is in use. Verified against libzmq both ways, its ZAP handler included.
+- CURVE with ZAP is `Security::curve_server_authenticated`; see CURVE above.
 - **A single function maps `ZapStatus` to READY, a silent close, or ERROR, and every mechanism goes through it.** libzmq commit ba63f037 fixed a GSSAPI bug where READY was sent despite a rejection; this design rules that bug out.
 - The sans-IO handshake has a `WaitingForZap` state.
-- CURVE server authentication is `CurveAuth::{None, Zap { domain: Option<Domain>, handler }}`.
+- CURVE server authentication is `Security::curve_server` (none) or `Security::curve_server_authenticated` (an authenticator).
 
 ### Z85 (RFC 32)
 

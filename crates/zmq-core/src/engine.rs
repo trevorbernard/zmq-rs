@@ -16,9 +16,10 @@ use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
     CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
     Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
-    Membership, Message, NullHandshake, PeerGreeting, PendingAuthentication,
-    PendingCurveAuthentication, Ping, PingContext, PlainClient, PlainServer, PlainServerConfig,
-    Role, ServerStep, SocketType, Subscription, Ttl, Version, ZapFailure, ZapReply,
+    Membership, Message, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
+    PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
+    PlainServer, PlainServerConfig, Role, ServerStep, SocketType, Subscription, Ttl, Version,
+    ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -113,6 +114,7 @@ enum Mechanism {
 
 /// A server handshake waiting for ZAP, by mechanism.
 enum Pending {
+    Null(PendingNullAuthentication),
     Plain(PendingAuthentication),
     Curve(Box<PendingCurveAuthentication>),
 }
@@ -203,6 +205,10 @@ impl Engine {
         let mechanism = match &config.security {
             Security::Null => zmtp::Mechanism::Null {
                 legacy_peers: LegacyPeers::Allow,
+            },
+            // libzmq refuses ZMTP 1.0 and 2.0 peers whenever ZAP is in use.
+            Security::NullAuthenticated { .. } => zmtp::Mechanism::Null {
+                legacy_peers: LegacyPeers::Refuse,
             },
             Security::PlainClient(_) => zmtp::Mechanism::Plain(Role::Client),
             Security::PlainServer { .. } => zmtp::Mechanism::Plain(Role::Server),
@@ -416,7 +422,7 @@ impl Engine {
         cx: &mut Context<'_>,
     ) -> Result<bool, EngineError> {
         match mem::replace(&mut self.state, State::Failed) {
-            State::Greeting(greeting) => self.receive_greeting(greeting),
+            State::Greeting(greeting) => self.receive_greeting(greeting, cx),
             State::Handshake { mechanism, decoder } => {
                 self.receive_handshake(mechanism, decoder, pipes, cx)
             }
@@ -437,7 +443,11 @@ impl Engine {
         }
     }
 
-    fn receive_greeting(&mut self, mut greeting: Greeting) -> Result<bool, EngineError> {
+    fn receive_greeting(
+        &mut self,
+        mut greeting: Greeting,
+        cx: &mut Context<'_>,
+    ) -> Result<bool, EngineError> {
         let mut buf = [0u8; 64];
         let n = match self.stream.read(&mut buf) {
             Ok(0) => return Err(EngineError::PeerClosed),
@@ -458,7 +468,7 @@ impl Engine {
             self.state = State::Greeting(greeting);
             return Ok(true);
         };
-        let mechanism = self.start_mechanism(&peer)?;
+        let mechanism = self.start_mechanism(&peer, cx)?;
         let mut decoder = Decoder::new(
             peer.version(),
             DecoderConfig {
@@ -476,9 +486,38 @@ impl Engine {
     }
 
     /// Starts the configured mechanism once the greeting is done.
-    fn start_mechanism(&mut self, peer: &PeerGreeting) -> Result<Mechanism, EngineError> {
+    fn start_mechanism(
+        &mut self,
+        peer: &PeerGreeting,
+        cx: &mut Context<'_>,
+    ) -> Result<Mechanism, EngineError> {
         let config = &self.config;
         let mechanism = match &config.security {
+            Security::NullAuthenticated {
+                domain,
+                authenticator,
+            } => {
+                let zap = NullZapConfig {
+                    domain: domain.clone(),
+                    peer_address: self.stream.zap_address(),
+                };
+                let started = NullHandshake::start_authenticated(
+                    config.socket_type,
+                    &config.identity,
+                    zap,
+                    peer,
+                );
+                // READY waits for the authenticator; nothing is read meanwhile.
+                started.map(|(pending, request)| {
+                    let (answer, reply) = mpsc::channel();
+                    authenticator
+                        .authenticate(request, ZapResponder::new(answer, cx.waker().clone()));
+                    Mechanism::Authenticating {
+                        pending: Pending::Null(pending),
+                        reply,
+                    }
+                })
+            }
             Security::Null => {
                 NullHandshake::start(config.socket_type, &config.identity, peer, &mut self.out)
                     .map(Mechanism::Null)
@@ -558,6 +597,10 @@ impl Engine {
                     Err(mpsc::TryRecvError::Disconnected) => ZapReply::InternalError,
                 };
                 match pending {
+                    Pending::Null(pending) => {
+                        let handshake = pending.reply(answer, &mut self.out);
+                        Step::Continue(Mechanism::Null(self.handshake_result(handshake)?))
+                    }
                     Pending::Plain(pending) => {
                         let server = pending.reply(answer, &mut self.out);
                         Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))

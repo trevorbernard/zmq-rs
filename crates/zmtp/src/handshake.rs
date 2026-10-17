@@ -10,7 +10,8 @@ use zeroize::Zeroizing;
 
 use crate::{
     Authenticated, Command, CommandError, Encoder, ErrorReason, Frame, Identity, Incoming, Message,
-    Metadata, PeerGreeting, PropertyName, SocketType, Version, ZapFailure, ZapReply,
+    Metadata, PeerGreeting, PropertyName, SocketType, Version, ZapCredentials, ZapFailure,
+    ZapReply, ZapRequest,
 };
 
 /// The NULL handshake for one connection, after the greeting.
@@ -21,6 +22,26 @@ pub struct NullHandshake {
     version: Version,
     legacy_peer_type: Option<SocketType>,
     implicit_subscription: bool,
+    /// Who ZAP accepted the peer as, for an authenticated NULL handshake.
+    authenticated: Option<Authenticated>,
+}
+
+/// Where a NULL handshake that asks ZAP is told whom it asks about.
+#[derive(Debug, Clone)]
+pub struct NullZapConfig {
+    /// The ZAP domain, which libzmq requires to be set for NULL to ask ZAP.
+    pub domain: Frame,
+    /// The peer's address, passed to ZAP.
+    pub peer_address: String,
+}
+
+/// A NULL handshake waiting for ZAP's verdict before sending READY.
+#[derive(Debug)]
+#[must_use]
+pub struct PendingNullAuthentication {
+    socket_type: SocketType,
+    identity: Identity,
+    version: Version,
 }
 
 /// A connection ready to carry messages.
@@ -120,7 +141,33 @@ impl NullHandshake {
             version,
             legacy_peer_type,
             implicit_subscription,
+            authenticated: None,
         })
+    }
+
+    /// Starts a NULL handshake that asks ZAP about the peer before sending
+    /// READY, as libzmq does when a NULL socket has a ZAP domain. Nothing is
+    /// written yet. ZMTP 1.0 and 2.0 peers, which have no READY to hold
+    /// back, are refused, as libzmq refuses them whenever ZAP is in use.
+    pub fn start_authenticated(
+        socket_type: SocketType,
+        identity: &Identity,
+        zap: NullZapConfig,
+        peer: &PeerGreeting,
+    ) -> Result<(PendingNullAuthentication, ZapRequest), HandshakeError> {
+        let version = require_zmtp_3(peer)?;
+        let request = ZapRequest {
+            domain: zap.domain,
+            address: zap.peer_address,
+            identity: Frame::copy_from_slice(identity.as_slice()),
+            credentials: ZapCredentials::Null,
+        };
+        let pending = PendingNullAuthentication {
+            socket_type,
+            identity: identity.clone(),
+            version,
+        };
+        Ok((pending, request))
     }
 
     /// Handles the next item from the peer. Writes an ERROR to `out` when we
@@ -133,13 +180,17 @@ impl NullHandshake {
         match (self.version, incoming) {
             (Version::V3_0 | Version::V3_1, Incoming::Command(body)) => {
                 match Command::parse(&body).map_err(HandshakeError::MalformedCommand)? {
-                    Command::Ready(metadata) => accept_peer(
-                        self.socket_type,
-                        self.version,
-                        metadata,
-                        Rejection::SendError,
-                        out,
-                    ),
+                    Command::Ready(metadata) => {
+                        let mut established = accept_peer(
+                            self.socket_type,
+                            self.version,
+                            metadata,
+                            Rejection::SendError,
+                            out,
+                        )?;
+                        established.authenticated = self.authenticated;
+                        Ok(established)
+                    }
                     Command::Error(reason) => Err(HandshakeError::PeerError(reason)),
                     other => Err(HandshakeError::UnexpectedCommand(Frame::copy_from_slice(
                         other.name(),
@@ -168,6 +219,28 @@ impl NullHandshake {
                 Err(HandshakeError::UnexpectedMessage)
             }
         }
+    }
+}
+
+impl PendingNullAuthentication {
+    /// Applies ZAP's verdict: READY on success, then the peer's READY ends
+    /// the handshake; otherwise ERROR with the status, or a silent close
+    /// for 300, as libzmq does.
+    pub fn reply(
+        self,
+        reply: ZapReply,
+        out: &mut Vec<u8>,
+    ) -> Result<NullHandshake, HandshakeError> {
+        let authenticated = zap_verdict(reply, self.version, out)?;
+        let ready = Command::Ready(local_metadata(self.socket_type, &self.identity));
+        write_command(self.version, &ready, out);
+        Ok(NullHandshake {
+            socket_type: self.socket_type,
+            version: self.version,
+            legacy_peer_type: None,
+            implicit_subscription: false,
+            authenticated: Some(authenticated),
+        })
     }
 }
 
@@ -386,6 +459,81 @@ mod tests {
         command_frame(Command::Error(
             ErrorReason::new("incompatible socket type").unwrap(),
         ))
+    }
+
+    // ---- ZMTP 3.x, asking ZAP ----
+
+    fn zap() -> NullZapConfig {
+        NullZapConfig {
+            domain: Frame::from("global"),
+            peer_address: "10.0.0.1".into(),
+        }
+    }
+
+    fn accepted() -> ZapReply {
+        ZapReply::Ok {
+            user_id: Frame::from("anon"),
+            metadata: Metadata::new(),
+        }
+    }
+
+    #[test]
+    fn an_authenticated_start_asks_zap_before_ready() {
+        let (_, request) =
+            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1).unwrap();
+        assert_eq!(request.credentials, ZapCredentials::Null);
+        assert_eq!(request.credentials.mechanism(), "NULL");
+        assert_eq!(request.domain, Frame::from("global"));
+        assert_eq!(request.address, "10.0.0.1");
+        assert_eq!(request.identity, Frame::from("me"));
+    }
+
+    #[test]
+    fn an_accepted_peer_gets_ready_and_is_recorded() {
+        let (pending, _) =
+            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1).unwrap();
+        let mut out = Vec::new();
+        let handshake = pending.reply(accepted(), &mut out).unwrap();
+        let (_, plain_ready) = start(SocketType::Router, &V3_1);
+        assert_eq!(out, plain_ready, "the same READY a plain NULL sends");
+        let established = handshake
+            .receive(peer_ready(&[("Socket-Type", "DEALER")]), &mut Vec::new())
+            .unwrap();
+        assert_eq!(
+            established.authenticated.unwrap().user_id,
+            Frame::from("anon")
+        );
+    }
+
+    #[test]
+    fn a_refused_peer_gets_the_status_or_silence() {
+        for (reply, sent) in [
+            (ZapReply::AuthenticationFailure, Some("400")),
+            (ZapReply::InternalError, Some("500")),
+            (ZapReply::TemporaryFailure, None),
+        ] {
+            let (pending, _) =
+                NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1)
+                    .unwrap();
+            let mut out = Vec::new();
+            assert!(matches!(
+                pending.reply(reply, &mut out),
+                Err(HandshakeError::Authentication(_))
+            ));
+            let expected = sent
+                .map(|code| command_frame(Command::Error(ErrorReason::new(code).unwrap())))
+                .unwrap_or_default();
+            assert_eq!(out, expected);
+        }
+    }
+
+    #[test]
+    fn an_authenticated_start_refuses_legacy_peers() {
+        let legacy = PeerGreeting::Zmtp2 { socket_type: 5 };
+        assert!(matches!(
+            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &legacy),
+            Err(HandshakeError::LegacyPeer)
+        ));
     }
 
     // ---- ZMTP 3.x ----

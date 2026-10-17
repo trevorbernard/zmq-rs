@@ -13,6 +13,15 @@ pub enum Security {
     /// No security (the default).
     #[default]
     Null,
+    /// No security, but `authenticator` is asked about each peer before the
+    /// handshake completes, as libzmq does for a NULL socket with a ZAP
+    /// domain. It sees `ZapCredentials::Null` and the peer's address.
+    /// ZMTP 1.0 and 2.0 peers are refused, as libzmq refuses them.
+    NullAuthenticated {
+        /// The ZAP domain the authenticator sees.
+        domain: Frame,
+        authenticator: Arc<dyn Authenticator>,
+    },
     /// PLAIN client: sends a username and password in clear text, so use it
     /// only on trusted networks or over a secure transport.
     PlainClient(PlainCredentials),
@@ -41,6 +50,15 @@ pub enum Security {
 }
 
 impl Security {
+    /// No security, but `authenticator` is asked about each peer, by its
+    /// address, before the handshake completes.
+    pub fn null_authenticated(domain: impl Into<Frame>, authenticator: impl Authenticator) -> Self {
+        Self::NullAuthenticated {
+            domain: domain.into(),
+            authenticator: Arc::new(authenticator),
+        }
+    }
+
     /// A PLAIN server in `domain` that asks `authenticator`.
     pub fn plain_server(domain: impl Into<Frame>, authenticator: impl Authenticator) -> Self {
         Self::PlainServer {
@@ -135,6 +153,10 @@ impl fmt::Debug for Security {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Null => f.write_str("Null"),
+            Self::NullAuthenticated { domain, .. } => f
+                .debug_struct("NullAuthenticated")
+                .field("domain", domain)
+                .finish_non_exhaustive(),
             Self::PlainClient(credentials) => {
                 f.debug_tuple("PlainClient").field(credentials).finish()
             }

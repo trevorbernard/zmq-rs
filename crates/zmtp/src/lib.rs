@@ -35,7 +35,9 @@ pub use curve::{
 pub use curve_keys::{KeyError, Keypair, PublicKey, SecretKey};
 pub use frame::Frame;
 pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, Replay, Version};
-pub use handshake::{Established, HandshakeError, NullHandshake};
+pub use handshake::{
+    Established, HandshakeError, NullHandshake, NullZapConfig, PendingNullAuthentication,
+};
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use membership::Membership;

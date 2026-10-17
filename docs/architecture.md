@@ -152,13 +152,13 @@ is a compile error.
 ## Security
 
 `ConnectionConfig::security` (and `SocketOptions::security`) selects NULL,
-a PLAIN client with its credentials, a PLAIN server with an
+NULL with an `Authenticator` asked about each peer's address, a PLAIN client with its credentials, a PLAIN server with an
 `Authenticator`, a CURVE client with its key pair and the server's public
 key, or a CURVE server with its key pair and, optionally, an
 `Authenticator`. The engine runs the matching `zmtp` state machine after
 the greeting.
 
-A PLAIN or CURVE server hands each client's `ZapRequest` to its authenticator with a
+A PLAIN or CURVE server, or a NULL socket with an authenticator, hands each client's `ZapRequest` to its authenticator with a
 `ZapResponder`, then waits without reading further input. The authenticator
 may answer at once or later from any thread; answering wakes the session.
 A responder dropped unanswered counts as ZAP status 500, so a forgotten
@@ -371,3 +371,4 @@ Also check while on Linux:
 | 11b | RADIO and DISH (`draft` feature) | done |
 | 11c | SCATTER and GATHER (`draft` feature) | done |
 | 11d | PEER and CHANNEL (`draft` feature) | done |
+| 12 | ZAP for NULL connections | done |
