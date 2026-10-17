@@ -250,6 +250,15 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
+    /// A new monitor of this socket's events, as libzmq's
+    /// `zmq_socket_monitor`: its listeners binding, accepting and closing,
+    /// and its connections connecting, completing or failing handshakes,
+    /// and disconnecting. Monitors hear events from when they are made, so
+    /// make one before binding or connecting to hear everything.
+    pub fn monitor(&self) -> zmq_core::Monitor {
+        self.peers.monitor()
+    }
+
     /// Binds `endpoint`, such as `tcp://*:5555`, `tcp://127.0.0.1:*`,
     /// `ipc:///tmp/feed`, `ipc://*` or `inproc://name`, and accepts peers on
     /// it. Returns where it is bound: the actual port for `tcp://…:*`, and

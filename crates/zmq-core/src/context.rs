@@ -21,7 +21,7 @@ use std::path::{Path, PathBuf};
 
 use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
 use crate::transport::{Address, IpcCleanup, StreamListener};
-use crate::{Reconnect, Security};
+use crate::{EventKind, MonitorSink, Reconnect, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -94,6 +94,11 @@ pub struct ConnectionConfig {
     /// How long the greeting and security handshake may take before the
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s).
     pub handshake_timeout: Option<Duration>,
+    /// Where listeners and connections report [`Event`]s. Shared by every
+    /// connection made with a clone of this config.
+    ///
+    /// [`Event`]: crate::Event
+    pub monitor: MonitorSink,
 }
 
 /// ZMTP 3.1 heartbeats: libzmq's `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT`
@@ -331,6 +336,15 @@ fn hwm_sum(a: Hwm, b: Hwm) -> Hwm {
     }
 }
 
+/// Passes a bind's result through, reporting a failure to the monitors.
+fn reported<T>(result: io::Result<T>, config: &ConnectionConfig, endpoint: &str) -> io::Result<T> {
+    result.inspect_err(|err| {
+        config
+            .monitor
+            .emit(endpoint, EventKind::BindFailed(err.kind()));
+    })
+}
+
 impl ConnectionConfig {
     /// libzmq's defaults: empty identity, HWM 1000 each way, no frame limit.
     pub fn new(socket_type: SocketType) -> Self {
@@ -346,6 +360,7 @@ impl ConnectionConfig {
             security: Security::default(),
             heartbeat: None,
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
+            monitor: MonitorSink::default(),
         }
     }
 }
@@ -374,9 +389,13 @@ impl Context {
     /// reported here, and accepts peers on an I/O thread. Accepted
     /// connections use `config`.
     pub fn bind(&self, addr: SocketAddr, config: ConnectionConfig) -> io::Result<Listener> {
-        let listener = TcpListener::bind(addr)?;
-        let local_addr = listener.local_addr()?;
-        let connections = self.listen(StreamListener::Tcp(listener), None, config);
+        let bound = TcpListener::bind(addr).and_then(|listener| {
+            let local_addr = listener.local_addr()?;
+            Ok((listener, local_addr))
+        });
+        let (listener, local_addr) = reported(bound, &config, &format!("tcp://{addr}"))?;
+        let endpoint = format!("tcp://{local_addr}");
+        let connections = self.listen(StreamListener::Tcp(listener), None, endpoint, config);
         Ok(Listener {
             local_addr,
             connections,
@@ -389,8 +408,14 @@ impl Context {
     /// is `AddrInUse`. The file is removed when the listener closes.
     #[cfg(unix)]
     pub fn bind_ipc(&self, path: &Path, config: ConnectionConfig) -> io::Result<IpcListener> {
-        let (listener, cleanup) = crate::transport::bind_ipc(path)?;
-        let connections = self.listen(StreamListener::Unix(listener), Some(cleanup), config);
+        let endpoint = format!("ipc://{}", path.display());
+        let (listener, cleanup) = reported(crate::transport::bind_ipc(path), &config, &endpoint)?;
+        let connections = self.listen(
+            StreamListener::Unix(listener),
+            Some(cleanup),
+            endpoint,
+            config,
+        );
         Ok(IpcListener {
             path: path.to_owned(),
             connections,
@@ -401,18 +426,28 @@ impl Context {
     /// directory, for `ipc://*`. Both are removed when the listener closes.
     #[cfg(unix)]
     pub fn bind_ipc_anywhere(&self, config: ConnectionConfig) -> io::Result<IpcListener> {
-        let (listener, cleanup, path) = crate::transport::bind_ipc_anywhere()?;
-        let connections = self.listen(StreamListener::Unix(listener), Some(cleanup), config);
+        let (listener, cleanup, path) =
+            reported(crate::transport::bind_ipc_anywhere(), &config, "ipc://*")?;
+        let endpoint = format!("ipc://{}", path.display());
+        let connections = self.listen(
+            StreamListener::Unix(listener),
+            Some(cleanup),
+            endpoint,
+            config,
+        );
         Ok(IpcListener { path, connections })
     }
 
-    /// Serves `listener` on an I/O thread, returning its accept queue.
+    /// Serves `listener`, bound at `endpoint`, on an I/O thread, returning
+    /// its accept queue.
     fn listen(
         &self,
         listener: StreamListener,
         cleanup: Option<IpcCleanup>,
+        endpoint: String,
         config: ConnectionConfig,
     ) -> Reader<Connection> {
+        config.monitor.emit(&endpoint, EventKind::Listening);
         let (writer, connections) = pipe(Hwm::Unlimited);
         self.io_thread()
             .send(IoCommand::Listen(Box::new(ListenRequest {
@@ -420,6 +455,7 @@ impl Context {
                 config,
                 connections: writer,
                 cleanup,
+                endpoint,
             })));
         connections
     }

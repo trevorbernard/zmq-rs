@@ -18,7 +18,7 @@ use crate::context::PeerSlot;
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
 use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
-use crate::{Connection, ConnectionConfig, Linger, Topics};
+use crate::{Connection, ConnectionConfig, EventKind, Linger, Topics};
 
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
@@ -55,6 +55,8 @@ pub(crate) struct ListenRequest {
     pub(crate) connections: Writer<Connection>,
     /// What to remove once the listener closes.
     pub(crate) cleanup: Option<IpcCleanup>,
+    /// The bound endpoint, for monitor events.
+    pub(crate) endpoint: String,
 }
 
 /// A running I/O thread. Dropping it stops and joins the thread.
@@ -216,6 +218,10 @@ impl EventLoop {
     fn start_shutdown(&mut self, deadline: Instant, done: mpsc::Sender<usize>) -> Vec<usize> {
         for (_, mut entry) in self.listeners.drain() {
             let _ = self.poll.registry().deregister(&mut entry.listener);
+            entry
+                .config
+                .monitor
+                .emit(&entry.endpoint, EventKind::Closed);
         }
         let now = Instant::now();
         let mut due = Vec::with_capacity(self.sessions.len());
@@ -274,7 +280,8 @@ impl EventLoop {
             outbound,
             peer,
         };
-        self.add_session(Origin::Connect(addr), None, config, pipes)
+        let endpoint = addr.to_string();
+        self.add_session(Origin::Connect(addr), None, config, pipes, endpoint)
     }
 
     fn listen(&mut self, request: ListenRequest) -> Option<usize> {
@@ -283,6 +290,7 @@ impl EventLoop {
             config,
             connections,
             cleanup,
+            endpoint,
         } = request;
         let id = self.take_id();
         self.poll
@@ -295,6 +303,7 @@ impl EventLoop {
             config,
             connections,
             _cleanup: cleanup,
+            endpoint,
             task_waker: Waker::from(waker.clone()),
             waker,
         };
@@ -308,6 +317,7 @@ impl EventLoop {
         stream: Option<Stream>,
         config: ConnectionConfig,
         pipes: SessionPipes,
+        endpoint: String,
     ) -> Option<usize> {
         let SessionPipes {
             inbound,
@@ -328,6 +338,8 @@ impl EventLoop {
             outbound,
             peer,
             subscriptions: Topics::default(),
+            endpoint,
+            progress: Progress::default(),
             task_waker: Waker::from(waker.clone()),
             waker,
         };
@@ -417,9 +429,12 @@ impl EventLoop {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        match session.drive() {
+        let result = session.drive();
+        session.report_progress();
+        match result {
             Ok(()) => {}
             Err(err) => {
+                session.report_failure(&err);
                 if let Some(mut engine) = session.engine.take() {
                     let _ = self.poll.registry().deregister(engine.stream());
                 }
@@ -474,6 +489,10 @@ impl EventLoop {
         };
         match session.retry.next_delay() {
             Some(delay) => {
+                session.config.monitor.emit(
+                    &session.endpoint,
+                    EventKind::ConnectRetried { interval: delay },
+                );
                 let at = Instant::now() + delay;
                 session.reconnect_at = Some(at);
                 self.timers.push(Reverse((at, id)));
@@ -499,18 +518,32 @@ impl EventLoop {
             // The Listener was dropped: stop listening.
             if let Some(mut entry) = self.listeners.remove(&id) {
                 let _ = self.poll.registry().deregister(&mut entry.listener);
+                entry
+                    .config
+                    .monitor
+                    .emit(&entry.endpoint, EventKind::Closed);
             }
             return;
         }
         let config = entry.config.clone();
+        let endpoint = entry.endpoint.clone();
         let mut accepted = Vec::new();
         loop {
             match entry.listener.accept() {
-                Ok(stream) => accepted.push(stream),
+                Ok(stream) => {
+                    config.monitor.emit(&endpoint, EventKind::Accepted);
+                    accepted.push(stream);
+                }
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-                // WouldBlock, or a transient error such as too many open
-                // files: try again on the next readiness event.
-                Err(_) => break,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
+                // A transient error such as too many open files: try again
+                // on the next readiness event.
+                Err(err) => {
+                    config
+                        .monitor
+                        .emit(&endpoint, EventKind::AcceptFailed(err.kind()));
+                    break;
+                }
             }
         }
         for stream in accepted {
@@ -530,7 +563,13 @@ impl EventLoop {
                 outbound,
                 peer,
             };
-            if let Some(session) = self.add_session(origin, Some(stream), config.clone(), pipes) {
+            if let Some(session) = self.add_session(
+                origin,
+                Some(stream),
+                config.clone(),
+                pipes,
+                endpoint.clone(),
+            ) {
                 self.drive_session(session);
             }
         }
@@ -558,8 +597,19 @@ struct Session {
     peer: PeerSlot,
     /// Subscriptions sent so far, replayed after reconnecting.
     subscriptions: Topics,
+    /// What monitor events call this connection.
+    endpoint: String,
+    /// How far the current engine has got, as monitors have been told.
+    progress: Progress,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
+}
+
+/// How far a session's current engine has got.
+#[derive(Debug, Default, Clone, Copy)]
+struct Progress {
+    connected: bool,
+    established: bool,
 }
 
 /// The session's ends of a connection, and the slot for its peer.
@@ -607,6 +657,43 @@ impl Session {
         timers.push(Reverse((deadline, id)));
     }
 
+    /// Tells monitors what the engine has newly achieved.
+    fn report_progress(&mut self) {
+        let Some(engine) = &self.engine else {
+            return;
+        };
+        let monitor = &self.config.monitor;
+        if !self.progress.connected && engine.is_connected() {
+            self.progress.connected = true;
+            // Accepted connections were reported by their listener.
+            if matches!(self.origin, Origin::Connect(_)) {
+                monitor.emit(&self.endpoint, EventKind::Connected);
+            }
+        }
+        if !self.progress.established && engine.is_established() {
+            self.progress.established = true;
+            monitor.emit(&self.endpoint, EventKind::HandshakeSucceeded);
+        }
+    }
+
+    /// Tells monitors the engine has failed: a connection that was up is
+    /// disconnected, after a failed handshake if it never completed one. A
+    /// connection attempt that never connected reports nothing here.
+    fn report_failure(&mut self, err: &EngineError) {
+        let progress = std::mem::take(&mut self.progress);
+        if !progress.connected {
+            return;
+        }
+        let monitor = &self.config.monitor;
+        if !progress.established {
+            monitor.emit(
+                &self.endpoint,
+                EventKind::HandshakeFailed(err.handshake_failure()),
+            );
+        }
+        monitor.emit(&self.endpoint, EventKind::Disconnected);
+    }
+
     fn drive(&mut self) -> Result<(), EngineError> {
         let Some(engine) = &mut self.engine else {
             return Ok(());
@@ -629,6 +716,8 @@ struct ListenerEntry {
     connections: Writer<Connection>,
     /// Dropped with the entry, removing an `ipc://` socket's file.
     _cleanup: Option<IpcCleanup>,
+    /// The bound endpoint, for monitor events.
+    endpoint: String,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
 }

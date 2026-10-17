@@ -183,6 +183,11 @@ impl Peers {
         self.list.push(connection)
     }
 
+    /// A new monitor of this socket's events, from now on.
+    pub fn monitor(&self) -> crate::Monitor {
+        self.config.monitor.monitor()
+    }
+
     /// How many peers the socket currently has.
     pub fn len(&self) -> usize {
         self.list.len()

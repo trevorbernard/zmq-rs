@@ -105,8 +105,8 @@ pub use socket::{
     Dealer, Pair, Pub, Pull, Push, Rep, Req, Request, Router, Socket, SocketType, Sub, XPub, XSub,
 };
 pub use zmq_core::{
-    Authenticator, Heartbeat, Linger, PeerGone, Reconnect, RouteOutcome, Security, XPubEvent,
-    ZapResponder,
+    Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
+    ProtocolError, Reconnect, RouteOutcome, Security, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{

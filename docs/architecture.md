@@ -186,6 +186,34 @@ timeout and TTL, and a PING carrying a TTL sets one. An expired deadline is
 a connection error, so a connecting session reconnects. PINGs are sent only
 to ZMTP 3.x peers.
 
+## Monitoring
+
+`Socket::monitor` is libzmq's `zmq_socket_monitor` with typed events: each
+`Monitor` yields `Event { endpoint, kind }`. Every connection a socket
+makes or accepts shares its `ConnectionConfig::monitor` sink, so sessions
+and listeners on the I/O threads report straight to the socket's
+monitors; binding reports from the socket's thread.
+
+- `Listening`, `BindFailed`, `Accepted`, `AcceptFailed` and `Closed` come
+  from listeners, and carry the bound endpoint, as do the events of the
+  connections they accept.
+- `Connected` (connections we make), `HandshakeSucceeded`,
+  `HandshakeFailed` and `Disconnected` come from sessions as their engine
+  progresses. As in libzmq, a connection that was up reports
+  `Disconnected` when it ends, after `HandshakeFailed` if its handshake
+  never finished. A connection attempt that never connected reports only
+  `ConnectRetried { interval }`.
+- `HandshakeFailure` is `Authentication { status }` (300, 400 or 500, from
+  our authenticator, or from the server's ERROR for a client), `Protocol`
+  with the typed error, or `NoDetail` for a broken connection or timeout.
+- Any number of monitors hear every event. Each holds up to 1000 unread
+  events, then drops new ones, as libzmq's monitor socket does at its
+  default HWM. A sink with no monitors costs one uncontended lock per
+  event.
+- Not reported: libzmq's `CONNECT_DELAYED` (every connect is non-blocking
+  here), `CLOSE_FAILED`, and anything for `inproc`, which has no
+  listeners, streams or handshakes.
+
 ## Proxy
 
 `zmq::Proxy` is libzmq's `zmq_proxy_steerable`. It borrows a frontend and
@@ -338,3 +366,4 @@ Also check while on Linux:
 | 8a | CURVE in `zmtp`: Z85, keys, handshake, MESSAGE boxing | done |
 | 8b | CURVE on connections and sockets | done |
 | 9 | Built-in proxy, with capture and steering | done |
+| 10 | Socket monitoring | done |

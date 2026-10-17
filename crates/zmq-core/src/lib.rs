@@ -9,6 +9,7 @@
 mod context;
 mod engine;
 mod io_thread;
+mod monitor;
 mod pair;
 mod pubsub;
 mod reconnect;
@@ -25,6 +26,7 @@ pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
     ShutdownTimedOut,
 };
+pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
 pub use pair::Pair;
 pub use pubsub::{Publisher, Subscriber, Topics, XPubEvent};
 pub use reconnect::Reconnect;

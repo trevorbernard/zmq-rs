@@ -28,6 +28,17 @@ pub(crate) enum Address {
     Ipc(PathBuf),
 }
 
+impl std::fmt::Display for Address {
+    /// The endpoint string, as libzmq writes it.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Tcp(addr) => write!(f, "tcp://{addr}"),
+            #[cfg(unix)]
+            Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
+        }
+    }
+}
+
 /// One connection's byte stream.
 #[derive(Debug)]
 pub(crate) enum Stream {

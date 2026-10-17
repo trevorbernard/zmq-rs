@@ -18,12 +18,12 @@ use zmtp::{
     Greeting, GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message,
     NullHandshake, PeerGreeting, PendingAuthentication, PendingCurveAuthentication, Ping,
     PingContext, PlainClient, PlainServer, PlainServerConfig, Role, ServerStep, SocketType,
-    Subscription, Ttl, Version, ZapReply,
+    Subscription, Ttl, Version, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
 use crate::transport::Stream;
-use crate::{ConnectionConfig, Security, Topics, ZapResponder};
+use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
 
 /// The shortest PING interval, so a zero interval cannot spin.
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
@@ -144,6 +144,40 @@ pub(crate) enum EngineError {
 }
 
 impl EngineError {
+    /// What a monitor is told when this ends a handshake, as libzmq tells
+    /// it: authentication with a ZAP status, a protocol error, or no
+    /// detail for a broken connection or a timeout.
+    pub(crate) fn handshake_failure(&self) -> HandshakeFailure {
+        let protocol = |error| HandshakeFailure::Protocol(error);
+        match self {
+            Self::Handshake(HandshakeError::Authentication(failure)) => {
+                HandshakeFailure::Authentication {
+                    status: match failure {
+                        ZapFailure::Temporary => 300,
+                        ZapFailure::Denied => 400,
+                        ZapFailure::Internal => 500,
+                    },
+                }
+            }
+            // A client learns why from the server's ERROR, whose reason is
+            // the ZAP status when authentication refused it.
+            Self::Handshake(HandshakeError::PeerError(reason))
+                if matches!(reason.as_slice(), b"300" | b"400" | b"500") =>
+            {
+                let status = std::str::from_utf8(reason.as_slice())
+                    .ok()
+                    .and_then(|digits| digits.parse().ok())
+                    .expect("three ASCII digits");
+                HandshakeFailure::Authentication { status }
+            }
+            Self::Handshake(err) => protocol(ProtocolError::Handshake(err.clone())),
+            Self::Greeting(err) => protocol(ProtocolError::Greeting(err.clone())),
+            Self::Decode(err) => protocol(ProtocolError::Decode(err.clone())),
+            Self::Curve(err) => protocol(ProtocolError::Curve(*err)),
+            Self::Io(_) | Self::PeerClosed | Self::Timeout => HandshakeFailure::NoDetail,
+        }
+    }
+
     /// Whether the connection broke, rather than the peer misbehaving.
     /// libzmq reconnects after the former but not the latter.
     pub(crate) fn is_connection_error(&self) -> bool {
@@ -193,6 +227,12 @@ impl Engine {
             deadlines: Deadlines::default(),
             curve: None,
         }
+    }
+
+    /// Whether the stream has connected, for connections we make; accepted
+    /// streams count once the engine first runs.
+    pub(crate) fn is_connected(&self) -> bool {
+        self.connected
     }
 
     pub(crate) fn stream(&mut self) -> &mut Stream {
