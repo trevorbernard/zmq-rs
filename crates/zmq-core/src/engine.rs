@@ -374,6 +374,11 @@ impl Engine {
                 max_frame_size: self.config.max_frame_size,
             },
         );
+        // An unversioned ZMTP 1.0 peer's greeting octets were the start of
+        // its identity frame.
+        if let PeerGreeting::Zmtp1Unversioned { replay } = &peer {
+            decoder.extend_from_slice(replay);
+        }
         decoder.extend_from_slice(&buf[feed.consumed..n]);
         self.state = State::Handshake { mechanism, decoder };
         Ok(true)
