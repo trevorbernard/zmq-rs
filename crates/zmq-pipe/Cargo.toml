@@ -13,3 +13,7 @@ atomic-waker.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "throughput"
+harness = false

@@ -15,6 +15,7 @@ See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is 
 nix develop        # or `direnv allow`
 cargo test --workspace
 nix flake check    # tests, clippy, rustfmt
+cargo bench -p zmq-pipe   # pipe throughput, one process per measurement
 ```
 
 ## Layout
