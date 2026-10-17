@@ -11,6 +11,7 @@
 use std::fmt;
 use std::future::poll_fn;
 use std::num::NonZeroUsize;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
@@ -40,6 +41,7 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         sender: Some(sender),
         shared: shared.clone(),
         written: 0,
+        peer_read: 0,
         hwm,
     };
     let reader = Reader {
@@ -52,15 +54,31 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
     (writer, reader)
 }
 
-/// State both ends see.
+/// State both ends see. Each hot field gets its own cache line, so the
+/// reader's per-message writes to `read` and the wakers do not drag one line
+/// back and forth between the two cores (false sharing).
 #[derive(Debug, Default)]
 struct Shared {
     /// Items the reader has taken, for the writer's high-water mark check.
-    read: AtomicU64,
+    read: CachePadded<AtomicU64>,
     /// Set by the reader before it goes away.
     reader_closed: AtomicBool,
-    reader_waker: AtomicWaker,
-    writer_waker: AtomicWaker,
+    reader_waker: CachePadded<AtomicWaker>,
+    writer_waker: CachePadded<AtomicWaker>,
+}
+
+/// Aligns `T` to its own cache line. 128 octets covers Apple silicon's line
+/// and x86-64's adjacent-line prefetcher, as crossbeam does.
+#[repr(align(128))]
+#[derive(Debug, Default)]
+struct CachePadded<T>(T);
+
+impl<T> Deref for CachePadded<T> {
+    type Target = T;
+
+    fn deref(&self) -> &T {
+        &self.0
+    }
 }
 
 /// The sending end of a pipe.
@@ -70,6 +88,10 @@ pub struct Writer<T> {
     sender: Option<mpsc::Sender<T>>,
     shared: Arc<Shared>,
     written: u64,
+    /// The reader's progress as last loaded from `Shared::read`. It only
+    /// lags the truth, so it can make the pipe look full but never let the
+    /// writer exceed the high-water mark.
+    peer_read: u64,
     hwm: Option<u64>,
 }
 
@@ -168,12 +190,22 @@ impl<T> Writer<T> {
         self.shared.reader_closed.load(Ordering::Acquire)
     }
 
-    fn is_full(&self) -> bool {
-        self.hwm
-            .is_some_and(|hwm| self.written - self.shared.read.load(Ordering::Acquire) >= hwm)
+    /// Checks the high-water mark against the cached reader progress, and
+    /// reloads the reader's shared counter only when that looks full. Like
+    /// libzmq's `_peers_msgs_read`, this keeps the writer from pulling the
+    /// reader's cache line across cores on every send.
+    fn is_full(&mut self) -> bool {
+        let Some(hwm) = self.hwm else {
+            return false;
+        };
+        if self.written - self.peer_read < hwm {
+            return false;
+        }
+        self.peer_read = self.shared.read.load(Ordering::Acquire);
+        self.written - self.peer_read >= hwm
     }
 
-    fn ready(&self) -> Poll<Result<(), ()>> {
+    fn ready(&mut self) -> Poll<Result<(), ()>> {
         if self.is_closed() {
             Poll::Ready(Err(()))
         } else if self.is_full() {
@@ -493,6 +525,23 @@ mod tests {
         thread::sleep(Duration::from_millis(20));
         writer.try_send("late").unwrap();
         assert_eq!(consumer.join().unwrap(), Some("late"));
+    }
+
+    #[test]
+    fn hot_shared_fields_sit_on_separate_cache_lines() {
+        // The reader writes `read` on every receive and both sides touch the
+        // wakers; sharing a line makes it bounce between cores per message.
+        const LINE: usize = 128;
+        let shared = Shared::default();
+        let lines = [
+            std::ptr::from_ref(&shared.read).addr() / LINE,
+            std::ptr::from_ref(&shared.reader_waker).addr() / LINE,
+            std::ptr::from_ref(&shared.writer_waker).addr() / LINE,
+        ];
+        assert!(
+            lines[0] != lines[1] && lines[1] != lines[2] && lines[0] != lines[2],
+            "fields share a cache line: {lines:?}"
+        );
     }
 
     #[test]
