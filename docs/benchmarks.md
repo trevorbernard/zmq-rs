@@ -206,8 +206,10 @@ libzmq for small messages over ipc and inproc, and at 64 KiB over inproc.
   1.54. Suspect how parking and waking threads behaves on Linux; the
   `zmq-pipe` benchmark here costs 407 ns a message at HWM 16 against
   166 ns at HWM 1000. Not yet investigated.
-- **Small-message ipc throughput is behind on the receiving side:**
-  libzmq→ours matches libzmq→libzmq, ours→libzmq does not.
+- **Small-message ipc throughput is behind on the sending side:** our
+  receiver keeps up with libzmq's sender (libzmq→ours matches
+  libzmq→libzmq), while our sender holds libzmq's receiver back
+  (ours→libzmq is no faster than ours→ours).
 - **The M1's ipc gap at 64 KiB is gone here** (1.13).
 - **tcp at 256 B is about 1.5M msg/s for both libraries,** against
   3.4M–5.9M on the M1, so this machine bounds that case, not either
