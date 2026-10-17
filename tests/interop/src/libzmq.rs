@@ -7,6 +7,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 const ZMQ_ROUTING_ID: c_int = 5;
@@ -15,6 +16,9 @@ const ZMQ_LINGER: c_int = 17;
 const ZMQ_RCVTIMEO: c_int = 27;
 const ZMQ_LAST_ENDPOINT: c_int = 32;
 const ZMQ_PLAIN_SERVER: c_int = 44;
+const ZMQ_PLAIN_USERNAME: c_int = 45;
+const ZMQ_PLAIN_PASSWORD: c_int = 46;
+const ZMQ_ZAP_DOMAIN: c_int = 55;
 const ZMQ_SNDMORE: c_int = 2;
 
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
@@ -40,6 +44,7 @@ unsafe extern "C" {
         len: *mut usize,
     ) -> c_int;
     fn zmq_bind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
+    fn zmq_connect(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_send(socket: *mut c_void, buf: *const c_void, len: usize, flags: c_int) -> c_int;
     fn zmq_msg_init(msg: *mut RawMsg) -> c_int;
     fn zmq_msg_recv(msg: *mut RawMsg, socket: *mut c_void, flags: c_int) -> c_int;
@@ -79,14 +84,34 @@ pub enum Kind {
     XPub = 9,
 }
 
+/// A libzmq context, shared by sockets that talk over `inproc`, such as a
+/// server and its ZAP handler.
+#[derive(Debug, Clone)]
+pub struct Context(Arc<RawContext>);
+
 #[derive(Debug)]
-struct Context(NonNull<c_void>);
+struct RawContext(NonNull<c_void>);
 
 // SAFETY: a libzmq context is thread-safe.
-unsafe impl Send for Context {}
-unsafe impl Sync for Context {}
+unsafe impl Send for RawContext {}
+unsafe impl Sync for RawContext {}
 
-impl Drop for Context {
+impl Context {
+    /// A new context.
+    pub fn new() -> Self {
+        // SAFETY: plain constructor call; the result is checked for null.
+        let raw = NonNull::new(unsafe { zmq_ctx_new() }).expect("zmq_ctx_new failed");
+        Self(Arc::new(RawContext(raw)))
+    }
+}
+
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for RawContext {
     fn drop(&mut self) {
         // SAFETY: the pointer came from zmq_ctx_new, and every socket holds an
         // Arc to this context, so all of them are closed by now.
@@ -99,7 +124,7 @@ impl Drop for Context {
 #[derive(Debug)]
 pub struct Socket {
     raw: NonNull<c_void>,
-    _context: Arc<Context>,
+    _context: Context,
 }
 
 // SAFETY: moving a socket to another thread is allowed; `Socket` is not Sync,
@@ -109,14 +134,17 @@ unsafe impl Send for Socket {}
 impl Socket {
     /// A socket in its own context.
     pub fn new(kind: Kind) -> Self {
-        // SAFETY: plain constructor calls; results are checked for null.
-        let context = NonNull::new(unsafe { zmq_ctx_new() }).expect("zmq_ctx_new failed");
-        let context = Arc::new(Context(context));
-        let raw = NonNull::new(unsafe { zmq_socket(context.0.as_ptr(), kind as c_int) })
+        Self::in_context(&Context::new(), kind)
+    }
+
+    /// A socket in `context`.
+    pub fn in_context(context: &Context, kind: Kind) -> Self {
+        // SAFETY: the context pointer is live; the result is checked for null.
+        let raw = NonNull::new(unsafe { zmq_socket(context.0.0.as_ptr(), kind as c_int) })
             .unwrap_or_else(|| panic!("zmq_socket failed: {}", last_error()));
         let socket = Self {
             raw,
-            _context: context,
+            _context: context.clone(),
         };
         socket.set_int(ZMQ_LINGER, 0);
         socket.set_receive_timeout(Duration::from_secs(5));
@@ -154,6 +182,33 @@ impl Socket {
     /// Makes this socket a PLAIN server.
     pub fn set_plain_server(&self) {
         self.set_int(ZMQ_PLAIN_SERVER, 1);
+    }
+
+    /// Makes this socket a PLAIN client with these credentials.
+    pub fn set_plain_client(&self, username: &[u8], password: &[u8]) {
+        self.set_bytes(ZMQ_PLAIN_USERNAME, username);
+        self.set_bytes(ZMQ_PLAIN_PASSWORD, password);
+    }
+
+    /// The ZAP domain this server authenticates in.
+    pub fn set_zap_domain(&self, domain: &[u8]) {
+        self.set_bytes(ZMQ_ZAP_DOMAIN, domain);
+    }
+
+    /// Binds to `endpoint`, e.g. `inproc://name`.
+    pub fn bind(&self, endpoint: &str) {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_bind(self.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_bind({endpoint}): {err}"));
+    }
+
+    /// Connects to a TCP address.
+    pub fn connect(&self, addr: SocketAddr) {
+        let endpoint = CString::new(format!("tcp://{addr}")).unwrap();
+        // SAFETY: `endpoint` is a valid C string for the call.
+        check(unsafe { zmq_connect(self.raw.as_ptr(), endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_connect({addr}): {err}"));
     }
 
     /// Subscribes a SUB socket to `topic`.
@@ -234,4 +289,31 @@ impl Drop for Socket {
         // SAFETY: the pointer came from zmq_socket and is closed exactly once.
         unsafe { zmq_close(self.raw.as_ptr()) };
     }
+}
+
+/// A ZAP handler (RFC 27) for `context` that answers one request with
+/// `status` and `user_id`, then returns the request frames it saw.
+pub fn zap_handler(
+    context: &Context,
+    status: &'static str,
+    user_id: &'static str,
+) -> JoinHandle<Vec<Vec<u8>>> {
+    let handler = Socket::in_context(context, Kind::Rep);
+    // Bound before returning, so the server finds it.
+    handler.bind("inproc://zeromq.zap.01");
+    thread::spawn(move || {
+        let request = handler.recv().expect("ZAP request");
+        let request_id = request[1].clone();
+        handler
+            .send(&[
+                b"1.0",
+                &request_id,
+                status.as_bytes(),
+                b"",
+                user_id.as_bytes(),
+                b"",
+            ])
+            .expect("ZAP reply");
+        request
+    })
 }

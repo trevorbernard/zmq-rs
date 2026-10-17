@@ -14,7 +14,9 @@ mod handshake;
 mod identity;
 mod mechanism;
 mod message;
+mod plain;
 mod socket_type;
+mod zap;
 
 pub use codec::{CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming};
 pub use command::{
@@ -27,4 +29,10 @@ pub use handshake::{Established, HandshakeError, NullHandshake};
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use message::{EmptyMessage, IntoIter, Iter, Message};
+pub use plain::{
+    ClientStep, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, ServerStep,
+};
 pub use socket_type::SocketType;
+pub use zap::{
+    Authenticated, Credential, PlainCredentials, ZapCredentials, ZapFailure, ZapReply, ZapRequest,
+};

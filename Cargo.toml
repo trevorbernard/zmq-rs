@@ -12,6 +12,7 @@ publish = false
 
 [workspace.dependencies]
 bytes = "1"
+zeroize = "1"
 zmtp = { path = "crates/zmtp" }
 zmq-pipe = { path = "crates/zmq-pipe" }
 zmq-core = { path = "crates/zmq-core" }

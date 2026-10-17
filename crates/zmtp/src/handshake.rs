@@ -6,9 +6,11 @@
 
 use std::fmt;
 
+use zeroize::Zeroizing;
+
 use crate::{
-    Command, CommandError, Encoder, ErrorReason, Frame, Identity, Incoming, Message, Metadata,
-    PeerGreeting, PropertyName, SocketType, Version,
+    Authenticated, Command, CommandError, Encoder, ErrorReason, Frame, Identity, Incoming, Message,
+    Metadata, PeerGreeting, PropertyName, SocketType, Version, ZapFailure, ZapReply,
 };
 
 /// The NULL handshake for one connection, after the greeting.
@@ -33,6 +35,8 @@ pub struct Established {
     pub peer_identity: Frame,
     /// The peer's READY properties. Empty for ZMTP 1.0 and 2.0 peers.
     pub metadata: Metadata,
+    /// Who ZAP authenticated the peer as, when the handshake asked ZAP.
+    pub authenticated: Option<Authenticated>,
     /// We are PUB or XPUB and the peer speaks unversioned ZMTP 1.0, which
     /// never sends subscriptions: treat it as subscribed to everything, as
     /// libzmq does.
@@ -59,6 +63,10 @@ pub enum HandshakeError {
     MalformedCommand(CommandError),
     /// The peer's identity is multipart or longer than 255 octets.
     InvalidPeerIdentity,
+    /// ZAP did not accept the peer.
+    Authentication(ZapFailure),
+    /// The mechanism requires ZMTP 3.x but the peer speaks 1.0 or 2.0.
+    LegacyPeer,
 }
 
 /// Sent to a ZMTP 3.x peer whose socket type we reject.
@@ -78,7 +86,6 @@ impl NullHandshake {
         out: &mut Vec<u8>,
     ) -> Result<Self, HandshakeError> {
         let version = peer.version();
-        let encoder = Encoder::new(version);
         let legacy_peer_type = match *peer {
             PeerGreeting::Zmtp1 { socket_type: code }
             | PeerGreeting::Zmtp2 { socket_type: code } => {
@@ -91,23 +98,16 @@ impl NullHandshake {
             }
             PeerGreeting::Zmtp1Unversioned { .. } | PeerGreeting::Zmtp3 { .. } => None,
         };
-        let identity = Frame::copy_from_slice(identity.as_slice());
         match peer {
             PeerGreeting::Zmtp3 { .. } => {
-                let mut metadata = Metadata::new();
-                metadata.push(
-                    PropertyName::from_static("Socket-Type"),
-                    Frame::from(socket_type.name()),
-                );
-                if socket_type.sends_identity() {
-                    metadata.push(PropertyName::from_static("Identity"), identity);
-                }
-                write_command(&encoder, &Command::Ready(metadata), out);
+                let ready = Command::Ready(local_metadata(socket_type, identity));
+                write_command(version, &ready, out);
             }
             // The greeting already sent our identity frame.
             PeerGreeting::Zmtp1Unversioned { .. } => {}
             PeerGreeting::Zmtp1 { .. } | PeerGreeting::Zmtp2 { .. } => {
-                encoder.encode(&Message::new(identity), out);
+                let identity = Frame::copy_from_slice(identity.as_slice());
+                Encoder::new(version).encode(&Message::new(identity), out);
             }
         }
         let implicit_subscription = matches!(peer, PeerGreeting::Zmtp1Unversioned { .. })
@@ -130,7 +130,13 @@ impl NullHandshake {
         match (self.version, incoming) {
             (Version::V3_0 | Version::V3_1, Incoming::Command(body)) => {
                 match Command::parse(&body).map_err(HandshakeError::MalformedCommand)? {
-                    Command::Ready(metadata) => self.ready(metadata, out),
+                    Command::Ready(metadata) => accept_peer(
+                        self.socket_type,
+                        self.version,
+                        metadata,
+                        Rejection::SendError,
+                        out,
+                    ),
                     Command::Error(reason) => Err(HandshakeError::PeerError(reason)),
                     other => Err(HandshakeError::UnexpectedCommand(Frame::copy_from_slice(
                         other.name(),
@@ -150,6 +156,7 @@ impl NullHandshake {
                     peer_socket_type: self.legacy_peer_type,
                     peer_identity: first.clone(),
                     metadata: Metadata::new(),
+                    authenticated: None,
                     implicit_subscription: self.implicit_subscription,
                 })
             }
@@ -159,44 +166,128 @@ impl NullHandshake {
             }
         }
     }
+}
 
-    fn ready(self, metadata: Metadata, out: &mut Vec<u8>) -> Result<Established, HandshakeError> {
-        let peer_socket_type = match metadata.get("Socket-Type") {
-            None => None,
-            Some(name) => {
-                let rejected = match SocketType::from_name(name) {
-                    Some(peer) if self.socket_type.accepts(peer) => Ok(peer),
-                    Some(peer) => Err(HandshakeError::IncompatiblePeer { peer }),
-                    None => Err(HandshakeError::UnknownSocketType(name.clone())),
-                };
-                match rejected {
-                    Ok(peer) => Some(peer),
-                    Err(err) => {
+/// The properties this socket announces in READY or INITIATE.
+pub(crate) fn local_metadata(socket_type: SocketType, identity: &Identity) -> Metadata {
+    let mut metadata = Metadata::new();
+    metadata.push(
+        PropertyName::from_static("Socket-Type"),
+        Frame::from(socket_type.name()),
+    );
+    if socket_type.sends_identity() {
+        metadata.push(
+            PropertyName::from_static("Identity"),
+            Frame::copy_from_slice(identity.as_slice()),
+        );
+    }
+    metadata
+}
+
+/// How to tell a ZMTP 3.x peer we reject it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rejection {
+    /// Send ERROR before closing.
+    SendError,
+    /// Close without a word, e.g. a client in a mechanism where only the
+    /// server sends ERROR.
+    Silent,
+}
+
+/// Checks the metadata a peer sent in READY or INITIATE: its socket type
+/// must be compatible with ours and its identity at most 255 octets.
+pub(crate) fn accept_peer(
+    socket_type: SocketType,
+    version: Version,
+    metadata: Metadata,
+    rejection: Rejection,
+    out: &mut Vec<u8>,
+) -> Result<Established, HandshakeError> {
+    let peer_socket_type = match metadata.get("Socket-Type") {
+        None => None,
+        Some(name) => {
+            let checked = match SocketType::from_name(name) {
+                Some(peer) if socket_type.accepts(peer) => Ok(peer),
+                Some(peer) => Err(HandshakeError::IncompatiblePeer { peer }),
+                None => Err(HandshakeError::UnknownSocketType(name.clone())),
+            };
+            match checked {
+                Ok(peer) => Some(peer),
+                Err(err) => {
+                    if rejection == Rejection::SendError {
                         let error = Command::Error(ErrorReason::from_static(REJECTION));
-                        write_command(&Encoder::new(self.version), &error, out);
-                        return Err(err);
+                        write_command(version, &error, out);
                     }
+                    return Err(err);
                 }
             }
-        };
-        let peer_identity = metadata.get("Identity").cloned().unwrap_or_default();
-        if peer_identity.len() > MAX_IDENTITY {
-            return Err(HandshakeError::InvalidPeerIdentity);
         }
-        Ok(Established {
-            version: self.version,
-            peer_socket_type,
-            peer_identity,
-            metadata,
-            implicit_subscription: false,
-        })
+    };
+    let peer_identity = metadata.get("Identity").cloned().unwrap_or_default();
+    if peer_identity.len() > MAX_IDENTITY {
+        return Err(HandshakeError::InvalidPeerIdentity);
+    }
+    Ok(Established {
+        version,
+        peer_socket_type,
+        peer_identity,
+        metadata,
+        authenticated: None,
+        implicit_subscription: false,
+    })
+}
+
+/// The one place a ZAP verdict becomes an outcome, for every mechanism:
+/// success continues the handshake, 300 closes silently, and 400 or 500
+/// sends ERROR with that status code, as libzmq does.
+pub(crate) fn zap_verdict(
+    reply: ZapReply,
+    version: Version,
+    out: &mut Vec<u8>,
+) -> Result<Authenticated, HandshakeError> {
+    let (failure, code) = match reply {
+        ZapReply::Ok { user_id, metadata } => return Ok(Authenticated { user_id, metadata }),
+        ZapReply::TemporaryFailure => {
+            return Err(HandshakeError::Authentication(ZapFailure::Temporary));
+        }
+        ZapReply::AuthenticationFailure => (ZapFailure::Denied, "400"),
+        ZapReply::InternalError => (ZapFailure::Internal, "500"),
+    };
+    write_command(
+        version,
+        &Command::Error(ErrorReason::from_static(code)),
+        out,
+    );
+    Err(HandshakeError::Authentication(failure))
+}
+
+/// The ZMTP 3.x version to speak with `peer`, for mechanisms that need one.
+pub(crate) fn require_zmtp_3(peer: &PeerGreeting) -> Result<Version, HandshakeError> {
+    match peer {
+        PeerGreeting::Zmtp3 { .. } => Ok(peer.version()),
+        _ => Err(HandshakeError::LegacyPeer),
     }
 }
 
-fn write_command(encoder: &Encoder, command: &Command, out: &mut Vec<u8>) {
+/// Writes a typed command frame.
+pub(crate) fn write_command(version: Version, command: &Command, out: &mut Vec<u8>) {
     let mut body = Vec::new();
     command.encode(&mut body);
-    let written = encoder.encode_command(&body, out);
+    write_body(version, &body, out);
+}
+
+/// Writes a command frame whose body is `name` followed by `data`.
+pub(crate) fn write_raw_command(version: Version, name: &str, data: &[u8], out: &mut Vec<u8>) {
+    debug_assert!(!name.is_empty() && name.len() <= MAX_IDENTITY);
+    let mut body = Zeroizing::new(Vec::with_capacity(1 + name.len() + data.len()));
+    body.push(name.len() as u8);
+    body.extend_from_slice(name.as_bytes());
+    body.extend_from_slice(data);
+    write_body(version, &body, out);
+}
+
+fn write_body(version: Version, body: &[u8], out: &mut Vec<u8>) {
+    let written = Encoder::new(version).encode_command(body, out);
     debug_assert!(written.is_ok(), "only ZMTP 3.x handshakes send commands");
 }
 
@@ -229,6 +320,8 @@ impl fmt::Display for HandshakeError {
             Self::InvalidPeerIdentity => {
                 f.write_str("peer identity is multipart or longer than 255 octets")
             }
+            Self::Authentication(failure) => write!(f, "authentication failed: {failure:?}"),
+            Self::LegacyPeer => f.write_str("the security mechanism requires ZMTP 3.x"),
         }
     }
 }
@@ -443,6 +536,7 @@ mod tests {
                 peer_socket_type: Some(SocketType::Router),
                 peer_identity: Frame::from("pid"),
                 metadata: Metadata::new(),
+                authenticated: None,
                 implicit_subscription: false,
             }
         );

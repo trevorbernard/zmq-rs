@@ -6,4 +6,4 @@
 pub mod libzmq;
 mod peer;
 
-pub use peer::{ConnectError, Peer};
+pub use peer::{ConnectError, Peer, Security};

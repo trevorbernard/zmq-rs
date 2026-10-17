@@ -186,9 +186,13 @@ into those two values.
 - PLAIN SHOULD NOT be used without transport security.
 - libzmq always sends a ZAP request for PLAIN, and the handshake fails if there is no handler.
 
+- **libzmq bug:** `src/plain_common.hpp` declares the ERROR prefix as the C literal `"\x05ERROR"`. A `\x` escape consumes every following hex digit, so `\x05E` is the single octet `0x5E` and libzmq's PLAIN server sends ERROR as `^RROR reason-length reason`. Its PLAIN client likewise expects `^RROR` and treats an RFC-correct ERROR as an unexpected command. This is still present on libzmq `master`; reported as [zeromq/libzmq#4943](https://github.com/zeromq/libzmq/issues/4943).
+
 **Design:**
-- A `Credential` newtype checks the 255-octet limit when it is constructed; the password is zeroized.
-- `PlainServer` requires an authenticator (it is not optional).
+- A `Credential` newtype checks the 255-octet limit when it is constructed; the password is zeroized and never printed.
+- The server returns a `ZapRequest` and waits for a `ZapReply`, so authentication can be synchronous or asynchronous.
+- Our PLAIN client also accepts libzmq's `^RROR` form. No valid command starts with `0x5E`, so this cannot misread anything else.
+- We send the RFC form. A libzmq client then closes with "unexpected command" rather than "authentication failed"; the connection fails either way.
 
 ### CURVE (RFC 25, 26)
 

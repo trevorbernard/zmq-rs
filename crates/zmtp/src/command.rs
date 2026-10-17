@@ -187,13 +187,7 @@ impl Command {
     pub fn encode(&self, out: &mut Vec<u8>) {
         put_name(out, self.name());
         match self {
-            Self::Ready(metadata) => {
-                for (name, value) in metadata.iter() {
-                    put_name(out, name.as_slice());
-                    out.extend_from_slice(&(value.len() as u32).to_be_bytes());
-                    out.extend_from_slice(value);
-                }
-            }
+            Self::Ready(metadata) => encode_metadata(metadata, out),
             Self::Error(reason) => put_name(out, reason.as_slice()),
             Self::Ping(ping) => {
                 out.extend_from_slice(&ping.ttl.deciseconds().to_be_bytes());
@@ -207,6 +201,16 @@ impl Command {
     }
 }
 
+/// Appends `metadata` as `name-length name value-length value` properties,
+/// the data of READY and INITIATE.
+pub(crate) fn encode_metadata(metadata: &Metadata, out: &mut Vec<u8>) {
+    for (name, value) in metadata.iter() {
+        put_name(out, name.as_slice());
+        out.extend_from_slice(&(value.len() as u32).to_be_bytes());
+        out.extend_from_slice(value);
+    }
+}
+
 /// Writes a short string: one length octet, then the octets. Every caller
 /// passes a value whose type limits it to 255 octets.
 fn put_name(out: &mut Vec<u8>, name: &[u8]) {
@@ -217,7 +221,10 @@ fn put_name(out: &mut Vec<u8>, name: &[u8]) {
 /// Parses `name-length name value-length value` properties until `data`
 /// ends. Like libzmq, any leftover or truncated property is an error and the
 /// first of duplicate names wins on lookup.
-fn parse_metadata(mut data: &[u8], command: &'static str) -> Result<Metadata, CommandError> {
+pub(crate) fn parse_metadata(
+    mut data: &[u8],
+    command: &'static str,
+) -> Result<Metadata, CommandError> {
     let truncated = || CommandError::Truncated { command };
     let mut properties = Vec::new();
     while let Some((&name_len, rest)) = data.split_first() {

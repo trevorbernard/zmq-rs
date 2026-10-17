@@ -6,11 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq_interop::libzmq::{Kind, Socket};
-use zmq_interop::{ConnectError, Peer};
-use zmtp::{
-    Command, Frame, GreetingError, HandshakeError, Identity, LegacyPeers, Mechanism, Message,
-    SocketType, Version,
-};
+use zmq_interop::{ConnectError, Peer, Security};
+use zmtp::{Command, Frame, GreetingError, HandshakeError, Identity, Message, SocketType, Version};
 
 fn message(parts: &[&[u8]]) -> Message {
     let frames = parts
@@ -112,10 +109,12 @@ fn mechanism_mismatch_never_completes() {
     let router = Socket::new(Kind::Router);
     router.set_plain_server();
     let addr = router.bind_loopback();
-    let null = Mechanism::Null {
-        legacy_peers: LegacyPeers::Allow,
-    };
-    let result = Peer::connect_with(addr, SocketType::Dealer, Identity::default(), null);
+    let result = Peer::connect_with(
+        addr,
+        SocketType::Dealer,
+        Identity::default(),
+        Security::Null,
+    );
     // Whichever side notices first closes the connection.
     assert!(
         matches!(

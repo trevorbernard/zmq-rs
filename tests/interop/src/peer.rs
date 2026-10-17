@@ -2,16 +2,28 @@
 
 use std::fmt;
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 use zmtp::{
-    Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting, GreetingConfig,
-    GreetingError, HandshakeError, Identity, Incoming, LegacyPeers, Mechanism, Message,
-    NullHandshake, SocketType,
+    ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame,
+    Greeting, GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, LegacyPeers,
+    Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials, PlainServer,
+    PlainServerConfig, Role, ServerStep, SocketType, ZapReply, ZapRequest,
 };
 
-/// A connection that has completed the greeting and NULL handshake.
+/// Which security mechanism a [`Peer`] uses, and its side of it.
+pub enum Security {
+    Null,
+    PlainClient(PlainCredentials),
+    /// A PLAIN server that asks `authenticate` about each client.
+    PlainServer {
+        domain: Frame,
+        authenticate: Box<dyn FnOnce(&ZapRequest) -> ZapReply + Send>,
+    },
+}
+
+/// A connection that has completed the greeting and security handshake.
 #[derive(Debug)]
 pub struct Peer {
     stream: TcpStream,
@@ -40,68 +52,113 @@ impl Peer {
         identity: &[u8],
     ) -> Result<Self, ConnectError> {
         let identity = Identity::new(identity.to_vec()).expect("valid test identity");
-        Self::connect_with(
-            addr,
-            socket_type,
-            identity,
-            Mechanism::Null {
-                legacy_peers: LegacyPeers::Allow,
-            },
-        )
+        Self::connect_with(addr, socket_type, identity, Security::Null)
     }
 
-    /// Connects to `addr` announcing `mechanism`. Only NULL can complete the
-    /// handshake; other mechanisms exercise the greeting.
+    /// Connects to `addr` with `security`.
     pub fn connect_with(
         addr: SocketAddr,
         socket_type: SocketType,
         identity: Identity,
-        mechanism: Mechanism,
+        security: Security,
     ) -> Result<Self, ConnectError> {
-        let mut stream = TcpStream::connect(addr).map_err(ConnectError::Io)?;
+        let stream = TcpStream::connect(addr).map_err(ConnectError::Io)?;
+        Self::establish(stream, socket_type, identity, security)
+    }
+
+    /// Accepts one connection on `listener` with `security`.
+    pub fn accept(
+        listener: &TcpListener,
+        socket_type: SocketType,
+        identity: Identity,
+        security: Security,
+    ) -> Result<Self, ConnectError> {
+        let (stream, _) = listener.accept().map_err(ConnectError::Io)?;
+        Self::establish(stream, socket_type, identity, security)
+    }
+
+    fn establish(
+        mut stream: TcpStream,
+        socket_type: SocketType,
+        identity: Identity,
+        security: Security,
+    ) -> Result<Self, ConnectError> {
         stream
             .set_read_timeout(Some(Duration::from_secs(5)))
             .map_err(ConnectError::Io)?;
-
-        let mut greeting = Greeting::new(GreetingConfig {
-            socket_type,
-            identity: identity.clone(),
-            mechanism,
-        });
-        let mut out = Vec::new();
-        let mut buf = [0u8; 64];
-        let (peer, leftover) = loop {
-            greeting.write_output(&mut out);
-            stream.write_all(&out).map_err(ConnectError::Io)?;
-            out.clear();
-            let n = stream.read(&mut buf).map_err(ConnectError::Io)?;
-            if n == 0 {
-                return Err(ConnectError::Closed);
+        let mechanism = match &security {
+            Security::Null => Mechanism::Null {
+                legacy_peers: LegacyPeers::Allow,
+            },
+            Security::PlainClient(_) => Mechanism::Plain(Role::Client),
+            Security::PlainServer { .. } => Mechanism::Plain(Role::Server),
+        };
+        let (peer, leftover) = greet(&mut stream, socket_type, &identity, mechanism)?;
+        let version = peer.version();
+        let mut decoder = Decoder::new(version, DecoderConfig::default());
+        decoder.extend_from_slice(&leftover);
+        let mut io = Io {
+            stream,
+            decoder,
+            out: Vec::new(),
+        };
+        let established = match security {
+            Security::Null => {
+                let handshake = NullHandshake::start(socket_type, &identity, &peer, &mut io.out);
+                let handshake = io.flush(handshake)?;
+                let first = io.next()?;
+                let result = handshake.receive(first, &mut io.out);
+                io.flush(result)?
             }
-            let feed = greeting.feed(&buf[..n]).map_err(ConnectError::Greeting)?;
-            if let Some(peer) = feed.peer {
-                greeting.write_output(&mut out);
-                break (peer, &buf[feed.consumed..n]);
+            Security::PlainClient(credentials) => {
+                let start =
+                    PlainClient::start(socket_type, identity, &credentials, &peer, &mut io.out);
+                let mut client = io.flush(start)?;
+                loop {
+                    let item = io.next()?;
+                    let step = client.receive(item, &mut io.out);
+                    match io.flush(step)? {
+                        ClientStep::Continue(next) => client = next,
+                        ClientStep::Established(established) => break established,
+                    }
+                }
+            }
+            Security::PlainServer {
+                domain,
+                authenticate,
+            } => {
+                let peer_address = io
+                    .stream
+                    .peer_addr()
+                    .map_err(ConnectError::Io)?
+                    .ip()
+                    .to_string();
+                let config = PlainServerConfig {
+                    socket_type,
+                    identity,
+                    domain,
+                    peer_address,
+                };
+                let server = PlainServer::start(config, &peer).map_err(ConnectError::Handshake)?;
+                let hello = io.next()?;
+                let step = server.receive(hello, &mut io.out);
+                let ServerStep::Authenticate(pending, request) = io.flush(step)? else {
+                    unreachable!("HELLO always leads to authentication");
+                };
+                let reply = pending.reply(authenticate(&request), &mut io.out);
+                let server = io.flush(reply)?;
+                let initiate = io.next()?;
+                let step = server.receive(initiate, &mut io.out);
+                let ServerStep::Established(established) = io.flush(step)? else {
+                    unreachable!("INITIATE always completes the handshake");
+                };
+                established
             }
         };
-
-        let version = peer.version();
-        let handshake = NullHandshake::start(socket_type, &identity, &peer, &mut out)
-            .map_err(ConnectError::Handshake)?;
-        stream.write_all(&out).map_err(ConnectError::Io)?;
-        out.clear();
-
-        let mut decoder = Decoder::new(version, DecoderConfig::default());
-        decoder.extend_from_slice(leftover);
-        let first = next(&mut decoder, &mut stream)?;
-        let result = handshake.receive(first, &mut out);
-        // Deliver any ERROR before reporting the failure.
-        stream.write_all(&out).map_err(ConnectError::Io)?;
-        let established = result.map_err(ConnectError::Handshake)?;
         Ok(Self {
-            stream,
+            stream: io.stream,
             encoder: Encoder::new(version),
-            decoder,
+            decoder: io.decoder,
             established,
         })
     }
@@ -139,6 +196,57 @@ impl Peer {
     }
 }
 
+/// Runs the greeting, returning the peer's greeting and any octets read past it.
+fn greet(
+    stream: &mut TcpStream,
+    socket_type: SocketType,
+    identity: &Identity,
+    mechanism: Mechanism,
+) -> Result<(PeerGreeting, Vec<u8>), ConnectError> {
+    let mut greeting = Greeting::new(GreetingConfig {
+        socket_type,
+        identity: identity.clone(),
+        mechanism,
+    });
+    let mut out = Vec::new();
+    let mut buf = [0u8; 64];
+    loop {
+        greeting.write_output(&mut out);
+        stream.write_all(&out).map_err(ConnectError::Io)?;
+        out.clear();
+        let n = stream.read(&mut buf).map_err(ConnectError::Io)?;
+        if n == 0 {
+            return Err(ConnectError::Closed);
+        }
+        let feed = greeting.feed(&buf[..n]).map_err(ConnectError::Greeting)?;
+        if let Some(peer) = feed.peer {
+            greeting.write_output(&mut out);
+            stream.write_all(&out).map_err(ConnectError::Io)?;
+            return Ok((peer, buf[feed.consumed..n].to_vec()));
+        }
+    }
+}
+
+/// The stream, decoder and pending output during a handshake.
+struct Io {
+    stream: TcpStream,
+    decoder: Decoder,
+    out: Vec<u8>,
+}
+
+impl Io {
+    /// Sends pending output, including any ERROR, then passes `result` on.
+    fn flush<T>(&mut self, result: Result<T, HandshakeError>) -> Result<T, ConnectError> {
+        self.stream.write_all(&self.out).map_err(ConnectError::Io)?;
+        self.out.clear();
+        result.map_err(ConnectError::Handshake)
+    }
+
+    fn next(&mut self) -> Result<Incoming, ConnectError> {
+        next(&mut self.decoder, &mut self.stream)
+    }
+}
+
 fn next(decoder: &mut Decoder, stream: &mut TcpStream) -> Result<Incoming, ConnectError> {
     loop {
         if let Some(item) = decoder.decode().map_err(ConnectError::Decode)? {
@@ -149,6 +257,21 @@ fn next(decoder: &mut Decoder, stream: &mut TcpStream) -> Result<Incoming, Conne
             .map_err(ConnectError::Io)?;
         if n == 0 {
             return Err(ConnectError::Closed);
+        }
+    }
+}
+
+impl fmt::Debug for Security {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Null => f.write_str("Null"),
+            Self::PlainClient(credentials) => {
+                f.debug_tuple("PlainClient").field(credentials).finish()
+            }
+            Self::PlainServer { domain, .. } => f
+                .debug_struct("PlainServer")
+                .field("domain", domain)
+                .finish_non_exhaustive(),
         }
     }
 }
