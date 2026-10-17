@@ -23,3 +23,7 @@ pkg-config = "0.3"
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "perf"
+harness = false

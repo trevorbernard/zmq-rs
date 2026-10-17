@@ -506,6 +506,80 @@ impl Socket {
             }
         }
     }
+
+    /// Sends a single frame of `size` zero octets. libzmq's `remote_thr`
+    /// leaves the payload unwritten; this writes it, as a Rust sender must
+    /// and a real application would, so both libraries pay the same.
+    pub fn send_sized(&self, size: usize) -> io::Result<()> {
+        let mut msg = Msg::with_size(size)?;
+        // SAFETY: the message owns `size` writable octets.
+        unsafe { std::ptr::write_bytes(zmq_msg_data(&mut msg.0).cast::<u8>(), 0, size) };
+        self.send_msg(&mut msg)
+    }
+
+    /// Sends `msg`, leaving it empty, as `zmq_msg_send` does.
+    pub fn send_msg(&self, msg: &mut Msg) -> io::Result<()> {
+        // SAFETY: `msg` is an initialized message and the socket is open.
+        check(unsafe { zmq_msg_send(&mut msg.0, self.raw.as_ptr(), 0) }).map(drop)
+    }
+
+    /// Receives one frame into `msg`, replacing what it held, and returns
+    /// its size. No copy is made, as in libzmq's `local_thr`.
+    pub fn recv_msg(&self, msg: &mut Msg) -> io::Result<usize> {
+        // SAFETY: `msg` is an initialized message and the socket is open.
+        check(unsafe { zmq_msg_recv(&mut msg.0, self.raw.as_ptr(), 0) })?;
+        Ok(msg.size())
+    }
+}
+
+/// An owned `zmq_msg_t`, closed on drop. Reused across sends and receives,
+/// it lets a benchmark cost what libzmq's own perf tools cost.
+pub struct Msg(RawMsg);
+
+// SAFETY: a message is plain data owned by one thread at a time.
+unsafe impl Send for Msg {}
+
+impl Msg {
+    /// An empty message.
+    pub fn new() -> Self {
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is writable storage for a zmq_msg_t.
+        check(unsafe { zmq_msg_init(&mut msg) }).expect("zmq_msg_init");
+        Self(msg)
+    }
+
+    /// A message of `size` octets, contents unset.
+    pub fn with_size(size: usize) -> io::Result<Self> {
+        let mut msg = RawMsg([0; 64]);
+        // SAFETY: `msg` is writable storage for a zmq_msg_t.
+        check(unsafe { zmq_msg_init_size(&mut msg, size) })?;
+        Ok(Self(msg))
+    }
+
+    /// The size of its single frame.
+    pub fn size(&self) -> usize {
+        // SAFETY: `self.0` is an initialized message.
+        unsafe { zmq_msg_size(&self.0) }
+    }
+}
+
+impl Default for Msg {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl std::fmt::Debug for Msg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Msg").field("size", &self.size()).finish()
+    }
+}
+
+impl Drop for Msg {
+    fn drop(&mut self) {
+        // SAFETY: `self.0` is initialized and closed exactly once.
+        unsafe { zmq_msg_close(&mut self.0) };
+    }
 }
 
 impl Drop for Socket {

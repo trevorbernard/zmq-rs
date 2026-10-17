@@ -23,7 +23,7 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 | `zmq-pipe` | SPSC `Writer`/`Reader` with high-water marks and wakers | none |
 | `zmq-core` | Context, I/O threads, sessions, engines, transports, routing | mio |
 | `zmq` | Typed sockets for applications | via `zmq-core` |
-| `tests/interop` | Tests against the reference libzmq | libzmq |
+| `tests/interop` | Tests and benchmarks against the reference libzmq | libzmq |
 
 ## Pieces in `zmq-core`
 
@@ -364,3 +364,4 @@ heartbeats run over a `Stream` that is either kind. Unix only.
 | 11d | PEER and CHANNEL (`draft` feature) | done |
 | 12 | ZAP for NULL connections | done |
 | 13 | Socket options: ROUTER mandatory, handover and probe; `IMMEDIATE`; `CONFLATE`; XPUB verbose, manual, welcome, nodrop and invert matching | done |
+| 14 | Benchmarks against libzmq: throughput and latency over tcp, ipc and inproc ([benchmarks.md](benchmarks.md)) | done |

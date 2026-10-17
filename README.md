@@ -8,6 +8,7 @@ An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
   its pattern allows.
 
 See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
+[docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
 
 ## Quick start
 
@@ -203,6 +204,7 @@ nix develop        # or `direnv allow`
 cargo test --workspace
 nix flake check    # tests, clippy, rustfmt
 cargo bench -p zmq-pipe   # pipe throughput, one process per measurement
+cargo bench -p zmq-interop --bench perf   # throughput and latency next to libzmq
 ```
 
 ## Layout
@@ -213,4 +215,4 @@ cargo bench -p zmq-pipe   # pipe throughput, one process per measurement
 | `zmq-pipe` | Lock-free SPSC pipes with high-water marks |
 | `zmq-core` | I/O threads, transports, sessions, socket patterns |
 | `zmq` | Public, type-safe API |
-| `tests/interop` | Interoperability tests against the reference libzmq |
+| `tests/interop` | Interoperability tests and benchmarks against the reference libzmq |
