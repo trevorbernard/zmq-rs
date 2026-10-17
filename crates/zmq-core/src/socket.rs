@@ -24,7 +24,7 @@ pub struct PeerKey(u64);
 #[derive(Debug)]
 pub struct Peer {
     key: PeerKey,
-    connection: Connection,
+    pub(crate) connection: Connection,
 }
 
 impl Peer {
@@ -90,7 +90,7 @@ impl PeerList {
         self.removals += 1;
     }
 
-    fn retain_mut(&mut self, keep: impl FnMut(&mut Peer) -> bool) {
+    pub(crate) fn retain_mut(&mut self, keep: impl FnMut(&mut Peer) -> bool) {
         let before = self.peers.len();
         self.peers.retain_mut(keep);
         if self.peers.len() != before {
@@ -195,24 +195,26 @@ pub struct LoadBalancer {
 }
 
 impl LoadBalancer {
-    /// Sends `message` to the next peer with room. Hands it back, with `cx`
-    /// registered on every peer, if none has room or there are no peers.
+    /// Sends `message` to the next peer with room and returns that peer.
+    /// Hands the message back, with `cx` registered on every peer, if none
+    /// has room or there are no peers.
     pub fn poll_send(
         &mut self,
         peers: &mut PeerList,
         mut message: Message,
         cx: &mut TaskContext<'_>,
-    ) -> Result<(), Message> {
+    ) -> Result<PeerKey, Message> {
         let count = peers.peers.len();
         for offset in 0..count {
             let index = (self.next + offset) % count;
-            let tx = &mut peers.peers[index].connection.tx;
+            let peer = &mut peers.peers[index];
+            let tx = &mut peer.connection.tx;
             // Closed peers are skipped; full ones register `cx`.
             if let Poll::Ready(Ok(())) = tx.poll_ready(cx) {
                 match tx.try_send(message) {
                     Ok(()) => {
                         self.next = (index + 1) % count;
-                        return Ok(());
+                        return Ok(peer.key);
                     }
                     Err(TrySendError::Full(back) | TrySendError::Closed(back)) => message = back,
                 }
@@ -394,83 +396,8 @@ impl RouterTable {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::num::NonZeroUsize;
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::task::{Wake, Waker};
-
-    use zmq_pipe::{Hwm, Reader, Writer, pipe};
-    use zmtp::{Established, Metadata, SocketType, Version};
-
-    /// The session's ends of a hand-built connection.
-    struct FakeSession {
-        to_socket: Writer<Message>,
-        from_socket: Reader<Message>,
-        connection_peer: crate::context::PeerSlot,
-    }
-
-    impl FakeSession {
-        /// Completes the handshake, announcing `identity`.
-        fn establish(&self, identity: &'static str) {
-            *self.connection_peer.lock().unwrap() = Some(Established {
-                version: Version::V3_1,
-                peer_socket_type: Some(SocketType::Dealer),
-                peer_identity: Frame::from(identity),
-                metadata: Metadata::new(),
-                authenticated: None,
-                implicit_subscription: false,
-            });
-        }
-    }
-
-    fn connection(hwm: usize) -> (Connection, FakeSession) {
-        let hwm = Hwm::Messages(NonZeroUsize::new(hwm).unwrap());
-        let (tx, from_socket) = pipe(hwm);
-        let (to_socket, rx) = pipe(hwm);
-        let peer = crate::context::PeerSlot::default();
-        (
-            Connection {
-                tx,
-                rx,
-                peer: peer.clone(),
-            },
-            FakeSession {
-                to_socket,
-                from_socket,
-                connection_peer: peer,
-            },
-        )
-    }
-
-    fn list(connections: Vec<Connection>) -> PeerList {
-        let mut list = PeerList::default();
-        for connection in connections {
-            list.push(connection);
-        }
-        list
-    }
-
-    #[derive(Default)]
-    struct Count(AtomicUsize);
-
-    impl Wake for Count {
-        fn wake(self: Arc<Self>) {
-            self.0.fetch_add(1, Ordering::SeqCst);
-        }
-    }
-
-    fn waker() -> (Arc<Count>, Waker) {
-        let count = Arc::new(Count::default());
-        (count.clone(), Waker::from(count))
-    }
-
-    fn msg(text: &'static str) -> Message {
-        Message::new(Frame::from(text))
-    }
-
-    fn drain(session: &mut FakeSession) -> Vec<Message> {
-        std::iter::from_fn(|| session.from_socket.try_recv().ok()).collect()
-    }
+    use crate::test_support::*;
+    use std::sync::atomic::Ordering;
 
     #[test]
     fn load_balancer_round_robins() {

@@ -105,6 +105,17 @@ strategies work over that set, as in libzmq:
   already in use is ignored. ROUTER never blocks on send: a message for an
   unknown or full peer is dropped and the `RouteOutcome` says so.
 
+- `Requester` (`req_t`) sends each request, behind an empty delimiter, to
+  the next peer with room and accepts a reply only from that peer,
+  discarding what other peers send. With correlation on, a 4-octet request
+  id leads the envelope and replies with another id are dropped.
+- `Replier` (`rep_t`) fair-queues requests, keeps every frame up to the
+  delimiter as the envelope, and sends the reply back behind it.
+
+In the `zmq` crate, REQ/REP lockstep is a borrow: `Socket<Req>::request`
+takes `&mut self` until the reply arrives, and `Socket<Rep>::recv` returns a
+`Request<'_>` that borrows the socket until `reply(self, ..)` consumes it.
+
 Each peer has a stable `PeerKey`. Keys only grow and removals keep order,
 so a peer is found by binary search. A connection learns its peer from the
 handshake: the engine publishes the `Established` result before delivering
@@ -126,5 +137,5 @@ is a compile error.
 | 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | done |
 | 4a | `Peers`, load balancing and fair queuing; PUSH/PULL as typed sockets in `zmq` | done |
 | 4b | DEALER and ROUTER: identity routing and envelopes | done |
-| 4c | REQ and REP | next |
-| 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | |
+| 4c | REQ and REP | done |
+| 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | next |

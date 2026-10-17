@@ -25,6 +25,27 @@
 //! push.recv();
 //! ```
 //!
+//! A REP socket answers one request at a time: it cannot receive another
+//! while one is unanswered,
+//!
+//! ```compile_fail,E0499
+//! let context = zmq::Context::new().unwrap();
+//! let mut rep = context.socket::<zmq::Rep>();
+//! let first = rep.recv();
+//! let second = rep.recv();
+//! first.reply("a");
+//! ```
+//!
+//! and cannot answer a request twice:
+//!
+//! ```compile_fail,E0382
+//! let context = zmq::Context::new().unwrap();
+//! let mut rep = context.socket::<zmq::Rep>();
+//! let request = rep.recv();
+//! request.reply("a");
+//! request.reply("b");
+//! ```
+//!
 //! A ROUTER cannot send without saying to whom:
 //!
 //! ```compile_fail,E0061
@@ -42,8 +63,8 @@ use std::io;
 
 pub use endpoint::Error;
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
-pub use socket::{Dealer, Pull, Push, Router, Socket, SocketType};
-pub use zmq_core::{Linger, Reconnect, RouteOutcome};
+pub use socket::{Dealer, Pull, Push, Rep, Req, Request, Router, Socket, SocketType};
+pub use zmq_core::{Linger, PeerGone, Reconnect, RouteOutcome};
 pub use zmq_pipe::Hwm;
 pub use zmtp::{Frame, Identity, Message};
 

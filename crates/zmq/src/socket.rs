@@ -6,7 +6,10 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::task::{Context as TaskContext, Poll, Waker};
 
-use zmq_core::{ConnectionConfig, FairQueue, LoadBalancer, Peers, RouteOutcome, RouterTable};
+use zmq_core::{
+    ConnectionConfig, FairQueue, LoadBalancer, Outstanding, PeerGone, Peers, Received, Replier,
+    Requester, RouteOutcome, RouterTable,
+};
 use zmtp::Message;
 
 use crate::{Error, RoutingId, SocketOptions, endpoint, wait};
@@ -57,6 +60,30 @@ pub enum Dealer {}
 /// unknown or full peer is dropped, as libzmq does by default.
 #[derive(Debug)]
 pub enum Router {}
+
+/// Sends requests and receives their replies in lockstep (RFC 28): each
+/// [`request`](Socket::request) goes to the next REP or ROUTER peer with
+/// room, and only that peer's reply is accepted.
+#[derive(Debug)]
+pub enum Req {}
+
+/// Receives requests fairly and answers each with one reply (RFC 28). The
+/// [`Request`] returned by [`recv`](Socket::recv) borrows the socket until
+/// it is answered or dropped.
+#[derive(Debug)]
+pub enum Rep {}
+
+impl sealed::Sealed for Req {}
+impl SocketType for Req {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Req;
+    type Routing = Requester;
+}
+
+impl sealed::Sealed for Rep {}
+impl SocketType for Rep {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Rep;
+    type Routing = Replier;
+}
 
 /// DEALER's routing: load-balanced sends, fair-queued receives.
 #[doc(hidden)]
@@ -223,6 +250,137 @@ impl Socket<Dealer> {
     }
 }
 
+impl Socket<Req> {
+    /// Tags requests with an id so that a reply to an abandoned request,
+    /// such as a dropped [`request_async`](Self::request_async) future, is
+    /// recognised and dropped (libzmq's `ZMQ_REQ_CORRELATE`). Off by default.
+    ///
+    /// Without it, the next request to the same peer may receive the reply
+    /// meant for the abandoned one. Peers echo the id as part of the
+    /// envelope; a ROUTER application sees it as an extra frame.
+    pub fn set_correlation(&mut self, on: bool) {
+        self.routing.set_correlate(on);
+    }
+
+    /// Sends `message` to the next peer with room and waits for its reply,
+    /// blocking the thread. Fails if that peer's connection closes first.
+    pub fn request(&mut self, message: impl Into<Message>) -> Result<Message, PeerGone> {
+        let mut state = RequestState::Sending(Some(message.into()));
+        wait::block_on(|cx| self.poll_request(&mut state, cx))
+    }
+
+    /// Sends `message` to the next peer with room and waits for its reply.
+    /// If this future is dropped before the reply arrives, the request is
+    /// abandoned; see [`set_correlation`](Self::set_correlation).
+    pub async fn request_async(
+        &mut self,
+        message: impl Into<Message>,
+    ) -> Result<Message, PeerGone> {
+        let mut state = RequestState::Sending(Some(message.into()));
+        poll_fn(|cx| self.poll_request(&mut state, cx)).await
+    }
+
+    fn poll_request(
+        &mut self,
+        state: &mut RequestState,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Result<Message, PeerGone>> {
+        self.peers.accept(cx);
+        let peers = self.peers.list_mut();
+        loop {
+            match state {
+                RequestState::Sending(slot) => {
+                    let Some(body) = slot.take() else {
+                        return Poll::Ready(Err(PeerGone));
+                    };
+                    match self.routing.poll_send(peers, body, cx) {
+                        Ok(outstanding) => *state = RequestState::Waiting(outstanding),
+                        Err(body) => {
+                            *slot = Some(body);
+                            return Poll::Pending;
+                        }
+                    }
+                }
+                RequestState::Waiting(outstanding) => {
+                    return self.routing.poll_reply(peers, outstanding, cx);
+                }
+            }
+        }
+    }
+}
+
+/// Where a request is: waiting for a peer with room, then for the reply.
+enum RequestState {
+    Sending(Option<Message>),
+    Waiting(Outstanding),
+}
+
+impl Socket<Rep> {
+    /// The next request, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Request<'_>> {
+        let received = ready(self.poll_received(&mut TaskContext::from_waker(Waker::noop())))?;
+        Some(Request {
+            socket: self,
+            received,
+        })
+    }
+
+    /// The next request, blocking until one arrives.
+    pub fn recv(&mut self) -> Request<'_> {
+        let received = wait::block_on(|cx| self.poll_received(cx));
+        Request {
+            socket: self,
+            received,
+        }
+    }
+
+    /// The next request, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Request<'_> {
+        let received = poll_fn(|cx| self.poll_received(cx)).await;
+        Request {
+            socket: self,
+            received,
+        }
+    }
+
+    fn poll_received(&mut self, cx: &mut TaskContext<'_>) -> Poll<Received> {
+        self.peers.accept(cx);
+        self.routing.poll_recv(self.peers.list_mut(), cx)
+    }
+}
+
+/// A request received by a REP socket. Answer it with
+/// [`reply`](Self::reply); until then the socket cannot receive another.
+/// Dropping it unanswered discards the request, and the requester waits.
+#[must_use = "the requester waits for a reply"]
+pub struct Request<'a> {
+    socket: &'a mut Socket<Rep>,
+    received: Received,
+}
+
+impl Request<'_> {
+    /// The request's message, without its envelope.
+    pub fn body(&self) -> &Message {
+        &self.received.body
+    }
+
+    /// Answers the request. Never blocks: if the requester is gone or its
+    /// queue is full, the reply is dropped and the outcome says so.
+    pub fn reply(self, reply: impl Into<Message>) -> RouteOutcome {
+        let Received { peer, envelope, .. } = self.received;
+        Replier::reply(self.socket.peers.list_mut(), peer, envelope, reply.into())
+    }
+}
+
+impl fmt::Debug for Request<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Request")
+            .field("envelope", &self.received.envelope)
+            .field("body", &self.received.body)
+            .finish()
+    }
+}
+
 impl Socket<Router> {
     /// Sends `message` to the peer with routing id `to`. Never blocks: if no
     /// such peer is connected, or its queue is full, the message is dropped
@@ -288,7 +446,7 @@ fn poll_load_balanced(
     };
     peers.accept(cx);
     match balancer.poll_send(peers.list_mut(), message, cx) {
-        Ok(()) => Poll::Ready(()),
+        Ok(_) => Poll::Ready(()),
         Err(message) => {
             *slot = Some(message);
             Poll::Pending

@@ -284,7 +284,10 @@ Rules shared by every pattern:
 - ROUTER's `Message` keeps the delimiter visible, and the user handles it. ROUTER also exposes a raw frame path for proxies.
 - REQ: `correlate` is a socket option, not a mode that switches on implicitly when a future is dropped.
   - A dropped `request_async` future leaves the socket in relaxed mode: the next request is allowed, and the late reply is filtered out by pipe and, when `correlate` is on, by request id.
-- Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. Document this and warn in debug builds.
+- Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. This is documented on `Request`.
+- Two deliberate differences from libzmq's REQ:
+  - A reply without a delimiter is dropped and the wait continues; libzmq drops the connection.
+  - If the asked peer's connection closes before replying, `request` returns `PeerGone`; libzmq waits forever.
 
 ### PUBSUB (RFC 29)
 
