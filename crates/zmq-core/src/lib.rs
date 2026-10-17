@@ -10,4 +10,4 @@ mod context;
 mod engine;
 mod io_thread;
 
-pub use context::{Connection, ConnectionConfig, Context};
+pub use context::{Connection, ConnectionConfig, Context, Listener};

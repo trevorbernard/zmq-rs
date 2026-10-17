@@ -95,6 +95,11 @@ impl Engine {
         &mut self.stream
     }
 
+    /// Whether the handshake has completed and messages are flowing.
+    pub(crate) fn is_established(&self) -> bool {
+        matches!(self.state, State::Active { .. })
+    }
+
     /// Does all the work currently possible: writing, taking messages from
     /// the socket, reading, and handing messages to the socket.
     pub(crate) fn drive(

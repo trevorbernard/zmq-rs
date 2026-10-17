@@ -185,6 +185,26 @@ impl<T> Writer<T> {
         }
     }
 
+    /// Ready once the reader is gone, so a writer can stop waiting for room
+    /// it will never get. Useful when the pipe is never full.
+    pub fn poll_closed(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        if self.is_closed() {
+            return Poll::Ready(());
+        }
+        // Register, then check again so a drop in between is not missed.
+        self.shared.writer_waker.register(cx.waker());
+        if self.is_closed() {
+            Poll::Ready(())
+        } else {
+            Poll::Pending
+        }
+    }
+
+    /// Waits until the reader is gone.
+    pub async fn closed(&mut self) {
+        poll_fn(|cx| self.poll_closed(cx)).await;
+    }
+
     /// Whether the reader is gone.
     pub fn is_closed(&self) -> bool {
         self.shared.reader_closed.load(Ordering::Acquire)
@@ -423,6 +443,18 @@ mod tests {
         drop(writer);
         assert_eq!(wakes(&count), 1);
         assert_eq!(reader.poll_recv(&mut cx), Poll::Ready(None));
+    }
+
+    #[test]
+    fn writer_is_woken_when_reader_drops_even_with_room() {
+        let (mut writer, reader) = pipe::<i32>(Hwm::Unlimited);
+        let (count, waker) = counting_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert_eq!(writer.poll_closed(&mut cx), Poll::Pending);
+        drop(reader);
+        assert_eq!(wakes(&count), 1);
+        assert_eq!(writer.poll_closed(&mut cx), Poll::Ready(()));
+        block_on(writer.closed());
     }
 
     #[test]

@@ -31,10 +31,11 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 |---|---|---|
 | `Context` | Shared handle to N I/O threads; dropping the last clone stops and joins them | `ctx_t` |
 | `IoThread` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
-| `IoCommand` | The thread's command type (`Connect`, `Stop`, ...) | `command_t` |
+| `IoCommand` | The thread's command type (`Connect`, `Listen`, `Stop`) | `command_t` |
+| `Listener` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
 | `Session` | One per peer: owns both pipe ends; will own reconnection | `session_base_t` |
 | `Engine` | One TCP connection: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
-| `SessionWaker` | A pipe waker that queues its session id once and wakes the event loop | `activate_read`, `activate_write` |
+| `TokenWaker` | A pipe waker that queues its session or listener id once and wakes the event loop | `activate_read`, `activate_write` |
 
 ## Event flow
 
@@ -63,13 +64,20 @@ signal again for data it has already reported.
   drops its pipe ends: the socket sees the receive pipe close and sends fail.
 - Dropping a socket's pipe ends closes the TCP stream.
 - Dropping the context stops every I/O thread, closing all connections.
+- `bind` binds immediately, so errors such as an address in use are reported
+  to the caller, then hands the listener to an I/O thread.
+- An accepted connection reaches the `Listener` only once its handshake has
+  succeeded, as in libzmq (`session_base_t::engine_ready`); peers that fail
+  never appear. Accepted sessions stay on the listener's I/O thread for now.
+- Dropping the `Listener` closes the port: the accept queue's
+  `Writer::poll_closed` wakes the I/O thread when its reader goes away.
 
 ## Status
 
 | Slice | Contents | State |
 |---|---|---|
 | 1 | Context, I/O threads, TCP connect, NULL handshake, sessions, engines | done |
-| 2 | Bind/listen, accepting peers | next |
-| 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | |
+| 2 | Bind/listen, accepting peers | done |
+| 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | next |
 | 4 | Load balancing and fair queuing; PUSH/PULL and DEALER/ROUTER; typed sockets in `zmq` | |
 | 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | |
