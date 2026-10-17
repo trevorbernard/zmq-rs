@@ -248,12 +248,23 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
-    /// Binds `endpoint`, such as `tcp://*:5555`, `tcp://127.0.0.1:*` or
-    /// `inproc://name`, and accepts peers on it. Returns where it is bound,
-    /// with the actual port when binding to `*`.
+    /// Binds `endpoint`, such as `tcp://*:5555`, `tcp://127.0.0.1:*`,
+    /// `ipc:///tmp/feed`, `ipc://*` or `inproc://name`, and accepts peers on
+    /// it. Returns where it is bound: the actual port for `tcp://…:*`, and
+    /// the fresh path for `ipc://*`.
+    ///
+    /// An `ipc` path's socket file is removed when the socket is dropped. A
+    /// leftover socket file nobody listens on is replaced, but a live socket
+    /// or any other file is `AddrInUse`.
     pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
         match endpoint::bind_target(endpoint)? {
             Target::Tcp(addr) => self.peers.bind(addr).map(Endpoint::Tcp),
+            #[cfg(unix)]
+            Target::Ipc(path) => self.peers.bind_ipc(&path).map(|()| Endpoint::Ipc(path)),
+            #[cfg(unix)]
+            Target::IpcAnywhere => self.peers.bind_ipc_anywhere().map(Endpoint::Ipc),
+            #[cfg(not(unix))]
+            Target::Ipc(_) | Target::IpcAnywhere => unreachable!("ipc is refused when parsing"),
             Target::Inproc(name) => self
                 .peers
                 .bind_inproc(&name)
@@ -262,14 +273,20 @@ impl<T: SocketType> Socket<T> {
         .map_err(Error::Io)
     }
 
-    /// Connects to `endpoint`, such as `tcp://localhost:5555` or
-    /// `inproc://name`. Returns at once; messages queue until the connection
-    /// is up, and a TCP connection reconnects if it breaks. An `inproc`
+    /// Connects to `endpoint`, such as `tcp://localhost:5555`,
+    /// `ipc:///tmp/feed` or `inproc://name`. Returns at once; messages queue
+    /// until the connection is up, and a TCP or IPC connection retries until
+    /// something listens and reconnects if it breaks. An `inproc`
     /// connection waits for its name to be bound in this socket's context,
     /// and ends for good when the bound socket is dropped.
     pub fn connect(&mut self, endpoint: &str) -> Result<(), Error> {
         match endpoint::connect_target(endpoint)? {
             Target::Tcp(addr) => self.peers.connect(addr),
+            #[cfg(unix)]
+            Target::Ipc(path) => self.peers.connect_ipc(&path),
+            #[cfg(not(unix))]
+            Target::Ipc(_) => unreachable!("ipc is refused when parsing"),
+            Target::IpcAnywhere => unreachable!("refused when parsing"),
             Target::Inproc(name) => self.peers.connect_inproc(&name),
         };
         self.routing.connected(self.peers.list_mut());

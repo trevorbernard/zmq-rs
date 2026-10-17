@@ -161,7 +161,7 @@ fn bind_and_connect_report_bad_endpoints() {
         Err(zmq::Error::InvalidEndpoint(_))
     ));
     assert!(matches!(
-        push.connect("ipc:///tmp/x"),
+        push.connect("pgm://eth0;239.192.1.1:5555"),
         Err(zmq::Error::UnsupportedTransport(_))
     ));
     let addr = push.bind("tcp://127.0.0.1:*").unwrap();

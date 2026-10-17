@@ -11,7 +11,6 @@ use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use mio::net::TcpStream;
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting,
@@ -21,6 +20,7 @@ use zmtp::{
 };
 
 use crate::context::PeerSlot;
+use crate::transport::Stream;
 use crate::{ConnectionConfig, Security, Topics, ZapResponder};
 
 /// The shortest PING interval, so a zero interval cannot spin.
@@ -30,7 +30,7 @@ const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 const MAX_PENDING_OUTPUT: usize = 64 * 1024;
 
 pub(crate) struct Engine {
-    stream: TcpStream,
+    stream: Stream,
     config: ConnectionConfig,
     connected: bool,
     state: State,
@@ -150,7 +150,7 @@ pub(crate) struct Pipes<'a> {
 }
 
 impl Engine {
-    pub(crate) fn new(stream: TcpStream, config: ConnectionConfig) -> Self {
+    pub(crate) fn new(stream: Stream, config: ConnectionConfig) -> Self {
         let mechanism = match &config.security {
             Security::Null => zmtp::Mechanism::Null {
                 legacy_peers: LegacyPeers::Allow,
@@ -177,7 +177,7 @@ impl Engine {
         }
     }
 
-    pub(crate) fn stream(&mut self) -> &mut TcpStream {
+    pub(crate) fn stream(&mut self) -> &mut Stream {
         &mut self.stream
     }
 
@@ -250,13 +250,8 @@ impl Engine {
 
     /// Whether the non-blocking connect has completed.
     fn finish_connect(&mut self) -> Result<bool, EngineError> {
-        if let Some(err) = self.stream.take_error().map_err(EngineError::Io)? {
-            return Err(EngineError::Io(err));
-        }
-        match self.stream.peer_addr() {
-            Ok(_) => {
-                // libzmq disables Nagle; batching happens in the encoder.
-                let _ = self.stream.set_nodelay(true);
+        match self.stream.finish_connect() {
+            Ok(true) => {
                 self.connected = true;
                 // As libzmq, the handshake clock starts once connected.
                 self.deadlines.handshake = self
@@ -265,7 +260,7 @@ impl Engine {
                     .map(|timeout| Instant::now() + timeout);
                 Ok(true)
             }
-            Err(err) if err.kind() == io::ErrorKind::NotConnected => Ok(false),
+            Ok(false) => Ok(false),
             Err(err) => Err(EngineError::Io(err)),
         }
     }
@@ -410,11 +405,7 @@ impl Engine {
             )
             .map(Mechanism::PlainClient),
             Security::PlainServer { domain, .. } => {
-                let peer_address = self
-                    .stream
-                    .peer_addr()
-                    .map(|addr| addr.ip().to_string())
-                    .unwrap_or_default();
+                let peer_address = self.stream.zap_address();
                 PlainServer::start(
                     PlainServerConfig {
                         socket_type: config.socket_type,

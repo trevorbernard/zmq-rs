@@ -4,14 +4,12 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::io;
-use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Wake, Waker};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use mio::net::{TcpListener, TcpStream};
 use mio::{Events, Interest, Token};
 use zmq_pipe::{Reader, Writer, pipe};
 use zmtp::Message;
@@ -19,6 +17,7 @@ use zmtp::Message;
 use crate::context::PeerSlot;
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
+use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
 use crate::{Connection, ConnectionConfig, Linger, Topics};
 
 /// Token of the waker that reports commands and pipe wakeups.
@@ -42,7 +41,7 @@ pub(crate) enum IoCommand {
 
 /// A connection to start: where to, as whom, and the session's pipe ends.
 pub(crate) struct ConnectRequest {
-    pub(crate) addr: SocketAddr,
+    pub(crate) addr: Address,
     pub(crate) config: ConnectionConfig,
     pub(crate) inbound: Writer<Message>,
     pub(crate) outbound: Reader<Message>,
@@ -51,9 +50,11 @@ pub(crate) struct ConnectRequest {
 
 /// A bound listener to serve, and where to deliver accepted connections.
 pub(crate) struct ListenRequest {
-    pub(crate) listener: TcpListener,
+    pub(crate) listener: StreamListener,
     pub(crate) config: ConnectionConfig,
     pub(crate) connections: Writer<Connection>,
+    /// What to remove once the listener closes.
+    pub(crate) cleanup: Option<IpcCleanup>,
 }
 
 /// A running I/O thread. Dropping it stops and joins the thread.
@@ -281,6 +282,7 @@ impl EventLoop {
             mut listener,
             config,
             connections,
+            cleanup,
         } = request;
         let id = self.take_id();
         self.poll
@@ -292,6 +294,7 @@ impl EventLoop {
             listener,
             config,
             connections,
+            _cleanup: cleanup,
             task_waker: Waker::from(waker.clone()),
             waker,
         };
@@ -302,7 +305,7 @@ impl EventLoop {
     fn add_session(
         &mut self,
         origin: Origin,
-        stream: Option<TcpStream>,
+        stream: Option<Stream>,
         config: ConnectionConfig,
         pipes: SessionPipes,
     ) -> Option<usize> {
@@ -338,7 +341,7 @@ impl EventLoop {
     fn start_engine(
         &self,
         id: usize,
-        mut stream: TcpStream,
+        mut stream: Stream,
         config: &ConnectionConfig,
     ) -> Option<Engine> {
         self.poll
@@ -390,13 +393,14 @@ impl EventLoop {
                 return;
             }
             session.reconnect_at = None;
-            let Origin::Connect(addr) = session.origin else {
+            let Origin::Connect(address) = &session.origin else {
                 // Accepted sessions always have an engine until they end.
                 self.close_session(id);
                 return;
             };
+            let address = address.clone();
             let config = session.config.clone();
-            let engine = TcpStream::connect(addr)
+            let engine = Stream::connect(&address)
                 .ok()
                 .and_then(|stream| self.start_engine(id, stream, &config));
             let Some(session) = self.sessions.get_mut(&id) else {
@@ -502,7 +506,7 @@ impl EventLoop {
         let mut accepted = Vec::new();
         loop {
             match entry.listener.accept() {
-                Ok((stream, _peer)) => accepted.push(stream),
+                Ok(stream) => accepted.push(stream),
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
                 // WouldBlock, or a transient error such as too many open
                 // files: try again on the next readiness event.
@@ -574,7 +578,7 @@ struct Closing {
 /// How a session came about, which decides whether it reconnects.
 enum Origin {
     /// We connected to this address, and reconnect to it.
-    Connect(SocketAddr),
+    Connect(Address),
     /// A listener accepted it. It never reconnects, and its pipes go to the
     /// listener's owner once the handshake succeeds.
     Accepted(Option<Delivery>),
@@ -620,9 +624,11 @@ impl Session {
 
 /// A listening socket and the queue its accepted connections go to.
 struct ListenerEntry {
-    listener: TcpListener,
+    listener: StreamListener,
     config: ConnectionConfig,
     connections: Writer<Connection>,
+    /// Dropped with the entry, removing an `ipc://` socket's file.
+    _cleanup: Option<IpcCleanup>,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
 }

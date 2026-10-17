@@ -1,9 +1,10 @@
-//! Endpoint strings, as libzmq writes them: `tcp://host:port` and
-//! `inproc://name`.
+//! Endpoint strings, as libzmq writes them: `tcp://host:port`,
+//! `ipc://path` and `inproc://name`.
 
 use std::fmt;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::path::PathBuf;
 
 /// Why binding or connecting failed.
 #[derive(Debug)]
@@ -25,6 +26,8 @@ pub enum Error {
 pub enum Endpoint {
     /// A TCP address, with the actual port when bound to `*`.
     Tcp(SocketAddr),
+    /// A Unix domain socket's path, for `ipc://`. Unix only.
+    Ipc(PathBuf),
     /// An `inproc` name, reachable from sockets of the same context.
     Inproc(String),
 }
@@ -34,7 +37,7 @@ impl Endpoint {
     pub fn tcp_addr(&self) -> Option<SocketAddr> {
         match self {
             Self::Tcp(addr) => Some(*addr),
-            Self::Inproc(_) => None,
+            Self::Ipc(_) | Self::Inproc(_) => None,
         }
     }
 }
@@ -49,6 +52,7 @@ impl fmt::Display for Endpoint {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
+            Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
             Self::Inproc(name) => write!(f, "inproc://{name}"),
         }
     }
@@ -57,32 +61,49 @@ impl fmt::Display for Endpoint {
 /// What a bind or connect is aimed at.
 pub(crate) enum Target {
     Tcp(SocketAddr),
+    Ipc(PathBuf),
+    /// `ipc://*`: a fresh path in a new temporary directory.
+    IpcAnywhere,
     Inproc(String),
 }
 
 /// Parses `endpoint` for binding.
 pub(crate) fn bind_target(endpoint: &str) -> Result<Target, Error> {
-    match inproc_name(endpoint)? {
-        Some(name) => Ok(Target::Inproc(name)),
+    match local_target(endpoint)? {
+        Some(target) => Ok(target),
         None => bind_addr(endpoint).map(Target::Tcp),
     }
 }
 
 /// Parses `endpoint` for connecting.
 pub(crate) fn connect_target(endpoint: &str) -> Result<Target, Error> {
-    match inproc_name(endpoint)? {
-        Some(name) => Ok(Target::Inproc(name)),
+    match local_target(endpoint)? {
+        Some(Target::IpcAnywhere) => Err(invalid(endpoint)),
+        Some(target) => Ok(target),
         None => connect_addr(endpoint).map(Target::Tcp),
     }
 }
 
-/// The name of an `inproc://name` endpoint, which must not be empty.
-fn inproc_name(endpoint: &str) -> Result<Option<String>, Error> {
-    match endpoint.strip_prefix("inproc://") {
-        Some("") => Err(invalid(endpoint)),
-        Some(name) => Ok(Some(name.to_owned())),
-        None => Ok(None),
+/// An `ipc://path` or `inproc://name` endpoint, whose path or name must not
+/// be empty.
+fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
+    if let Some(name) = endpoint.strip_prefix("inproc://") {
+        return match name {
+            "" => Err(invalid(endpoint)),
+            name => Ok(Some(Target::Inproc(name.to_owned()))),
+        };
     }
+    if let Some(path) = endpoint.strip_prefix("ipc://") {
+        if !cfg!(unix) {
+            return Err(Error::UnsupportedTransport("ipc".to_owned()));
+        }
+        return match path {
+            "" => Err(invalid(endpoint)),
+            "*" => Ok(Some(Target::IpcAnywhere)),
+            path => Ok(Some(Target::Ipc(PathBuf::from(path)))),
+        };
+    }
+    Ok(None)
 }
 
 /// The address to bind for `endpoint`. `*` means every interface or, as the
@@ -242,10 +263,30 @@ mod tests {
     }
 
     #[test]
+    fn ipc_endpoints() {
+        assert!(
+            matches!(bind_target("ipc:///tmp/x"), Ok(Target::Ipc(p)) if p == std::path::Path::new("/tmp/x"))
+        );
+        assert!(
+            matches!(connect_target("ipc://rel/y"), Ok(Target::Ipc(p)) if p == std::path::Path::new("rel/y"))
+        );
+        assert!(matches!(bind_target("ipc://*"), Ok(Target::IpcAnywhere)));
+        assert!(matches!(
+            connect_target("ipc://*"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+        assert!(matches!(
+            bind_target("ipc://"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+        assert_eq!(Endpoint::Ipc("/tmp/x".into()).to_string(), "ipc:///tmp/x");
+    }
+
+    #[test]
     fn other_transports_are_unsupported() {
         assert!(matches!(
-            bind_addr("ipc:///tmp/x"),
-            Err(Error::UnsupportedTransport(t)) if t == "ipc"
+            bind_target("pgm://eth0;239.192.1.1:5555"),
+            Err(Error::UnsupportedTransport(t)) if t == "pgm"
         ));
     }
 

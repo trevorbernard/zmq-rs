@@ -145,6 +145,31 @@ impl Peers {
         Ok(local)
     }
 
+    /// Binds a Unix domain socket at `path` and accepts peers on it.
+    #[cfg(unix)]
+    pub fn bind_ipc(&mut self, path: &std::path::Path) -> io::Result<()> {
+        let listener = self.context.bind_ipc(path, self.config.clone())?;
+        self.listeners.push(listener.into_queue());
+        Ok(())
+    }
+
+    /// Binds a Unix domain socket at a fresh temporary path, returning it.
+    #[cfg(unix)]
+    pub fn bind_ipc_anywhere(&mut self) -> io::Result<std::path::PathBuf> {
+        let listener = self.context.bind_ipc_anywhere(self.config.clone())?;
+        let path = listener.path().to_owned();
+        self.listeners.push(listener.into_queue());
+        Ok(path)
+    }
+
+    /// Connects to the Unix domain socket at `path`, retrying until it is
+    /// bound.
+    #[cfg(unix)]
+    pub fn connect_ipc(&mut self, path: &std::path::Path) -> PeerKey {
+        let connection = self.context.connect_ipc(path, self.config.clone());
+        self.list.push(connection)
+    }
+
     /// Binds the `inproc` `name` and accepts peers on it.
     pub fn bind_inproc(&mut self, name: &str) -> io::Result<()> {
         let listener = self.context.bind_inproc(name, self.config.clone())?;

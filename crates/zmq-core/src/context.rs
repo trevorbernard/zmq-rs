@@ -16,8 +16,11 @@ use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe};
 use zmtp::{Established, Frame, Identity, Message, Metadata, SocketType, Version};
 
 use mio::net::TcpListener;
+#[cfg(unix)]
+use std::path::{Path, PathBuf};
 
 use crate::io_thread::{ConnectRequest, IoCommand, IoThread, ListenRequest};
+use crate::transport::{Address, IpcCleanup, StreamListener};
 use crate::{Reconnect, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
@@ -208,6 +211,48 @@ impl Listener {
     }
 }
 
+/// A bound `ipc://` path: a Unix domain socket. Peers that complete the
+/// handshake arrive as [`Connection`]s. Dropping the listener closes the
+/// socket and removes its file.
+#[cfg(unix)]
+#[derive(Debug)]
+pub struct IpcListener {
+    path: PathBuf,
+    connections: Reader<Connection>,
+}
+
+#[cfg(unix)]
+impl IpcListener {
+    /// The bound path.
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    /// The next connection, if one is waiting.
+    pub fn try_accept(&mut self) -> Result<Connection, TryRecvError> {
+        self.connections.try_recv()
+    }
+
+    /// The next connection, or `None` once the listener has closed.
+    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+        self.connections.poll_recv(cx)
+    }
+
+    /// The next connection, waiting for one to arrive.
+    pub async fn accept(&mut self) -> Option<Connection> {
+        self.connections.recv().await
+    }
+
+    /// The next connection, blocking the thread until one arrives.
+    pub fn accept_blocking(&mut self) -> Option<Connection> {
+        self.connections.recv_blocking()
+    }
+
+    pub(crate) fn into_queue(self) -> Reader<Connection> {
+        self.connections
+    }
+}
+
 /// An `inproc` name bound in a context. Peers that connect to it with a
 /// compatible socket type arrive as [`Connection`]s. Dropping it frees the
 /// name.
@@ -331,17 +376,52 @@ impl Context {
     pub fn bind(&self, addr: SocketAddr, config: ConnectionConfig) -> io::Result<Listener> {
         let listener = TcpListener::bind(addr)?;
         let local_addr = listener.local_addr()?;
+        let connections = self.listen(StreamListener::Tcp(listener), None, config);
+        Ok(Listener {
+            local_addr,
+            connections,
+        })
+    }
+
+    /// Binds a Unix domain socket at `path` for `ipc://`, and accepts peers
+    /// on an I/O thread. A socket file nobody is listening on, as a crashed
+    /// process leaves behind, is replaced; a live socket or any other file
+    /// is `AddrInUse`. The file is removed when the listener closes.
+    #[cfg(unix)]
+    pub fn bind_ipc(&self, path: &Path, config: ConnectionConfig) -> io::Result<IpcListener> {
+        let (listener, cleanup) = crate::transport::bind_ipc(path)?;
+        let connections = self.listen(StreamListener::Unix(listener), Some(cleanup), config);
+        Ok(IpcListener {
+            path: path.to_owned(),
+            connections,
+        })
+    }
+
+    /// Binds a Unix domain socket at a fresh path in a new temporary
+    /// directory, for `ipc://*`. Both are removed when the listener closes.
+    #[cfg(unix)]
+    pub fn bind_ipc_anywhere(&self, config: ConnectionConfig) -> io::Result<IpcListener> {
+        let (listener, cleanup, path) = crate::transport::bind_ipc_anywhere()?;
+        let connections = self.listen(StreamListener::Unix(listener), Some(cleanup), config);
+        Ok(IpcListener { path, connections })
+    }
+
+    /// Serves `listener` on an I/O thread, returning its accept queue.
+    fn listen(
+        &self,
+        listener: StreamListener,
+        cleanup: Option<IpcCleanup>,
+        config: ConnectionConfig,
+    ) -> Reader<Connection> {
         let (writer, connections) = pipe(Hwm::Unlimited);
         self.io_thread()
             .send(IoCommand::Listen(Box::new(ListenRequest {
                 listener,
                 config,
                 connections: writer,
+                cleanup,
             })));
-        Ok(Listener {
-            local_addr,
-            connections,
-        })
+        connections
     }
 
     /// Binds the `inproc` `name` in this context. Fails with
@@ -438,6 +518,18 @@ impl Context {
     /// Connects to a TCP peer in the background and returns the pipes for
     /// talking to it.
     pub fn connect(&self, addr: SocketAddr, config: ConnectionConfig) -> Connection {
+        self.connect_to(Address::Tcp(addr), config)
+    }
+
+    /// Connects to the Unix domain socket at `path` in the background, for
+    /// `ipc://`. Like a TCP connection, it retries until something listens
+    /// there, and reconnects if the connection breaks.
+    #[cfg(unix)]
+    pub fn connect_ipc(&self, path: &Path, config: ConnectionConfig) -> Connection {
+        self.connect_to(Address::Ipc(path.to_owned()), config)
+    }
+
+    fn connect_to(&self, addr: Address, config: ConnectionConfig) -> Connection {
         let (tx, outbound) = pipe(config.send_hwm);
         let (inbound, rx) = pipe(config.recv_hwm);
         let peer = PeerSlot::default();

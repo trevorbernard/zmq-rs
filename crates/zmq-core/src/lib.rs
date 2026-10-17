@@ -17,7 +17,10 @@ mod security;
 mod socket;
 #[cfg(test)]
 mod test_support;
+mod transport;
 
+#[cfg(unix)]
+pub use context::IpcListener;
 pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
     ShutdownTimedOut,

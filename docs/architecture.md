@@ -33,6 +33,8 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 | `IoThread` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
 | `IoCommand` | The thread's command type (`Connect`, `Listen`, `Shutdown`, `Stop`) | `command_t` |
 | `Listener` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
+| `IpcListener` | A bound `ipc://` path (Unix domain socket), served like a TCP listener; removes its socket file when it closes | `ipc_listener_t` |
+| `Stream` | A connection's byte stream, TCP or Unix domain socket; engines and sessions are the same for both | `tcp_connecter_t`, `ipc_connecter_t` |
 | `InprocListener` | A bound `inproc` name in the context's registry; paired connections arrive the same way | `ctx_t::endpoints`, `pend_connection` |
 | `Session` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
 | `Engine` | One TCP connection: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
@@ -200,6 +202,88 @@ connections waiting for a name.
 - `inproc` connections never reconnect, and security and heartbeats do
   not apply.
 
+## `ipc`
+
+An `ipc://` connection is a Unix domain socket and otherwise exactly a TCP
+connection: the same sessions, engines, reconnection, security and
+heartbeats run over a `Stream` that is either kind. Unix only.
+
+- Binding a path that holds a socket file nobody listens on replaces it,
+  as a crashed process leaves it. A live socket or any other kind of file
+  is `AddrInUse`. libzmq unlinks whatever is there.
+- `ipc://*` binds `socket` in a new temporary directory and reports the
+  path.
+- When the listener closes, its socket file is removed, along with the
+  directory a wildcard made, but only if the file is still the one it
+  created (same device and inode). libzmq removes only wildcard files.
+- ZAP sees an empty address for IPC peers, as in libzmq.
+- Abstract socket names (`ipc://@name`, Linux) are not supported yet; see
+  the to-do list below.
+
+### To do on Linux: abstract socket names
+
+Linux-only work that cannot be built or tested on macOS. Reference:
+libzmq's `src/ipc_address.cpp` (`resolve` and `to_string`).
+
+Behaviour to match:
+
+- `ipc://@name` names a socket in the abstract namespace: `sun_path`
+  starts with a NUL byte, then `name`. There is no file: the name vanishes
+  when the last socket bound to it closes.
+- `ipc://@` alone is invalid (libzmq: `EINVAL`), as is a name too long for
+  `sun_path` (108 octets including the leading NUL; libzmq: `ENAMETOOLONG`).
+- A second bind to a live name fails with `EADDRINUSE` from the kernel, so
+  there is no stale-file probe and no cleanup.
+- `ipc://@*` is not a wildcard in libzmq; treat `*` as a literal name.
+- Elsewhere (macOS, BSDs), `ipc://@name` stays an ordinary relative path
+  starting with `@`, as in libzmq.
+
+Steps:
+
+- [ ] **Parsing** (`crates/zmq/src/endpoint.rs`, `local_target`): on Linux
+  and Android, `ipc://@name` becomes a new `Target::IpcAbstract(Vec<u8>)`.
+  An empty name is `InvalidEndpoint`. Add `Endpoint::IpcAbstract` (or a
+  field on `Endpoint::Ipc`) that displays as `ipc://@name`.
+- [ ] **Address** (`crates/zmq-core/src/transport.rs`): add
+  `Address::IpcAbstract(Vec<u8>)` under
+  `#[cfg(any(target_os = "linux", target_os = "android"))]`. Connect with
+  `mio::net::UnixStream::connect_addr` and bind with
+  `mio::net::UnixListener::bind_addr`, both taking a
+  `std::os::unix::net::SocketAddr` built by
+  `std::os::linux::net::SocketAddrExt::from_abstract_name`. Both mio
+  functions exist in 1.2.4.
+- [ ] **Context and Peers** (`context.rs`, `socket.rs`): add
+  `Context::bind_ipc_abstract(name, config)` and
+  `connect_ipc_abstract(name, config)` beside `bind_ipc`/`connect_ipc`. The
+  listener needs no `IpcCleanup` (pass `None`). `IpcListener::path` has no
+  meaning here: give the listener an enum address, or add a separate
+  listener type.
+- [ ] **`Socket::bind`/`connect`** (`crates/zmq/src/socket.rs`): dispatch
+  the new target and return the new endpoint.
+- [ ] **Tests** (`crates/zmq/tests/ipc.rs`, `#[cfg(target_os = "linux")]`):
+  - push/pull over `ipc://@name`, and the displayed endpoint round-trips;
+  - a second bind is `AddrInUse`, and the name is free again once the
+    first socket is dropped;
+  - `ipc://@` is `InvalidEndpoint`, and an over-long name fails;
+  - a connect before the bind retries until it works;
+  - no file appears anywhere.
+- [ ] **Interop** (`tests/interop/tests/ipc.rs`): libzmq binds
+  `ipc://@name` and we connect, and the reverse.
+- [ ] **Docs**: replace the bullet above with the behaviour, and add the
+  Linux-only note to `docs/rfc-compliance.md` if anything differs from
+  libzmq.
+
+Also check while on Linux:
+
+- [ ] Run the stale-file mutation: drop the `is_socket()` check in
+  `transport::ipc::bind_ipc`. On Linux, `connect()` to a regular file
+  fails with `ECONNREFUSED`, so `an_ordinary_file_is_never_replaced`
+  should fail. On macOS this mutant survives because `connect()` fails
+  differently there.
+- [ ] Run the whole suite 20 times and `nix flake check` on Linux. The ipc
+  tests use `std::env::temp_dir()`, so check that their paths fit within
+  Linux's 108-octet `sun_path`.
+
 ## Status
 
 | Slice | Contents | State |
@@ -216,3 +300,4 @@ connections waiting for a name.
 | 6a | PUB and SUB; subscriptions on the wire and replayed after reconnecting | done |
 | 6b | XPUB and XSUB | done |
 | 6c | PAIR | done |
+| 7 | `ipc://` | done |
