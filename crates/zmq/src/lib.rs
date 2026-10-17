@@ -24,16 +24,28 @@
 //! let mut push = context.socket::<zmq::Push>();
 //! push.recv();
 //! ```
+//!
+//! A ROUTER cannot send without saying to whom:
+//!
+//! ```compile_fail,E0061
+//! let context = zmq::Context::new().unwrap();
+//! let mut router = context.socket::<zmq::Router>();
+//! router.send("to nobody in particular");
+//! ```
 
 mod endpoint;
+mod options;
 mod socket;
 mod wait;
 
 use std::io;
 
 pub use endpoint::Error;
-pub use socket::{Pull, Push, Socket, SocketType};
-pub use zmtp::{Frame, Message};
+pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
+pub use socket::{Dealer, Pull, Push, Router, Socket, SocketType};
+pub use zmq_core::{Linger, Reconnect, RouteOutcome};
+pub use zmq_pipe::Hwm;
+pub use zmtp::{Frame, Identity, Message};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
 #[derive(Debug, Clone)]
@@ -49,8 +61,13 @@ impl Context {
         })
     }
 
-    /// A new socket of type `T`, with no peers yet.
+    /// A new socket of type `T` with libzmq's default options.
     pub fn socket<T: SocketType>(&self) -> Socket<T> {
-        Socket::new(self.core.clone())
+        self.socket_with(SocketOptions::default())
+    }
+
+    /// A new socket of type `T` with `options`.
+    pub fn socket_with<T: SocketType>(&self, options: SocketOptions) -> Socket<T> {
+        Socket::new(self.core.clone(), options)
     }
 }

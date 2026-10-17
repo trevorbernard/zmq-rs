@@ -4,15 +4,15 @@ use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 
 use std::sync::mpsc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe};
-use zmtp::{Identity, Message, SocketType};
+use zmtp::{Established, Identity, Message, SocketType};
 
 use mio::net::TcpListener;
 
@@ -87,6 +87,23 @@ pub struct Connection {
     pub tx: Writer<Message>,
     /// Messages from the peer.
     pub rx: Reader<Message>,
+    pub(crate) peer: PeerSlot,
+}
+
+/// What the most recent handshake established, shared by a session and its
+/// connection. Written before any message from that handshake is delivered.
+pub(crate) type PeerSlot = Arc<Mutex<Option<Established>>>;
+
+impl Connection {
+    /// What the most recent handshake with the peer established, such as
+    /// its identity and socket type. `None` until the first handshake
+    /// completes; replaced after each reconnection.
+    pub fn peer(&self) -> Option<Established> {
+        self.peer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
 }
 
 /// A bound TCP port. Each peer that connects and completes the handshake
@@ -184,14 +201,16 @@ impl Context {
     pub fn connect(&self, addr: SocketAddr, config: ConnectionConfig) -> Connection {
         let (tx, outbound) = pipe(config.send_hwm);
         let (inbound, rx) = pipe(config.recv_hwm);
+        let peer = PeerSlot::default();
         self.io_thread()
             .send(IoCommand::Connect(Box::new(ConnectRequest {
                 addr,
                 config,
                 inbound,
                 outbound,
+                peer: peer.clone(),
             })));
-        Connection { tx, rx }
+        Connection { tx, rx, peer }
     }
 
     /// Closes every listener and connection, lets connections deliver their

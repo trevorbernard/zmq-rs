@@ -6,10 +6,10 @@ use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::task::{Context as TaskContext, Poll, Waker};
 
-use zmq_core::{ConnectionConfig, FairQueue, LoadBalancer, Peers};
+use zmq_core::{ConnectionConfig, FairQueue, LoadBalancer, Peers, RouteOutcome, RouterTable};
 use zmtp::Message;
 
-use crate::{Error, endpoint, wait};
+use crate::{Error, RoutingId, SocketOptions, endpoint, wait};
 
 mod sealed {
     pub trait Sealed {}
@@ -47,6 +47,45 @@ impl SocketType for Pull {
     type Routing = FairQueue;
 }
 
+/// Sends round robin to, and receives fairly from, its peers (RFC 28):
+/// REP, ROUTER or other DEALERs. Waits while no peer has room.
+#[derive(Debug)]
+pub enum Dealer {}
+
+/// Receives from its peers tagged with their [`RoutingId`], and sends to a
+/// peer by routing id (RFC 28). Never blocks on send: a message for an
+/// unknown or full peer is dropped, as libzmq does by default.
+#[derive(Debug)]
+pub enum Router {}
+
+/// DEALER's routing: load-balanced sends, fair-queued receives.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct DealerRouting {
+    send: LoadBalancer,
+    recv: FairQueue,
+}
+
+/// ROUTER's routing: fair-queued receives tagged by routing id.
+#[doc(hidden)]
+#[derive(Debug, Default)]
+pub struct RouterRouting {
+    recv: FairQueue,
+    table: RouterTable,
+}
+
+impl sealed::Sealed for Dealer {}
+impl SocketType for Dealer {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Dealer;
+    type Routing = DealerRouting;
+}
+
+impl sealed::Sealed for Router {}
+impl SocketType for Router {
+    const KIND: zmtp::SocketType = zmtp::SocketType::Router;
+    type Routing = RouterRouting;
+}
+
 /// A socket of type `T`. What it can do depends on `T`: a
 /// `Socket<Push>` can only send and a `Socket<Pull>` can only receive.
 pub struct Socket<T: SocketType> {
@@ -56,9 +95,18 @@ pub struct Socket<T: SocketType> {
 }
 
 impl<T: SocketType> Socket<T> {
-    pub(crate) fn new(context: zmq_core::Context) -> Self {
+    pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
+        let config = ConnectionConfig {
+            identity: options.identity,
+            send_hwm: options.send_hwm,
+            recv_hwm: options.recv_hwm,
+            linger: options.linger,
+            reconnect: options.reconnect,
+            max_frame_size: options.max_frame_size,
+            ..ConnectionConfig::new(T::KIND)
+        };
         Self {
-            peers: Peers::new(context, ConnectionConfig::new(T::KIND)),
+            peers: Peers::new(context, config),
             routing: T::Routing::default(),
             _type: PhantomData,
         }
@@ -85,52 +133,35 @@ impl<T: SocketType> Socket<T> {
 impl Socket<Push> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
-        let mut cx = TaskContext::from_waker(Waker::noop());
-        self.poll_send(message.into(), &mut cx)
+        let mut slot = Some(message.into());
+        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        slot.map_or(Ok(()), Err)
     }
 
     /// Sends `message`, blocking while no peer has room.
     pub fn send(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send_slot(&mut slot, cx));
+        wait::block_on(|cx| self.poll_send(&mut slot, cx));
     }
 
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send_slot(&mut slot, cx)).await;
+        poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
     }
 
-    /// Sends the message in `slot`, putting it back if no peer has room.
-    fn poll_send_slot(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
-        let Some(message) = slot.take() else {
-            return Poll::Ready(());
-        };
-        match self.poll_send(message, cx) {
-            Ok(()) => Poll::Ready(()),
-            Err(message) => {
-                *slot = Some(message);
-                Poll::Pending
-            }
-        }
-    }
-
-    fn poll_send(&mut self, message: Message, cx: &mut TaskContext<'_>) -> Result<(), Message> {
-        self.peers.accept(cx);
+    fn poll_send(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        // PUSH never receives: discard anything peers send, and drop peers
+        // that are gone.
         self.peers.prune_send_only();
-        self.routing
-            .poll_send(self.peers.connections_mut(), message, cx)
+        poll_load_balanced(&mut self.peers, &mut self.routing, slot, cx)
     }
 }
 
 impl Socket<Pull> {
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        let mut cx = TaskContext::from_waker(Waker::noop());
-        match self.poll_recv(&mut cx) {
-            Poll::Ready(message) => Some(message),
-            Poll::Pending => None,
-        }
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
     }
 
     /// The next message, blocking until one arrives.
@@ -144,8 +175,143 @@ impl Socket<Pull> {
     }
 
     fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        poll_fair_queued(&mut self.peers, &mut self.routing, cx)
+    }
+}
+
+impl Socket<Dealer> {
+    /// Sends `message` if a peer has room, otherwise hands it back.
+    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
+        let mut slot = Some(message.into());
+        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        slot.map_or(Ok(()), Err)
+    }
+
+    /// Sends `message`, blocking while no peer has room.
+    pub fn send(&mut self, message: impl Into<Message>) {
+        let mut slot = Some(message.into());
+        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+    }
+
+    /// Sends `message`, waiting while no peer has room.
+    pub async fn send_async(&mut self, message: impl Into<Message>) {
+        let mut slot = Some(message.into());
+        poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+    }
+
+    /// The next message, if one is waiting.
+    pub fn try_recv(&mut self) -> Option<Message> {
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+    }
+
+    /// The next message, blocking until one arrives.
+    pub fn recv(&mut self) -> Message {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message, waiting until one arrives.
+    pub async fn recv_async(&mut self) -> Message {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_send(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        poll_load_balanced(&mut self.peers, &mut self.routing.send, slot, cx)
+    }
+
+    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        poll_fair_queued(&mut self.peers, &mut self.routing.recv, cx)
+    }
+}
+
+impl Socket<Router> {
+    /// Sends `message` to the peer with routing id `to`. Never blocks: if no
+    /// such peer is connected, or its queue is full, the message is dropped
+    /// and the outcome says so.
+    pub fn send(&mut self, to: &RoutingId, message: impl Into<Message>) -> RouteOutcome {
+        self.peers
+            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        let RouterRouting { table, .. } = &mut self.routing;
+        let peers = self.peers.list_mut();
+        table.sync(peers);
+        table.send(peers, to.as_bytes(), message.into())
+    }
+
+    /// The next message and the routing id of the peer that sent it, if
+    /// one is waiting.
+    pub fn try_recv(&mut self) -> Option<(RoutingId, Message)> {
+        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+    }
+
+    /// The next message and its sender's routing id, blocking until one
+    /// arrives.
+    pub fn recv(&mut self) -> (RoutingId, Message) {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message and its sender's routing id, waiting until one
+    /// arrives.
+    pub async fn recv_async(&mut self) -> (RoutingId, Message) {
+        poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
         self.peers.accept(cx);
-        self.routing.poll_recv(self.peers.connections_mut(), cx)
+        let RouterRouting { recv, table } = &mut self.routing;
+        let peers = self.peers.list_mut();
+        table.sync(peers);
+        loop {
+            let Poll::Ready((peer, message)) = recv.poll_recv(peers, cx) else {
+                return Poll::Pending;
+            };
+            if table.routing_id(peer).is_none() {
+                table.sync(peers);
+            }
+            // A peer whose identity duplicates another's is ignored, as in
+            // libzmq: its messages are dropped.
+            if let Some(routing_id) = table.routing_id(peer) {
+                return Poll::Ready((RoutingId::trusted(routing_id.clone()), message));
+            }
+        }
+    }
+}
+
+/// Sends the message in `slot` to the next peer with room, putting it back
+/// and returning `Pending` if none has room. Shared by PUSH and DEALER.
+fn poll_load_balanced(
+    peers: &mut Peers,
+    balancer: &mut LoadBalancer,
+    slot: &mut Option<Message>,
+    cx: &mut TaskContext<'_>,
+) -> Poll<()> {
+    let Some(message) = slot.take() else {
+        return Poll::Ready(());
+    };
+    peers.accept(cx);
+    match balancer.poll_send(peers.list_mut(), message, cx) {
+        Ok(()) => Poll::Ready(()),
+        Err(message) => {
+            *slot = Some(message);
+            Poll::Pending
+        }
+    }
+}
+
+/// The next message from any peer, fairly. Shared by PULL and DEALER.
+fn poll_fair_queued(
+    peers: &mut Peers,
+    queue: &mut FairQueue,
+    cx: &mut TaskContext<'_>,
+) -> Poll<Message> {
+    peers.accept(cx);
+    queue
+        .poll_recv(peers.list_mut(), cx)
+        .map(|(_, message)| message)
+}
+
+fn ready<T>(poll: Poll<T>) -> Option<T> {
+    match poll {
+        Poll::Ready(value) => Some(value),
+        Poll::Pending => None,
     }
 }
 

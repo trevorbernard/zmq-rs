@@ -97,8 +97,19 @@ strategies work over that set, as in libzmq:
 - `LoadBalancer` (`lb_t`) sends each message to the next peer with room,
   round robin, and waits while none has room.
 - `FairQueue` (`fq_t`) takes the next message round robin from peers that
-  have one waiting, and drops a peer once its session is gone and
-  everything it delivered has been read.
+  have one waiting, reports which peer sent it, and drops a peer once its
+  session is gone and everything it delivered has been read.
+- `RouterTable` (`router_t`) maps routing ids to peers. A peer's routing id
+  is the identity from its handshake; anonymous peers get `0x00` and a
+  32-bit counter that starts at a random value; a peer reusing an identity
+  already in use is ignored. ROUTER never blocks on send: a message for an
+  unknown or full peer is dropped and the `RouteOutcome` says so.
+
+Each peer has a stable `PeerKey`. Keys only grow and removals keep order,
+so a peer is found by binary search. A connection learns its peer from the
+handshake: the engine publishes the `Established` result before delivering
+any message from that handshake, so ROUTER never sees a message it cannot
+attribute.
 
 A socket waits on many pipes at once by polling each with the same waker,
 so blocking calls, `async` methods and `try_` methods share one code path.
@@ -114,6 +125,6 @@ is a compile error.
 | 2 | Bind/listen, accepting peers | done |
 | 3 | Reconnection with backoff (sessions outlive connections), linger, shutdown | done |
 | 4a | `Peers`, load balancing and fair queuing; PUSH/PULL as typed sockets in `zmq` | done |
-| 4b | DEALER and ROUTER: identity routing and envelopes | next |
-| 4c | REQ and REP | |
+| 4b | DEALER and ROUTER: identity routing and envelopes | done |
+| 4c | REQ and REP | next |
 | 5 | PLAIN with an `Authenticator` trait, `inproc`, heartbeats | |

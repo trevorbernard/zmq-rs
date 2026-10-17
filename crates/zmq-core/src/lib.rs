@@ -14,4 +14,6 @@ mod socket;
 
 pub use context::{Connection, ConnectionConfig, Context, Linger, Listener, ShutdownTimedOut};
 pub use reconnect::Reconnect;
-pub use socket::{FairQueue, LoadBalancer, Peers};
+pub use socket::{
+    FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterTable,
+};

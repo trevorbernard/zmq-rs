@@ -78,6 +78,7 @@ fn check(rc: c_int) -> io::Result<c_int> {
 pub enum Kind {
     Pub = 1,
     Sub = 2,
+    Req = 3,
     Rep = 4,
     Dealer = 5,
     Router = 6,

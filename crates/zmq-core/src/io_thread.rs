@@ -16,6 +16,7 @@ use mio::{Events, Interest, Token};
 use zmq_pipe::{Reader, Writer, pipe};
 use zmtp::Message;
 
+use crate::context::PeerSlot;
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
 use crate::{Connection, ConnectionConfig, Linger};
@@ -45,6 +46,7 @@ pub(crate) struct ConnectRequest {
     pub(crate) config: ConnectionConfig,
     pub(crate) inbound: Writer<Message>,
     pub(crate) outbound: Reader<Message>,
+    pub(crate) peer: PeerSlot,
 }
 
 /// A bound listener to serve, and where to deliver accepted connections.
@@ -264,8 +266,14 @@ impl EventLoop {
             config,
             inbound,
             outbound,
+            peer,
         } = request;
-        self.add_session(Origin::Connect(addr), None, config, inbound, outbound)
+        let pipes = SessionPipes {
+            inbound,
+            outbound,
+            peer,
+        };
+        self.add_session(Origin::Connect(addr), None, config, pipes)
     }
 
     fn listen(&mut self, request: ListenRequest) -> Option<usize> {
@@ -296,9 +304,13 @@ impl EventLoop {
         origin: Origin,
         stream: Option<TcpStream>,
         config: ConnectionConfig,
-        inbound: Writer<Message>,
-        outbound: Reader<Message>,
+        pipes: SessionPipes,
     ) -> Option<usize> {
+        let SessionPipes {
+            inbound,
+            outbound,
+            peer,
+        } = pipes;
         let id = self.take_id();
         let waker = self.token_waker(id);
         let mut session = Session {
@@ -310,6 +322,7 @@ impl EventLoop {
             config,
             inbound,
             outbound,
+            peer,
             task_waker: Waker::from(waker.clone()),
             waker,
         };
@@ -496,13 +509,21 @@ impl EventLoop {
         for stream in accepted {
             let (tx, outbound) = pipe(config.send_hwm);
             let (inbound, rx) = pipe(config.recv_hwm);
+            let peer = PeerSlot::default();
             let origin = Origin::Accepted(Some(Delivery {
                 listener: id,
-                connection: Connection { tx, rx },
+                connection: Connection {
+                    tx,
+                    rx,
+                    peer: peer.clone(),
+                },
             }));
-            if let Some(session) =
-                self.add_session(origin, Some(stream), config.clone(), inbound, outbound)
-            {
+            let pipes = SessionPipes {
+                inbound,
+                outbound,
+                peer,
+            };
+            if let Some(session) = self.add_session(origin, Some(stream), config.clone(), pipes) {
                 self.drive_session(session);
             }
         }
@@ -524,8 +545,17 @@ struct Session {
     closing: Option<Closing>,
     inbound: Writer<Message>,
     outbound: Reader<Message>,
+    /// Shared with the socket's [`Connection`].
+    peer: PeerSlot,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
+}
+
+/// The session's ends of a connection, and the slot for its peer.
+struct SessionPipes {
+    inbound: Writer<Message>,
+    outbound: Reader<Message>,
+    peer: PeerSlot,
 }
 
 /// A session delivering its last queued messages.
@@ -557,6 +587,7 @@ impl Session {
         let mut pipes = Pipes {
             inbound: &mut self.inbound,
             outbound: &mut self.outbound,
+            peer: &self.peer,
         };
         engine.drive(&mut pipes, &mut cx)
     }

@@ -387,7 +387,7 @@ fn dropping_only_the_receiver_keeps_the_connection_sending() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let Connection { mut tx, rx } = context.connect(addr, dealer("half"));
+    let Connection { mut tx, rx, .. } = context.connect(addr, dealer("half"));
     drop(rx);
     tx.send_blocking(message(&[b"first"])).unwrap();
     assert_eq!(router.recv().unwrap(), [&b"half"[..], b"first"]);
@@ -460,4 +460,38 @@ fn shutdown_closes_listeners_and_later_work() {
     let after = context.connect(free_port(), dealer("after"));
     let (_after, next) = recv(after);
     assert_eq!(next, None, "a stopped context closes new connections");
+}
+
+#[test]
+fn a_connection_learns_its_peer_from_the_handshake() {
+    let libzmq = Socket::new(Kind::Dealer);
+    libzmq.set_routing_id(b"lib");
+    let addr = libzmq.bind_loopback();
+    let context = Context::new().unwrap();
+    let connection = context.connect(addr, dealer("us"));
+    libzmq.send(&[b"first"]).unwrap();
+    // The peer is known before its first message can be read.
+    let (connection, first) = recv(connection);
+    assert_eq!(first, Some(message(&[b"first"])));
+    let peer = connection.peer().expect("known once a message has arrived");
+    assert_eq!(peer.peer_identity, Frame::from("lib"));
+    assert_eq!(peer.peer_socket_type, Some(SocketType::Dealer));
+}
+
+#[test]
+fn an_accepted_connection_knows_its_peer_on_arrival() {
+    let context = Context::new().unwrap();
+    let mut listener = context
+        .bind(
+            "127.0.0.1:0".parse().unwrap(),
+            ConnectionConfig::new(SocketType::Router),
+        )
+        .unwrap();
+    let libzmq = Socket::new(Kind::Dealer);
+    libzmq.set_routing_id(b"client");
+    libzmq.connect(listener.local_addr());
+    let connection =
+        within(Duration::from_secs(5), move || listener.accept_blocking()).expect("accepted");
+    let peer = connection.peer().expect("delivered after the handshake");
+    assert_eq!(peer.peer_identity, Frame::from("client"));
 }

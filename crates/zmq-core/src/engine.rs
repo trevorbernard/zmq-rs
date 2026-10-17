@@ -7,6 +7,7 @@
 
 use std::io::{self, Read, Write};
 use std::mem;
+use std::sync::PoisonError;
 use std::task::{Context, Poll};
 
 use mio::net::TcpStream;
@@ -17,6 +18,7 @@ use zmtp::{
 };
 
 use crate::ConnectionConfig;
+use crate::context::PeerSlot;
 
 /// Stop taking messages from the socket while this much output is unsent.
 const MAX_PENDING_OUTPUT: usize = 64 * 1024;
@@ -76,6 +78,8 @@ pub(crate) struct Pipes<'a> {
     pub(crate) inbound: &'a mut Writer<Message>,
     /// From the socket.
     pub(crate) outbound: &'a mut Reader<Message>,
+    /// Where the handshake's outcome goes, for the socket to read.
+    pub(crate) peer: &'a PeerSlot,
 }
 
 impl Engine {
@@ -225,9 +229,13 @@ impl Engine {
                             return Err(EngineError::Handshake(err));
                         }
                     };
+                    let version = established.version;
+                    // Published before any message from this peer can be
+                    // delivered, so a ROUTER always knows who sent it.
+                    *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
                     self.state = State::Active {
                         decoder,
-                        encoder: Encoder::new(established.version),
+                        encoder: Encoder::new(version),
                         pending: None,
                     };
                     Ok(true)
