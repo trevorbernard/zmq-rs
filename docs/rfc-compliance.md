@@ -241,6 +241,12 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
 - Checks beyond libzmq: the vouch must name our long-term key as well as C' (RFC 26; libzmq checks only C').
 - Verified on the wire against libzmq 4.3.5 in both roles, with multipart messages and 100 KB frames, using the key pairs from libzmq's `zmq_curve(7)`; public keys derived from those secrets match the published ones.
 
+**Done on connections and sockets:**
+- `Security::curve_client(keypair, server_key)`, `Security::curve_server(keypair)` and `Security::curve_server_authenticated(keypair, domain, authenticator)`.
+- Without an authenticator a CURVE server accepts any client that knows its public key, as libzmq does with no ZAP handler, and the connection records no authentication. With one, the authenticator sees `ZapCredentials::Curve(client_key)`.
+- After the handshake every frame is boxed, including PING, PONG, SUBSCRIBE and CANCEL, as libzmq boxes them.
+- Security applies to TCP and IPC. Over `inproc` no mechanism runs, as in libzmq.
+
 ### ZAP (RFC 27)
 
 - Request frames: `"" | "1.0" | request_id | domain | address | identity | mechanism | credentials...`.

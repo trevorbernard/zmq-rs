@@ -13,10 +13,12 @@ use std::time::{Duration, Instant};
 
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
-    ClientStep, Command, DecodeError, Decoder, DecoderConfig, Encoder, Established, Greeting,
-    GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message, NullHandshake,
-    PeerGreeting, PendingAuthentication, Ping, PingContext, PlainClient, PlainServer,
-    PlainServerConfig, Role, ServerStep, SocketType, Subscription, Ttl, Version, ZapReply,
+    ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
+    CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
+    Greeting, GreetingConfig, GreetingError, HandshakeError, Incoming, LegacyPeers, Message,
+    NullHandshake, PeerGreeting, PendingAuthentication, PendingCurveAuthentication, Ping,
+    PingContext, PlainClient, PlainServer, PlainServerConfig, Role, ServerStep, SocketType,
+    Subscription, Ttl, Version, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -39,6 +41,8 @@ pub(crate) struct Engine {
     /// The last look at the socket's pipe found it empty or closed.
     outbound_empty: bool,
     deadlines: Deadlines,
+    /// Boxes and unboxes every frame once a CURVE handshake is done.
+    curve: Option<CurveCodec>,
 }
 
 /// When the engine must act or give up, all `None` while not applicable.
@@ -98,17 +102,26 @@ enum Mechanism {
     Null(NullHandshake),
     PlainClient(PlainClient),
     PlainServer(PlainServer),
-    /// A PLAIN server waiting for its authenticator's answer.
+    CurveClient(Box<CurveClient>),
+    CurveServer(Box<CurveServer>),
+    /// A server waiting for its authenticator's answer.
     Authenticating {
-        pending: PendingAuthentication,
+        pending: Pending,
         reply: mpsc::Receiver<ZapReply>,
     },
+}
+
+/// A server handshake waiting for ZAP, by mechanism.
+enum Pending {
+    Plain(PendingAuthentication),
+    Curve(Box<PendingCurveAuthentication>),
 }
 
 /// Where a handshake step leads.
 enum Step {
     Continue(Mechanism),
-    Established(Established),
+    /// Done, with the codec every later frame goes through for CURVE.
+    Established(Established, Option<CurveCodec>),
 }
 
 /// Why an engine stopped. The connection is closed.
@@ -126,6 +139,8 @@ pub(crate) enum EngineError {
     /// The handshake took too long, or the peer went quiet past a heartbeat
     /// deadline.
     Timeout,
+    /// A CURVE frame did not open, or arrived out of order.
+    Curve(CurveError),
 }
 
 impl EngineError {
@@ -157,6 +172,8 @@ impl Engine {
             },
             Security::PlainClient(_) => zmtp::Mechanism::Plain(Role::Client),
             Security::PlainServer { .. } => zmtp::Mechanism::Plain(Role::Server),
+            Security::CurveClient { .. } => zmtp::Mechanism::Curve(Role::Client),
+            Security::CurveServer { .. } => zmtp::Mechanism::Curve(Role::Server),
         };
         let mut greeting = Greeting::new(GreetingConfig {
             socket_type: config.socket_type,
@@ -174,6 +191,7 @@ impl Engine {
             out_pos: 0,
             outbound_empty: false,
             deadlines: Deadlines::default(),
+            curve: None,
         }
     }
 
@@ -188,27 +206,54 @@ impl Engine {
     }
 
     /// Sends a PING if one is due, and starts waiting for traffic.
-    fn maybe_ping(&mut self, now: Instant) {
+    fn maybe_ping(&mut self, now: Instant) -> Result<(), EngineError> {
         let (Some(heartbeat), Some(due)) = (self.config.heartbeat, self.deadlines.next_ping) else {
-            return;
+            return Ok(());
         };
         if due > now {
-            return;
+            return Ok(());
         }
         let State::Active { encoder, .. } = &self.state else {
-            return;
+            return Ok(());
         };
+        let encoder = *encoder;
         let ping = Command::Ping(Ping {
             ttl: Ttl::from_duration(heartbeat.ttl),
             context: PingContext::default(),
         });
         let mut body = Vec::new();
         ping.encode(&mut body);
-        if encoder.encode_command(&body, &mut self.out).is_ok() {
+        if self.write_command(encoder, &body)? {
             self.deadlines.next_ping = Some(now + heartbeat.interval.max(MIN_PING_INTERVAL));
             self.deadlines
                 .ping_timeout
                 .get_or_insert(now + heartbeat.timeout);
+        }
+        Ok(())
+    }
+
+    /// Writes `message`, boxed if CURVE is in use.
+    fn write_message(&mut self, encoder: Encoder, message: &Message) -> Result<(), EngineError> {
+        match &mut self.curve {
+            Some(codec) => codec
+                .encode_message(message, encoder, &mut self.out)
+                .map_err(EngineError::Curve),
+            None => {
+                encoder.encode(message, &mut self.out);
+                Ok(())
+            }
+        }
+    }
+
+    /// Writes a command, boxed if CURVE is in use. Returns false for ZMTP
+    /// 1.0 and 2.0 peers, which have no commands.
+    fn write_command(&mut self, encoder: Encoder, body: &[u8]) -> Result<bool, EngineError> {
+        match &mut self.curve {
+            Some(codec) => codec
+                .encode_command(body, encoder, &mut self.out)
+                .map(|()| true)
+                .map_err(EngineError::Curve),
+            None => Ok(encoder.encode_command(body, &mut self.out).is_ok()),
         }
     }
 
@@ -237,7 +282,7 @@ impl Engine {
         if self.deadlines.expired(now) {
             return Err(EngineError::Timeout);
         }
-        self.maybe_ping(now);
+        self.maybe_ping(now)?;
         loop {
             let wrote = self.flush()?;
             let pulled = self.pull_outbound(pipes, cx)?;
@@ -304,9 +349,9 @@ impl Engine {
                     match self.outgoing_subscription(&message) {
                         Some(subscription) => {
                             remember(pipes.subscriptions, &subscription);
-                            self.encode_subscription(encoder, &subscription);
+                            self.encode_subscription(encoder, &subscription)?;
                         }
-                        None => encoder.encode(&message, &mut self.out),
+                        None => self.write_message(encoder, &message)?,
                     }
                     self.outbound_empty = false;
                     progressed = true;
@@ -417,6 +462,31 @@ impl Engine {
                 )
                 .map(Mechanism::PlainServer)
             }
+            Security::CurveClient {
+                keypair,
+                server_key,
+            } => CurveClient::start(
+                config.socket_type,
+                config.identity.clone(),
+                keypair,
+                *server_key,
+                peer,
+                &mut self.out,
+            )
+            .map(|client| Mechanism::CurveClient(Box::new(client))),
+            Security::CurveServer {
+                keypair, domain, ..
+            } => CurveServer::start(
+                CurveServerConfig {
+                    socket_type: config.socket_type,
+                    identity: config.identity.clone(),
+                    domain: domain.clone(),
+                    peer_address: self.stream.zap_address(),
+                },
+                keypair,
+                peer,
+            )
+            .map(|server| Mechanism::CurveServer(Box::new(server))),
         };
         mechanism.map_err(EngineError::Handshake)
     }
@@ -445,8 +515,17 @@ impl Engine {
                     // Dropped unanswered: an internal error, as ZAP's 500.
                     Err(mpsc::TryRecvError::Disconnected) => ZapReply::InternalError,
                 };
-                let server = pending.reply(answer, &mut self.out);
-                Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))
+                match pending {
+                    Pending::Plain(pending) => {
+                        let server = pending.reply(answer, &mut self.out);
+                        Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))
+                    }
+                    Pending::Curve(pending) => {
+                        let result = pending.reply(answer, &mut self.out);
+                        let (established, codec) = self.handshake_result(result)?;
+                        Step::Established(established, Some(codec))
+                    }
+                }
             }
             mechanism => match decoder.decode().map_err(EngineError::Decode)? {
                 Some(item) => self.handshake_step(mechanism, item, cx)?,
@@ -461,8 +540,9 @@ impl Engine {
             Step::Continue(mechanism) => {
                 self.state = State::Handshake { mechanism, decoder };
             }
-            Step::Established(established) => {
+            Step::Established(established, codec) => {
                 let version = established.version;
+                self.curve = codec;
                 self.deadlines.handshake = None;
                 // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
                 if matches!(version, Version::V3_0 | Version::V3_1) {
@@ -477,7 +557,7 @@ impl Engine {
                 let encoder = Encoder::new(version);
                 for topic in pipes.subscriptions.iter() {
                     let topic = zmtp::Frame::copy_from_slice(topic);
-                    self.encode_subscription(encoder, &Subscription::Subscribe(topic));
+                    self.encode_subscription(encoder, &Subscription::Subscribe(topic))?;
                 }
                 self.state = State::Active {
                     decoder,
@@ -499,13 +579,13 @@ impl Engine {
         Ok(match mechanism {
             Mechanism::Null(handshake) => {
                 let result = handshake.receive(item, &mut self.out);
-                Step::Established(self.handshake_result(result)?)
+                Step::Established(self.handshake_result(result)?, None)
             }
             Mechanism::PlainClient(client) => {
                 let result = client.receive(item, &mut self.out);
                 match self.handshake_result(result)? {
                     ClientStep::Continue(client) => Step::Continue(Mechanism::PlainClient(client)),
-                    ClientStep::Established(established) => Step::Established(established),
+                    ClientStep::Established(established) => Step::Established(established, None),
                 }
             }
             Mechanism::PlainServer(server) => {
@@ -519,9 +599,60 @@ impl Engine {
                         }
                         // Without an authenticator the responder is dropped
                         // unanswered, rejecting the client.
-                        Step::Continue(Mechanism::Authenticating { pending, reply })
+                        Step::Continue(Mechanism::Authenticating {
+                            pending: Pending::Plain(pending),
+                            reply,
+                        })
                     }
-                    ServerStep::Established(established) => Step::Established(established),
+                    ServerStep::Established(established) => Step::Established(established, None),
+                }
+            }
+            Mechanism::CurveClient(client) => {
+                let result = client.receive(item, &mut self.out);
+                match self.handshake_result(result)? {
+                    CurveClientStep::Continue(client) => {
+                        Step::Continue(Mechanism::CurveClient(Box::new(client)))
+                    }
+                    CurveClientStep::Established(established, codec) => {
+                        Step::Established(established, Some(codec))
+                    }
+                }
+            }
+            Mechanism::CurveServer(server) => {
+                let result = server.receive(item, &mut self.out);
+                match self.handshake_result(result)? {
+                    CurveServerStep::Continue(server) => {
+                        Step::Continue(Mechanism::CurveServer(Box::new(server)))
+                    }
+                    CurveServerStep::Authenticate(pending, request) => {
+                        let authenticator = match &self.config.security {
+                            Security::CurveServer { authenticator, .. } => authenticator.clone(),
+                            _ => None,
+                        };
+                        match authenticator {
+                            Some(authenticator) => {
+                                let (answer, reply) = mpsc::channel();
+                                let respond = ZapResponder::new(answer, cx.waker().clone());
+                                authenticator.authenticate(request, respond);
+                                Step::Continue(Mechanism::Authenticating {
+                                    pending: Pending::Curve(Box::new(pending)),
+                                    reply,
+                                })
+                            }
+                            // No authenticator: any client that knows our
+                            // key is welcome, and nobody vouched for it.
+                            None => {
+                                let accept = ZapReply::Ok {
+                                    user_id: zmtp::Frame::new(),
+                                    metadata: zmtp::Metadata::new(),
+                                };
+                                let result = pending.reply(accept, &mut self.out);
+                                let (mut established, codec) = self.handshake_result(result)?;
+                                established.authenticated = None;
+                                Step::Established(established, Some(codec))
+                            }
+                        }
+                    }
                 }
             }
             // Handled before decoding; nothing is read while waiting.
@@ -559,9 +690,21 @@ impl Engine {
             progressed = true;
         }
         loop {
-            let item = decoder.decode().map_err(EngineError::Decode)?;
+            let mut item = decoder.decode().map_err(EngineError::Decode)?;
             if item.is_some() {
                 self.deadlines.heard_from_peer();
+            }
+            if let Some(codec) = &mut self.curve
+                && let Some(boxed) = item.take()
+            {
+                match codec.decode(boxed).map_err(EngineError::Curve)? {
+                    Some(unboxed) => item = Some(unboxed),
+                    // Part of a multipart message: keep reading.
+                    None => {
+                        progressed = true;
+                        continue;
+                    }
+                }
             }
             match item {
                 Some(Incoming::Message(message)) => {
@@ -613,7 +756,7 @@ impl Engine {
             }
             let mut pong = Vec::new();
             Command::Pong(ping.context).encode(&mut pong);
-            let _ = encoder.encode_command(&pong, &mut self.out);
+            self.write_command(encoder, &pong)?;
         }
         Ok(None)
     }
@@ -628,13 +771,17 @@ impl Engine {
 
     /// Writes `subscription` as ZMTP 3.1 does, as a command, or in the
     /// message form older peers expect.
-    fn encode_subscription(&mut self, encoder: Encoder, subscription: &Subscription) {
+    fn encode_subscription(
+        &mut self,
+        encoder: Encoder,
+        subscription: &Subscription,
+    ) -> Result<(), EngineError> {
         if encoder.version() == Version::V3_1 {
             let mut body = Vec::new();
             subscription.to_command().encode(&mut body);
-            let _ = encoder.encode_command(&body, &mut self.out);
+            self.write_command(encoder, &body).map(drop)
         } else {
-            encoder.encode(&subscription.to_message(), &mut self.out);
+            self.write_message(encoder, &subscription.to_message())
         }
     }
 

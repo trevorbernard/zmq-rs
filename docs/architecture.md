@@ -152,11 +152,13 @@ is a compile error.
 ## Security
 
 `ConnectionConfig::security` (and `SocketOptions::security`) selects NULL,
-a PLAIN client with its credentials, or a PLAIN server with an
+a PLAIN client with its credentials, a PLAIN server with an
+`Authenticator`, a CURVE client with its key pair and the server's public
+key, or a CURVE server with its key pair and, optionally, an
 `Authenticator`. The engine runs the matching `zmtp` state machine after
 the greeting.
 
-A PLAIN server hands each client's `ZapRequest` to its authenticator with a
+A PLAIN or CURVE server hands each client's `ZapRequest` to its authenticator with a
 `ZapResponder`, then waits without reading further input. The authenticator
 may answer at once or later from any thread; answering wakes the session.
 A responder dropped unanswered counts as ZAP status 500, so a forgotten
@@ -166,6 +168,11 @@ answer rejects the client rather than hanging the handshake. A closure
 A failed authentication is a protocol error: the session ends without
 reconnecting, as in libzmq. The authenticated user id and metadata reach
 the socket through `Connection::peer().authenticated`.
+
+Once a CURVE handshake completes, the engine keeps its `CurveCodec`, and
+every frame in or out goes through it: messages, and the PING, PONG,
+SUBSCRIBE and CANCEL commands too. A frame that fails to open, or whose
+nonce does not increase, is a protocol error and ends the session.
 
 ## Heartbeats and deadlines
 
@@ -302,4 +309,4 @@ Also check while on Linux:
 | 6c | PAIR | done |
 | 7 | `ipc://` | done |
 | 8a | CURVE in `zmtp`: Z85, keys, handshake, MESSAGE boxing | done |
-| 8b | CURVE on connections and sockets | next |
+| 8b | CURVE on connections and sockets | done |

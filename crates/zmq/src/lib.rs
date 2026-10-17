@@ -88,7 +88,8 @@ pub use zmq_core::{
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
-    Credential, Frame, Identity, Message, PlainCredentials, ZapCredentials, ZapReply, ZapRequest,
+    Credential, Frame, Identity, KeyError, Keypair, Message, Metadata, PlainCredentials, PublicKey,
+    SecretKey, ZapCredentials, ZapReply, ZapRequest,
 };
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
