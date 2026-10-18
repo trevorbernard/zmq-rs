@@ -168,14 +168,19 @@ fn parse_port(port: &str, endpoint: &str) -> Result<u16, Error> {
     port.parse().map_err(|_| invalid(endpoint))
 }
 
+/// Resolves `host`, preferring an IPv4 address as libzmq does with
+/// `ZMQ_IPV6` off, its default. Otherwise `localhost` may resolve to `::1`
+/// and never reach a `tcp://*:port` listener, which binds IPv4 only.
 fn resolve(host: &str, port: u16, endpoint: &str) -> Result<SocketAddr, Error> {
     if let Ok(ip) = host.parse::<IpAddr>() {
         return Ok(SocketAddr::new(ip, port));
     }
-    (host, port)
-        .to_socket_addrs()
-        .map_err(Error::Io)?
-        .next()
+    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs().map_err(Error::Io)?.collect();
+    addrs
+        .iter()
+        .find(|addr| addr.is_ipv4())
+        .or_else(|| addrs.first())
+        .copied()
         .ok_or_else(|| invalid(endpoint))
 }
 
@@ -233,11 +238,9 @@ mod tests {
             connect_addr("tcp://[::1]:5555").unwrap(),
             addr("[::1]:5555")
         );
-        assert!(
-            connect_addr("tcp://localhost:5555")
-                .unwrap()
-                .ip()
-                .is_loopback()
+        assert_eq!(
+            connect_addr("tcp://localhost:5555").unwrap(),
+            addr("127.0.0.1:5555")
         );
     }
 
