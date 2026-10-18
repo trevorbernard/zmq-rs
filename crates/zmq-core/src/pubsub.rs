@@ -13,7 +13,7 @@ use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
-use crate::socket::{PeerKey, PeerList};
+use crate::socket::{Peer, PeerKey, PeerList};
 
 /// Topics and how many times each was subscribed, matched by prefix.
 #[derive(Debug, Clone, Default)]
@@ -443,11 +443,11 @@ impl Publisher {
         self.sync(peers);
         self.match_peers(&message);
         let mut sent = 0;
-        for peer in peers.iter_mut() {
-            if self.wanted(peer.key()) && peer.connection.tx.try_send(message.clone()).is_ok() {
+        self.for_each_wanted(peers, |peer| {
+            if peer.connection.tx.try_send(message.clone()).is_ok() {
                 sent += 1;
             }
-        }
+        });
         sent
     }
 
@@ -466,11 +466,11 @@ impl Publisher {
         };
         self.match_peers(&message);
         let mut full = false;
-        for peer in peers.iter_mut() {
-            if self.wanted(peer.key()) && peer.connection.tx.poll_ready(cx).is_pending() {
+        self.for_each_wanted(peers, |peer| {
+            if peer.connection.tx.poll_ready(cx).is_pending() {
                 full = true;
             }
-        }
+        });
         if full {
             *slot = Some(message);
             return Poll::Pending;
@@ -487,7 +487,7 @@ impl Publisher {
     }
 
     /// Finds the peers subscribed to a prefix of `message`, for
-    /// [`wanted`](Self::wanted).
+    /// [`for_each_wanted`](Self::for_each_wanted).
     fn match_peers(&mut self, message: &Message) {
         self.matched.clear();
         let topic = message.split_first().0.as_slice();
@@ -496,10 +496,24 @@ impl Publisher {
         }
     }
 
-    /// Whether the peer with `key` should get the message last given to
-    /// [`match_peers`](Self::match_peers).
-    fn wanted(&self, key: PeerKey) -> bool {
-        self.subscribers.contains_key(&key) && self.matched.contains(&key) != self.invert
+    /// Calls `f` with each peer that should get the message last given to
+    /// [`match_peers`](Self::match_peers). Without invert matching only
+    /// the matched peers are visited, however many others there are.
+    fn for_each_wanted(&self, peers: &mut PeerList, mut f: impl FnMut(&mut Peer)) {
+        if self.invert {
+            for peer in peers.iter_mut() {
+                let key = peer.key();
+                if self.subscribers.contains_key(&key) && !self.matched.contains(&key) {
+                    f(peer);
+                }
+            }
+        } else {
+            for &key in &self.matched {
+                if let Some(peer) = peers.get_mut(key) {
+                    f(peer);
+                }
+            }
+        }
     }
 }
 
