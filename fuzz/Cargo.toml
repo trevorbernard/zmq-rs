@@ -1,0 +1,51 @@
+[package]
+name = "zmtp-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "MPL-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+# Kept out of the main workspace: it needs a nightly toolchain and libFuzzer.
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+zmtp = { path = "../crates/zmtp" }
+
+[[bin]]
+name = "z85_decode"
+path = "fuzz_targets/z85_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "command_parse"
+path = "fuzz_targets/command_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "frame_decoder"
+path = "fuzz_targets/frame_decoder.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "null_handshake"
+path = "fuzz_targets/null_handshake.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "plain_server"
+path = "fuzz_targets/plain_server.rs"
+test = false
+doc = false
+bench = false

@@ -94,6 +94,13 @@
             echo "Cargo $(cargo --version)"
           '';
         };
+        # cargo-fuzz needs nightly for -Zsanitizer.
+        fuzz = pkgs.mkShell {
+          nativeBuildInputs = [
+            (pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal))
+            pkgs.cargo-fuzz
+          ];
+        };
       }
     );
   };
