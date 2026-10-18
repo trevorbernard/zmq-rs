@@ -38,18 +38,19 @@ pub fn encode(data: &[u8]) -> Result<String, Z85Error> {
 
 /// Decodes `text`, whose length must be a multiple of 5.
 pub fn decode(text: &str) -> Result<Vec<u8>, Z85Error> {
-    let text = text.as_bytes();
-    if !text.len().is_multiple_of(5) {
+    let octets = text.as_bytes();
+    if !octets.len().is_multiple_of(5) {
         return Err(Z85Error::Length);
     }
-    let mut data = Vec::with_capacity(text.len() / 5 * 4);
-    for group in text.chunks_exact(5) {
+    let mut data = Vec::with_capacity(octets.len() / 5 * 4);
+    for (start, group) in (0..).step_by(5).zip(octets.chunks_exact(5)) {
         let mut value: u64 = 0;
-        for &c in group {
-            let digit = ALPHABET
-                .iter()
-                .position(|&a| a == c)
-                .ok_or(Z85Error::Character(char::from(c)))?;
+        for (at, &c) in (start..).zip(group) {
+            // The alphabet is ASCII, so the first octet outside it starts
+            // a character.
+            let digit = ALPHABET.iter().position(|&a| a == c).ok_or_else(|| {
+                Z85Error::Character(text[at..].chars().next().expect("a character starts here"))
+            })?;
             value = value * 85 + digit as u64;
         }
         let value = u32::try_from(value).map_err(|_| Z85Error::Overflow)?;
@@ -102,6 +103,7 @@ mod tests {
     fn rejects_foreign_characters_and_overflow() {
         assert_eq!(decode("Hell~"), Err(Z85Error::Character('~')));
         assert_eq!(decode("Hellé"), Err(Z85Error::Length), "é is two octets");
+        assert_eq!(decode("He€"), Err(Z85Error::Character('€')));
         assert_eq!(decode("%nSc1"), Err(Z85Error::Overflow));
         assert_eq!(decode("#####"), Err(Z85Error::Overflow));
     }
