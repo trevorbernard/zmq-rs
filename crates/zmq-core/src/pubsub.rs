@@ -5,7 +5,7 @@
 //! subscribed to a prefix of its first frame. Subscribers filter too, so
 //! publishers that do not (ZMTP 1.0) are harmless.
 
-use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, btree_map};
 use std::hash::{BuildHasher, Hasher, RandomState};
 use std::task::{Context as TaskContext, Poll, Waker};
 
@@ -15,53 +15,115 @@ use crate::FairQueue;
 use crate::socket::{PeerKey, PeerList};
 
 /// Topics and how many times each was subscribed, matched by prefix.
-///
-/// Peers choose the topics, so matching must not cost more than linear time
-/// in the message: hashing every prefix of it afresh would be quadratic in
-/// the longest topic. Topics are kept by a hash fed one octet at a time, so
-/// one pass over the message yields every prefix's hash.
 #[derive(Debug, Clone, Default)]
-pub struct Topics {
-    buckets: HashMap<u64, Bucket>,
-    /// How many topics have each length, so matching tries no longer
-    /// prefixes than the longest.
-    lengths: BTreeMap<usize, usize>,
-    /// Keyed per set, so peers cannot aim topics at one bucket.
-    hasher: RandomState,
-}
-
-/// The topics sharing a hash, each with its subscription count.
-type Bucket = Vec<(Box<[u8]>, usize)>;
+pub struct Topics(PrefixMap<usize>);
 
 impl Topics {
     /// Adds a subscription to `topic`. Returns whether it is new.
     pub fn add(&mut self, topic: &[u8]) -> bool {
-        let hash = self.hash(topic);
-        let bucket = self.buckets.entry(hash).or_default();
-        if let Some((_, count)) = bucket.iter_mut().find(|(t, _)| **t == *topic) {
+        if let Some(count) = self.0.get_mut(topic) {
             *count += 1;
             return false;
         }
-        bucket.push((topic.into(), 1));
-        *self.lengths.entry(topic.len()).or_default() += 1;
+        self.0.insert(topic, 1);
         true
     }
 
     /// Removes one subscription to `topic`. Returns whether that was the
     /// last, so the topic is gone.
     pub fn remove(&mut self, topic: &[u8]) -> bool {
-        let hash = self.hash(topic);
-        let Some(bucket) = self.buckets.get_mut(&hash) else {
+        let Some(count) = self.0.get_mut(topic) else {
             return false;
         };
-        let Some(at) = bucket.iter().position(|(t, _)| **t == *topic) else {
-            return false;
-        };
-        bucket[at].1 -= 1;
-        if bucket[at].1 > 0 {
+        *count -= 1;
+        if *count > 0 {
             return false;
         }
-        bucket.swap_remove(at);
+        self.0.remove(topic);
+        true
+    }
+
+    /// Whether `topic` is subscribed.
+    pub fn contains(&self, topic: &[u8]) -> bool {
+        self.0.get(topic).is_some()
+    }
+
+    /// Whether a message whose first frame is `data` is wanted: some topic
+    /// is a prefix of it.
+    pub fn matches(&self, data: &[u8]) -> bool {
+        self.0.prefixes_of(data).next().is_some()
+    }
+
+    /// The subscribed topics, in no particular order.
+    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
+        self.0.iter().map(|(topic, _)| topic)
+    }
+
+    /// Whether nothing is subscribed.
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+/// A map from topics, searched for the topics that are prefixes of a
+/// message.
+///
+/// Peers choose the topics, so a search must not cost more than linear time
+/// in the message: hashing every prefix of it afresh would be quadratic in
+/// the longest topic. Topics are kept by a hash fed one octet at a time, so
+/// one pass over the message yields every prefix's hash.
+#[derive(Debug, Clone)]
+struct PrefixMap<V> {
+    buckets: HashMap<u64, Bucket<V>>,
+    /// How many topics have each length, so a search tries no longer
+    /// prefixes than the longest.
+    lengths: BTreeMap<usize, usize>,
+    /// Keyed per map, so peers cannot aim topics at one bucket.
+    hasher: RandomState,
+}
+
+/// The topics sharing a hash, with their values.
+type Bucket<V> = Vec<(Box<[u8]>, V)>;
+
+impl<V> Default for PrefixMap<V> {
+    fn default() -> Self {
+        Self {
+            buckets: HashMap::new(),
+            lengths: BTreeMap::new(),
+            hasher: RandomState::new(),
+        }
+    }
+}
+
+impl<V> PrefixMap<V> {
+    fn get(&self, topic: &[u8]) -> Option<&V> {
+        self.find(self.hash(topic), topic)
+    }
+
+    fn get_mut(&mut self, topic: &[u8]) -> Option<&mut V> {
+        let hash = self.hash(topic);
+        self.buckets
+            .get_mut(&hash)?
+            .iter_mut()
+            .find(|(t, _)| **t == *topic)
+            .map(|(_, value)| value)
+    }
+
+    /// Adds `topic`, which must be absent.
+    fn insert(&mut self, topic: &[u8], value: V) {
+        let hash = self.hash(topic);
+        self.buckets
+            .entry(hash)
+            .or_default()
+            .push((topic.into(), value));
+        *self.lengths.entry(topic.len()).or_default() += 1;
+    }
+
+    fn remove(&mut self, topic: &[u8]) -> Option<V> {
+        let hash = self.hash(topic);
+        let bucket = self.buckets.get_mut(&hash)?;
+        let at = bucket.iter().position(|(t, _)| **t == *topic)?;
+        let (_, value) = bucket.swap_remove(at);
         if bucket.is_empty() {
             self.buckets.remove(&hash);
         }
@@ -71,42 +133,42 @@ impl Topics {
                 entry.remove();
             }
         }
-        true
+        Some(value)
     }
 
-    /// Whether `topic` is subscribed.
-    pub fn contains(&self, topic: &[u8]) -> bool {
-        self.find(self.hash(topic), topic)
-    }
-
-    /// Whether a message whose first frame is `data` is wanted: some topic
-    /// is a prefix of it.
-    pub fn matches(&self, data: &[u8]) -> bool {
-        let Some(&longest) = self.lengths.keys().next_back() else {
-            return false;
-        };
+    /// The values of the topics that are prefixes of `data`, shortest first.
+    fn prefixes_of<'a>(&'a self, data: &'a [u8]) -> impl Iterator<Item = &'a V> {
+        let longest = self.lengths.keys().next_back().copied();
+        let data = &data[..longest.unwrap_or(0).min(data.len())];
         let mut state = self.hasher.build_hasher();
-        if self.find(state.finish(), b"") {
-            return true;
-        }
-        let prefix = &data[..longest.min(data.len())];
-        (1..=prefix.len()).any(|len| {
-            state.write_u8(prefix[len - 1]);
-            self.find(state.finish(), &prefix[..len])
+        let mut len = longest.map(|_| 0);
+        std::iter::from_fn(move || {
+            while let Some(at) = len {
+                let found = self.find(state.finish(), &data[..at]);
+                len = data.get(at).map(|&octet| {
+                    state.write_u8(octet);
+                    at + 1
+                });
+                if found.is_some() {
+                    return found;
+                }
+            }
+            None
         })
     }
 
-    /// The subscribed topics, in no particular order.
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.buckets.values().flatten().map(|(topic, _)| &**topic)
+    fn iter(&self) -> impl Iterator<Item = (&[u8], &V)> {
+        self.buckets
+            .values()
+            .flatten()
+            .map(|(topic, value)| (&**topic, value))
     }
 
-    /// Whether nothing is subscribed.
-    pub fn is_empty(&self) -> bool {
+    fn is_empty(&self) -> bool {
         self.buckets.is_empty()
     }
 
-    /// Hashes octet by octet, as `matches` extends a prefix.
+    /// Hashes octet by octet, as `prefixes_of` extends a prefix.
     fn hash(&self, topic: &[u8]) -> u64 {
         let mut state = self.hasher.build_hasher();
         for &octet in topic {
@@ -115,10 +177,12 @@ impl Topics {
         state.finish()
     }
 
-    fn find(&self, hash: u64, topic: &[u8]) -> bool {
+    fn find(&self, hash: u64, topic: &[u8]) -> Option<&V> {
         self.buckets
-            .get(&hash)
-            .is_some_and(|bucket| bucket.iter().any(|(t, _)| **t == *topic))
+            .get(&hash)?
+            .iter()
+            .find(|(t, _)| **t == *topic)
+            .map(|(_, value)| value)
     }
 }
 
@@ -154,8 +218,11 @@ pub enum Verbosity {
 #[derive(Debug, Default)]
 pub struct Publisher {
     subscribers: HashMap<PeerKey, PeerTopics>,
-    /// How many peers subscribe to each topic.
-    everyone: Topics,
+    /// The peers subscribed to each topic, so that one pass over a message
+    /// finds every peer it matches, however many there are.
+    index: PeerIndex,
+    /// The peers the message being sent matches, kept for its capacity.
+    matched: HashSet<PeerKey>,
     /// What XPUB has yet to receive, and from which peer. `None` for PUB,
     /// which discards it.
     events: Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
@@ -242,10 +309,13 @@ impl Publisher {
             Subscription::Subscribe(topic) => {
                 if !entry.topics.contains(&topic) {
                     entry.topics.add(&topic);
+                    join(&mut self.index, &topic, key);
                 }
             }
             Subscription::Cancel(topic) => {
-                entry.topics.remove(&topic);
+                if entry.topics.remove(&topic) {
+                    leave(&mut self.index, &topic, key);
+                }
             }
         }
         true
@@ -271,14 +341,14 @@ impl Publisher {
     fn drain(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) {
         let Self {
             subscribers,
-            everyone,
+            index,
             events,
             verbosity,
             manual,
             ..
         } = self;
         let mut changes = Changes {
-            everyone,
+            index,
             events,
             verbosity: *verbosity,
             manual: *manual,
@@ -321,11 +391,10 @@ impl Publisher {
     /// libzmq. Returns how many peers it went to.
     pub fn send(&mut self, peers: &mut PeerList, message: Message) -> usize {
         self.sync(peers);
+        self.match_peers(&message);
         let mut sent = 0;
         for peer in peers.iter_mut() {
-            if self.wants(peer.key(), &message)
-                && peer.connection.tx.try_send(message.clone()).is_ok()
-            {
+            if self.wanted(peer.key()) && peer.connection.tx.try_send(message.clone()).is_ok() {
                 sent += 1;
             }
         }
@@ -345,9 +414,10 @@ impl Publisher {
         let Some(message) = slot.take() else {
             return Poll::Ready(0);
         };
+        self.match_peers(&message);
         let mut full = false;
         for peer in peers.iter_mut() {
-            if self.wants(peer.key(), &message) && peer.connection.tx.poll_ready(cx).is_pending() {
+            if self.wanted(peer.key()) && peer.connection.tx.poll_ready(cx).is_pending() {
                 full = true;
             }
         }
@@ -365,11 +435,58 @@ impl Publisher {
             .get(&key)
             .is_some_and(|entry| entry.topics.matches(topic) != self.invert)
     }
+
+    /// Finds the peers subscribed to a prefix of `message`, for
+    /// [`wanted`](Self::wanted).
+    fn match_peers(&mut self, message: &Message) {
+        self.matched.clear();
+        let topic = message.split_first().0.as_slice();
+        for peers in self.index.prefixes_of(topic) {
+            self.matched.extend(peers);
+        }
+    }
+
+    /// Whether the peer with `key` should get the message last given to
+    /// [`match_peers`](Self::match_peers).
+    fn wanted(&self, key: PeerKey) -> bool {
+        self.subscribers.contains_key(&key) && self.matched.contains(&key) != self.invert
+    }
+}
+
+type PeerIndex = PrefixMap<HashSet<PeerKey>>;
+
+/// Adds `key` to the peers subscribed to `topic`. Returns whether it is
+/// the first.
+fn join(index: &mut PeerIndex, topic: &[u8], key: PeerKey) -> bool {
+    match index.get_mut(topic) {
+        Some(peers) => {
+            peers.insert(key);
+            false
+        }
+        None => {
+            index.insert(topic, HashSet::from([key]));
+            true
+        }
+    }
+}
+
+/// Removes `key` from the peers subscribed to `topic`. Returns whether it
+/// was the last.
+fn leave(index: &mut PeerIndex, topic: &[u8], key: PeerKey) -> bool {
+    let Some(peers) = index.get_mut(topic) else {
+        return false;
+    };
+    peers.remove(&key);
+    if !peers.is_empty() {
+        return false;
+    }
+    index.remove(topic);
+    true
 }
 
 /// Applies what one peer sent to the topics of all peers, noting events.
 struct Changes<'a> {
-    everyone: &'a mut Topics,
+    index: &'a mut PeerIndex,
     events: &'a mut Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
     verbosity: Verbosity,
     manual: bool,
@@ -388,7 +505,7 @@ impl Changes<'_> {
         }
         let first = !peer.topics.contains(&topic) && {
             peer.topics.add(&topic);
-            self.everyone.add(&topic)
+            join(self.index, &topic, self.key())
         };
         if first || self.verbosity >= Verbosity::Subscriptions {
             self.event(XPubEvent::Subscribe(topic));
@@ -404,7 +521,7 @@ impl Changes<'_> {
         if !peer.topics.remove(&topic) {
             return;
         }
-        if self.everyone.remove(&topic) || self.verbosity == Verbosity::Everything {
+        if leave(self.index, &topic, self.key()) || self.verbosity == Verbosity::Everything {
             self.event(XPubEvent::Cancel(topic));
         }
     }
@@ -415,17 +532,25 @@ impl Changes<'_> {
 
     /// A peer is gone: its subscriptions end with it.
     fn forget(&mut self, peer: PeerTopics) {
+        let key = self.key();
         if self.manual {
+            for topic in peer.topics.iter() {
+                leave(self.index, topic, key);
+            }
             for topic in peer.requested.iter() {
                 self.event(XPubEvent::Cancel(Frame::copy_from_slice(topic)));
             }
             return;
         }
         for topic in peer.topics.iter() {
-            if self.everyone.remove(topic) || self.verbosity == Verbosity::Everything {
+            if leave(self.index, topic, key) || self.verbosity == Verbosity::Everything {
                 self.event(XPubEvent::Cancel(Frame::copy_from_slice(topic)));
             }
         }
+    }
+
+    fn key(&self) -> PeerKey {
+        self.from.expect("set before each peer is read")
     }
 
     fn event(&mut self, event: XPubEvent) {
