@@ -284,7 +284,8 @@ Rules shared by every pattern:
 - Messages are never modified.
 - HWM is checked per **message**, not per frame.
 - A `Message` must contain at least one frame, and an empty frame is valid. ROUTER and REP traffic relies on empty delimiter frames.
-- Receive timeouts (`ZMQ_RCVTIMEO`) are per call, not a socket option: every blocking `recv` has a `recv_timeout(Duration)` beside it returning `None` on timeout, and `Monitor::recv_timeout` returns `RecvTimeoutError::{Timeout, Disconnected}`. libzmq's `-1`, `0` and `N` map to `recv`, `try_recv` and `recv_timeout`. `recv` stays infallible, and each call site shows how long it may block. Async code races `recv_async` against its executor's timer. Send timeouts (`ZMQ_SNDTIMEO`) are not implemented yet.
+- Receive timeouts (`ZMQ_RCVTIMEO`) are per call, not a socket option: every blocking `recv` has a `recv_timeout(Duration)` beside it returning `None` on timeout, and `Monitor::recv_timeout` returns `RecvTimeoutError::{Timeout, Disconnected}`. libzmq's `-1`, `0` and `N` map to `recv`, `try_recv` and `recv_timeout`. `recv` stays infallible, and each call site shows how long it may block. Async code races `recv_async` against its executor's timer.
+- Send timeouts (`ZMQ_SNDTIMEO`) are per call too: every blocking `send` has a `send_timeout` beside it (`send_all_timeout` for `XPUB_NODROP`) returning what that socket's `try_send` returns, so `try_send` is `send_timeout` with a zero timeout. On timeout the message is handed back: `Err(message)`, or `Full(message)` for ROUTER, SERVER and PEER, which still report an unknown peer at once. REQ's `request_timeout` covers waiting for room.
 
 ### REQREP (RFC 28)
 

@@ -451,6 +451,18 @@ impl Socket<Push> {
         wait::block_on(|cx| self.poll_send(&mut slot, cx));
     }
 
+    /// Sends `message`, blocking for at most `timeout` while no peer has room.
+    /// Hands it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<(), Message> {
+        let mut slot = Some(message.into());
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
+        slot.map_or(Ok(()), Err)
+    }
+
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
@@ -482,6 +494,18 @@ impl Socket<Pair> {
     pub fn send(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
         wait::block_on(|cx| self.poll_send(&mut slot, cx));
+    }
+
+    /// Sends `message`, blocking for at most `timeout` while there is no peer with room.
+    /// Hands it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<(), Message> {
+        let mut slot = Some(message.into());
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
+        slot.map_or(Ok(()), Err)
     }
 
     /// Sends `message`, waiting until there is a peer with room.
@@ -584,6 +608,22 @@ impl<T: Publishes> Socket<T> {
     pub fn send_all(&mut self, message: impl Into<Message>) -> usize {
         let mut slot = Some(message.into());
         wait::block_on(|cx| self.poll_send_all(&mut slot, cx))
+    }
+
+    /// Sends `message` to every subscriber that wants it, blocking for at
+    /// most `timeout` until all of them have room, as libzmq's
+    /// `ZMQ_XPUB_NODROP`. Returns how many subscribers it was queued for,
+    /// or hands it back if one still has no room.
+    pub fn send_all_timeout(
+        &mut self,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<usize, Message> {
+        let mut slot = Some(message.into());
+        wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_send_all(&mut slot, cx)
+        })
+        .ok_or_else(|| slot.take().expect("kept while pending"))
     }
 
     /// Sends `message` to every subscriber that wants it, waiting until all
@@ -943,6 +983,18 @@ impl Socket<Dealer> {
         wait::block_on(|cx| self.poll_send(&mut slot, cx));
     }
 
+    /// Sends `message`, blocking for at most `timeout` while no peer has room.
+    /// Hands it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<(), Message> {
+        let mut slot = Some(message.into());
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
+        slot.map_or(Ok(()), Err)
+    }
+
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
@@ -1217,6 +1269,27 @@ impl Socket<Router> {
     ) -> Result<(), UnknownRoutingId> {
         let mut slot = Some(message.into());
         wait::block_on(|cx| self.poll_send(to, &mut slot, cx)).map_err(UnknownRoutingId)
+    }
+
+    /// Sends `message` to the peer with routing id `to`, blocking for at
+    /// most `timeout` while its queue is full. Fails at once if no peer has
+    /// that routing id, and with `Full` if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        to: &RoutingId,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<(), RouterSendError> {
+        let mut slot = Some(message.into());
+        match wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_send(to, &mut slot, cx)
+        }) {
+            Some(Ok(())) => Ok(()),
+            Some(Err(message)) => Err(RouterSendError::UnknownRoutingId(message)),
+            None => Err(RouterSendError::Full(
+                slot.take().expect("kept while pending"),
+            )),
+        }
     }
 
     /// Sends `message` to the peer with routing id `to`, waiting while its

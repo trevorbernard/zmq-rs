@@ -181,6 +181,20 @@ impl Socket<Client> {
         wait::block_on(|cx| self.poll_send_frame(&mut slot, cx));
     }
 
+    /// Sends `frame`, blocking for at most `timeout` while no server has room. Hands
+    /// it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        frame: impl Into<Frame>,
+        timeout: Duration,
+    ) -> Result<(), Frame> {
+        let mut slot = Some(Message::new(frame.into()));
+        wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_send_frame(&mut slot, cx)
+        });
+        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+    }
+
     /// Sends `frame`, waiting while no server has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
@@ -311,6 +325,20 @@ impl Socket<Scatter> {
         wait::block_on(|cx| self.poll_scatter(&mut slot, cx));
     }
 
+    /// Sends `frame`, blocking for at most `timeout` while no gather has room. Hands
+    /// it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        frame: impl Into<Frame>,
+        timeout: Duration,
+    ) -> Result<(), Frame> {
+        let mut slot = Some(Message::new(frame.into()));
+        wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_scatter(&mut slot, cx)
+        });
+        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+    }
+
     /// Sends `frame`, waiting while no gather has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
@@ -397,6 +425,18 @@ impl Socket<Server> {
     pub fn send(&mut self, to: ClientId, frame: impl Into<Frame>) -> Result<(), NoSuchClient> {
         let mut slot = Some(frame.into());
         wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchClient)
+    }
+
+    /// Sends `frame` to the client `to`, blocking for at most `timeout`
+    /// while its queue is full. Fails at once if no client has that id, and
+    /// with `Full` if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        to: ClientId,
+        frame: impl Into<Frame>,
+        timeout: Duration,
+    ) -> Result<(), ServerSendError> {
+        send_routed_timeout(self, to.0, frame.into(), timeout)
     }
 
     /// Sends `frame` to the client `to`, waiting while its queue is full.
@@ -519,6 +559,21 @@ impl Socket<Peer> {
         wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchPeer)
     }
 
+    /// Sends `frame` to the peer `to`, blocking for at most `timeout` while
+    /// its queue is full. Fails at once if no peer has that id, and with
+    /// `Full` if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        to: PeerId,
+        frame: impl Into<Frame>,
+        timeout: Duration,
+    ) -> Result<(), PeerSendError> {
+        send_routed_timeout(self, to.0, frame.into(), timeout).map_err(|err| match err {
+            ServerSendError::NoSuchClient(frame) => PeerSendError::NoSuchPeer(frame),
+            ServerSendError::Full(frame) => PeerSendError::Full(frame),
+        })
+    }
+
     /// Sends `frame` to the peer `to`, waiting while its queue is full.
     /// Fails if no peer has that id, or it goes away meanwhile.
     pub async fn send_async(
@@ -588,6 +643,25 @@ fn poll_send_routed<T: SocketType<Routing = ServerTable>>(
     }
 }
 
+/// Sends `frame` to `to`, waiting at most `timeout` while it is full.
+fn send_routed_timeout<T: SocketType<Routing = ServerTable>>(
+    socket: &mut Socket<T>,
+    to: NonZeroU32,
+    frame: Frame,
+    timeout: Duration,
+) -> Result<(), ServerSendError> {
+    let mut slot = Some(frame);
+    match wait::block_on_until(wait::deadline(timeout), |cx| {
+        poll_send_routed(socket, to, &mut slot, cx)
+    }) {
+        Some(Ok(())) => Ok(()),
+        Some(Err(frame)) => Err(ServerSendError::NoSuchClient(frame)),
+        None => Err(ServerSendError::Full(
+            slot.take().expect("kept while pending"),
+        )),
+    }
+}
+
 fn disconnect_routed<T: SocketType<Routing = ServerTable>>(
     socket: &mut Socket<T>,
     to: NonZeroU32,
@@ -622,6 +696,20 @@ impl Socket<Channel> {
     pub fn send(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
         wait::block_on(|cx| self.poll_channel_send(&mut slot, cx));
+    }
+
+    /// Sends `frame`, blocking for at most `timeout` while there is no peer with room. Hands
+    /// it back if there is still no room.
+    pub fn send_timeout(
+        &mut self,
+        frame: impl Into<Frame>,
+        timeout: Duration,
+    ) -> Result<(), Frame> {
+        let mut slot = Some(Message::new(frame.into()));
+        wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_channel_send(&mut slot, cx)
+        });
+        slot.map_or(Ok(()), |message| Err(only_frame(message)))
     }
 
     /// Sends `frame`, waiting until there is a peer with room.
