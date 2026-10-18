@@ -134,11 +134,12 @@ lower everywhere.
 ## Results: Linux, Intel Xeon
 
 Intel Xeon E5-1650 v4 (6 cores, 12 threads, 64 GB), Linux 6.18, the
-`schedutil` governor, libzmq 4.3.5 from nixpkgs, commit `b824630`.
-2026-10-17.
+`schedutil` governor, libzmq 4.3.5 from nixpkgs, commit `17b2266`.
+2026-10-18.
 
-Our latency is lower everywhere, but our throughput is not: it trails
-libzmq for small messages over ipc and inproc, and at 64 KiB over inproc.
+Our latency is lower everywhere except ipc 64 KiB (0.84), where both
+libraries' runs spread too widely to compare. Our throughput is level
+(0.94–0.95) or ahead except at 256 B over ipc and inproc (0.86).
 
 ### Throughput, msg/s (Mb/s)
 
@@ -146,28 +147,28 @@ libzmq for small messages over ipc and inproc, and at 64 KiB over inproc.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 5.51M [5.32M–5.58M] (353) | 5.84M [5.42M–5.96M] (373) | 5.56M | 6.14M | 0.95 |
-| 256 B | 1.56M [1.52M–1.61M] (3197) | 1.59M [1.58M–1.61M] (3255) | 1.55M | 1.62M | 0.98 |
-| 4 KiB | 576.9k [544.0k–580.4k] (18903) | 255.9k [240.9k–258.1k] (8384) | 507.8k | 234.8k | 2.25 |
-| 64 KiB | 34.7k [33.6k–35.8k] (18169) | 36.3k [35.6k–36.7k] (19028) | 34.8k | 36.0k | 0.95 |
+| 8 B | 6.65M [6.39M–6.79M] (426) | 6.18M [5.89M–6.23M] (395) | 6.24M | 6.89M | 1.08 |
+| 256 B | 1.75M [1.71M–1.80M] (3586) | 1.54M [1.51M–1.66M] (3149) | 1.78M | 1.56M | 1.14 |
+| 4 KiB | 530.4k [497.5k–562.1k] (17381) | 243.9k [234.9k–249.3k] (7994) | 499.9k | 235.1k | 2.17 |
+| 64 KiB | 34.8k [33.4k–36.0k] (18268) | 36.9k [35.5k–37.3k] (19356) | 34.9k | 36.3k | 0.94 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 5.14M [4.81M–5.20M] (329) | 6.39M [6.09M–6.58M] (409) | 5.19M | 5.92M | 0.80 |
-| 256 B | 1.48M [1.46M–1.53M] (3032) | 2.02M [2.00M–2.09M] (4144) | 1.51M | 2.03M | 0.73 |
-| 4 KiB | 606.5k [590.8k–610.1k] (19873) | 404.2k [396.4k–408.8k] (13246) | 563.1k | 428.3k | 1.50 |
-| 64 KiB | 54.0k [52.7k–54.3k] (28312) | 47.8k [46.7k–49.1k] (25073) | 52.8k | 52.6k | 1.13 |
+| 8 B | 6.31M [6.01M–6.53M] (404) | 6.64M [5.73M–6.93M] (425) | 6.22M | 4.97M | 0.95 |
+| 256 B | 1.72M [1.69M–1.74M] (3530) | 2.01M [1.98M–2.04M] (4122) | 1.75M | 1.98M | 0.86 |
+| 4 KiB | 610.5k [607.8k–622.5k] (20006) | 400.9k [396.4k–404.4k] (13137) | 529.9k | 422.8k | 1.52 |
+| 64 KiB | 52.8k [52.3k–54.4k] (27671) | 47.5k [47.5k–48.6k] (24893) | 52.9k | 51.9k | 1.11 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 3.31M [2.35M–4.74M] (212) | 6.26M [6.15M–6.51M] (400) | 0.53 |
-| 256 B | 1.54M [1.45M–1.59M] (3158) | 1.94M [1.91M–1.96M] (3982) | 0.79 |
-| 4 KiB | 1.32M [1.30M–1.40M] (43164) | 1.35M [1.30M–1.39M] (44348) | 0.97 |
-| 64 KiB | 211.0k [200.2k–226.1k] (110605) | 332.9k [113.4k–344.1k] (174511) | 0.63 |
+| 8 B | 7.41M [6.89M–8.34M] (474) | 6.23M [6.14M–6.47M] (398) | 1.19 |
+| 256 B | 1.66M [1.63M–1.69M] (3403) | 1.93M [1.90M–2.03M] (3961) | 0.86 |
+| 4 KiB | 1.38M [1.36M–1.41M] (45185) | 1.28M [1.27M–1.39M] (41857) | 1.08 |
+| 64 KiB | 166.5k [143.4k–177.1k] (87320) | 163.7k [139.0k–261.2k] (85829) | 1.02 |
 
 ### Latency, one-way µs (p50/p99)
 
@@ -175,47 +176,72 @@ libzmq for small messages over ipc and inproc, and at 64 KiB over inproc.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 37.1 [20.9–48.7] (36.1/65.7) | 68.7 [60.6–69.1] (70.8/89.2) | 56.5 | 59.4 | 1.85 |
-| 256 B | 50.2 [22.2–56.3] (52.8/70.1) | 66.6 [60.3–71.5] (69.1/89.5) | 55.8 | 58.9 | 1.33 |
-| 4 KiB | 55.0 [44.8–56.0] (58.3/75.0) | 74.2 [62.9–75.9] (78.4/98.1) | 62.9 | 67.9 | 1.35 |
-| 64 KiB | 112.9 [104.8–113.9] (110.2/180.8) | 120.2 [84.1–153.9] (144.1/161.6) | 127.7 | 125.7 | 1.06 |
+| 8 B | 34.3 [23.7–39.6] (27.4/62.4) | 67.5 [46.2–69.1] (71.9/92.3) | 60.3 | 60.7 | 1.97 |
+| 256 B | 54.5 [31.4–54.9] (55.1/72.2) | 66.7 [64.1–73.4] (71.4/92.3) | 55.6 | 60.9 | 1.22 |
+| 4 KiB | 53.3 [45.8–61.5] (56.4/77.4) | 75.0 [54.8–76.7] (75.6/100.4) | 66.6 | 65.4 | 1.41 |
+| 64 KiB | 99.8 [82.3–111.6] (110.5/169.4) | 146.0 [133.5–153.5] (155.0/215.0) | 125.6 | 136.1 | 1.46 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 21.2 [20.0–27.8] (19.4/35.8) | 43.8 [38.0–48.1] (51.5/65.3) | 32.9 | 37.3 | 2.07 |
-| 256 B | 26.5 [20.7–28.2] (22.6/46.1) | 44.1 [37.9–50.4] (50.2/67.7) | 38.0 | 43.7 | 1.67 |
-| 4 KiB | 37.4 [32.5–40.2] (38.2/53.7) | 53.4 [31.2–57.9] (55.7/72.0) | 43.2 | 43.1 | 1.43 |
-| 64 KiB | 55.3 [29.8–74.6] (51.6/85.7) | 55.4 [52.3–73.7] (51.3/85.9) | 58.0 | 57.1 | 1.00 |
+| 8 B | 32.7 [22.9–35.4] (31.7/51.0) | 47.2 [22.6–50.3] (51.8/66.7) | 34.9 | 37.7 | 1.45 |
+| 256 B | 22.1 [19.1–34.4] (22.5/28.7) | 47.6 [39.0–48.3] (52.2/69.9) | 37.4 | 37.8 | 2.15 |
+| 4 KiB | 36.5 [24.8–41.7] (36.0/54.4) | 54.7 [40.7–56.5] (56.7/74.0) | 43.5 | 40.4 | 1.50 |
+| 64 KiB | 66.8 [43.8–79.1] (68.7/85.9) | 56.3 [42.5–64.7] (54.5/78.7) | 44.1 | 51.7 | 0.84 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 5.5 [3.2–6.7] (5.7/7.7) | 9.7 [6.2–12.6] (9.5/12.9) | 1.76 |
-| 256 B | 4.8 [4.1–6.3] (4.6/6.7) | 11.2 [6.5–13.5] (10.3/15.9) | 2.34 |
-| 4 KiB | 5.2 [4.7–5.6] (5.0/7.4) | 10.7 [7.0–12.3] (9.9/15.7) | 2.05 |
-| 64 KiB | 4.9 [4.3–5.1] (4.8/6.8) | 9.8 [8.2–10.2] (9.6/14.3) | 2.01 |
+| 8 B | 4.5 [4.3–5.5] (4.3/6.4) | 9.3 [7.5–10.6] (8.9/11.9) | 2.06 |
+| 256 B | 4.7 [4.2–6.4] (4.5/6.6) | 9.6 [6.6–12.3] (9.7/12.0) | 2.03 |
+| 4 KiB | 4.9 [3.8–6.3] (4.6/7.5) | 10.5 [7.3–11.8] (9.8/18.3) | 2.13 |
+| 64 KiB | 4.7 [3.7–5.1] (4.6/6.5) | 7.3 [6.8–10.2] (7.0/14.3) | 1.54 |
 
 ### Reading them
 
-- **inproc throughput is the largest gap, and no transport is
-  involved,** so it is in our sockets or pipes: 0.53 at 8 B, 0.79 at
-  256 B, 0.63 at 64 KiB. On the M1 the same cases read 1.75, 1.68 and
-  1.54. Suspect how parking and waking threads behaves on Linux; the
-  `zmq-pipe` benchmark here costs 407 ns a message at HWM 16 against
-  166 ns at HWM 1000. Not yet investigated.
-- **Small-message ipc throughput is behind on the sending side:** our
-  receiver keeps up with libzmq's sender (libzmq→ours matches
-  libzmq→libzmq), while our sender holds libzmq's receiver back
-  (ours→libzmq is no faster than ours→ours).
-- **The M1's ipc gap at 64 KiB is gone here** (1.13).
-- **tcp at 256 B is about 1.5M msg/s for both libraries,** against
-  3.4M–5.9M on the M1, so this machine bounds that case, not either
-  library.
-- **Noise:** spread is tighter than on macOS except two cells: our inproc
-  throughput at 8 B (2.35M–4.74M) and libzmq's at 64 KiB
-  (113.4k–344.1k). The machine was not otherwise idle (load average
-  about 1.5) and ran the `schedutil` governor; rerun those with the
-  `performance` governor before acting on them.
+- **Blocking calls used to allocate a waker each,** freed on the peer's
+  thread by its wake: a cross-thread free per message, which glibc's
+  allocator handles badly and macOS's does not. Reusing one waker per
+  thread (`0fd7eff`) raised 8 B throughput from 0.58 to 0.92 over inproc,
+  0.80 to 0.96 over ipc and 0.95 to 1.07 over tcp, and ended a 2× spread
+  between runs at inproc 8 B.
+- **Writers used to wake their reader on every send,** an atomic
+  read-modify-write on a line the reader also uses, even while the reader
+  was busy. Like libzmq's ypipe, a writer now wakes only a reader that
+  flagged it is about to wait (`17b2266`). inproc 8 B went from 0.92 to
+  1.19. In the pipe benchmark (`zmq-pipe`'s `throughput`), a message
+  takes 49 ns instead of 137 ns with no high-water mark and 47 ns
+  instead of 217 ns at 1000, but 635 ns instead of 514 ns at 16, where
+  the writer is nearly always waiting and the reader nearly always
+  empty.
+- **256 B over ipc and inproc is our remaining gap, and only under
+  glibc's allocator.** Preloading mimalloc gives 1.01 over inproc and
+  1.11 over ipc; jemalloc 0.93 and 1.56 (measured at `0fd7eff`). Both
+  libraries allocate once per message, on the sender, freed on the
+  receiver; switching `calloc` for `malloc` and raising
+  `glibc.malloc.tcache_max` to 4096 changed nothing.
+- **Per-call housekeeping is not the bottleneck.** Every send and receive
+  polls the socket's listeners for new peers, and PUSH checks every peer
+  for closure, where libzmq checks its mailbox only about once a
+  millisecond. Skipping both gained about 2% at 256 B and nothing at 8 B.
+  Skipping only the receiver's made inproc 8 B 40% *slower*: the receiver
+  found the pipe empty more often, and the cost moved to the pipe's
+  cache lines passing between the two cores on each message.
+- **Small-message ipc throughput is behind on the receiving side:** our
+  sender keeps up with libzmq's receiver (ours→libzmq matches
+  ours→ours), while our receiver holds libzmq's sender back
+  (libzmq→ours 4.97M against 6.64M for libzmq→libzmq; 5.25M against
+  6.38M at `0fd7eff`). At `b824630` it was the sending side.
+- **The allocator matters to both libraries from 256 B up.** Under
+  mimalloc or jemalloc (`LD_PRELOAD`) both run up to three times as
+  fast over inproc; the 8 B case barely moves for libzmq, which stores
+  small messages inline.
+- **tcp at 256 B is 1.5M–1.8M msg/s for both libraries,** against
+  3.4M–5.9M on the M1, so this machine bounds that case.
+- **Noise:** inproc 64 KiB throughput spread widely for libzmq
+  (139.0k–261.2k), as it has in every run, and ipc 64 KiB latency for
+  both (ours 43.8–79.1 µs, libzmq 42.5–64.7 µs). The machine was idle
+  before the run but ran the `schedutil` governor; rerun with the
+  `performance` governor before acting on a difference there.
