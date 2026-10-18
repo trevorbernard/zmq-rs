@@ -284,6 +284,7 @@ Rules shared by every pattern:
 - Messages are never modified.
 - HWM is checked per **message**, not per frame.
 - A `Message` must contain at least one frame, and an empty frame is valid. ROUTER and REP traffic relies on empty delimiter frames.
+- Receive timeouts (`ZMQ_RCVTIMEO`) are per call, not a socket option: every blocking `recv` has a `recv_timeout(Duration)` beside it returning `None` on timeout, and `Monitor::recv_timeout` returns `RecvTimeoutError::{Timeout, Disconnected}`. libzmq's `-1`, `0` and `N` map to `recv`, `try_recv` and `recv_timeout`. `recv` stays infallible, and each call site shows how long it may block. Async code races `recv_async` against its executor's timer. Send timeouts (`ZMQ_SNDTIMEO`) are not implemented yet.
 
 ### REQREP (RFC 28)
 
@@ -310,10 +311,12 @@ Rules shared by every pattern:
 - ROUTER's `Message` keeps the delimiter visible, and the user handles it. ROUTER also exposes a raw frame path for proxies.
 - REQ: `correlate` is a socket option, not a mode that switches on implicitly when a future is dropped.
   - A dropped `request_async` future leaves the socket in relaxed mode: the next request is allowed, and the late reply is filtered out by pipe and, when `correlate` is on, by request id.
+  - `request_timeout` is the exception: it turns `correlate` on for good, since calling it asks for abandonment, where dropping a future may be accidental. A ROUTER application serving the REQ then sees the request id frame; REP peers do not notice.
 - Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. This is documented on `Request`.
 - Two deliberate differences from libzmq's REQ:
   - A reply without a delimiter is dropped and the wait continues; libzmq drops the connection.
   - If the asked peer's connection closes before replying, `request` returns `PeerGone`; libzmq waits forever.
+  - After `request_timeout` gives up (`RequestError::TimedOut`), the socket takes a new request at once. libzmq's REQ is stuck after `ZMQ_RCVTIMEO` (EFSM) unless `ZMQ_REQ_RELAXED` is set.
 
 ### PUBSUB (RFC 29)
 

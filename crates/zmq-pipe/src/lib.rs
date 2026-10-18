@@ -16,6 +16,7 @@ use std::sync::atomic::{self, AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
+use std::time::{Duration, Instant};
 
 use atomic_waker::AtomicWaker;
 
@@ -175,6 +176,16 @@ pub enum TryRecvError {
     Empty,
     /// The writer is gone and everything it sent has been received.
     Closed,
+}
+
+/// Why [`Reader::recv_timeout`] returned nothing, as std's
+/// `mpsc::RecvTimeoutError`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecvTimeoutError {
+    /// Nothing arrived in time.
+    Timeout,
+    /// The writer is gone and everything it sent has been received.
+    Disconnected,
 }
 
 impl<T> Writer<T> {
@@ -375,6 +386,16 @@ impl<T> Reader<T> {
         block_on_poll(|cx| self.poll_recv(cx))
     }
 
+    /// The next item, blocking the thread for at most `timeout` while the
+    /// pipe is empty.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<T, RecvTimeoutError> {
+        match block_on_poll_until(Instant::now().checked_add(timeout), |cx| self.poll_recv(cx)) {
+            Some(Some(item)) => Ok(item),
+            Some(None) => Err(RecvTimeoutError::Disconnected),
+            None => Err(RecvTimeoutError::Timeout),
+        }
+    }
+
     fn ready(&mut self) -> Poll<Option<T>> {
         match self.try_recv() {
             Ok(item) => Poll::Ready(Some(item)),
@@ -392,7 +413,17 @@ impl<T> Drop for Reader<T> {
 }
 
 /// Polls until ready, parking the thread in between.
-fn block_on_poll<R>(mut poll: impl FnMut(&mut Context<'_>) -> Poll<R>) -> R {
+fn block_on_poll<R>(poll: impl FnMut(&mut Context<'_>) -> Poll<R>) -> R {
+    block_on_poll_until(None, poll).expect("no deadline")
+}
+
+/// Polls until ready or until `deadline`, parking the thread in between.
+/// `None` once a poll at or after the deadline is still pending; a `None`
+/// deadline waits forever.
+fn block_on_poll_until<R>(
+    deadline: Option<Instant>,
+    mut poll: impl FnMut(&mut Context<'_>) -> Poll<R>,
+) -> Option<R> {
     struct Unpark(Thread);
 
     impl Wake for Unpark {
@@ -417,10 +448,19 @@ fn block_on_poll<R>(mut poll: impl FnMut(&mut Context<'_>) -> Poll<R>) -> R {
     let mut cx = Context::from_waker(&waker);
     loop {
         if let Poll::Ready(output) = poll(&mut cx) {
-            return output;
+            return Some(output);
         }
         // Spurious wakeups are harmless: the loop polls again.
-        thread::park();
+        match deadline {
+            None => thread::park(),
+            Some(deadline) => {
+                let now = Instant::now();
+                if now >= deadline {
+                    return None;
+                }
+                thread::park_timeout(deadline - now);
+            }
+        }
     }
 }
 
@@ -434,6 +474,17 @@ impl fmt::Display for TryRecvError {
 }
 
 impl std::error::Error for TryRecvError {}
+
+impl fmt::Display for RecvTimeoutError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Timeout => "timed out waiting on the pipe",
+            Self::Disconnected => "pipe is closed",
+        })
+    }
+}
+
+impl std::error::Error for RecvTimeoutError {}
 
 #[cfg(test)]
 mod tests {
@@ -706,6 +757,25 @@ mod tests {
             drop(writer);
             assert_eq!(consumer.join().unwrap(), total, "hwm {hwm_size}");
         }
+    }
+
+    #[test]
+    fn recv_timeout_times_out_then_receives_then_sees_the_close() {
+        let (mut writer, mut reader) = pipe::<u32>(Hwm::Unlimited);
+        let short = Duration::from_millis(50);
+        let start = Instant::now();
+        assert_eq!(reader.recv_timeout(short), Err(RecvTimeoutError::Timeout));
+        assert!(start.elapsed() >= short);
+        let late = thread::spawn(move || {
+            thread::sleep(short);
+            writer.try_send(7).unwrap();
+        });
+        assert_eq!(reader.recv_timeout(Duration::from_secs(60)), Ok(7));
+        late.join().unwrap();
+        assert_eq!(
+            reader.recv_timeout(Duration::MAX),
+            Err(RecvTimeoutError::Disconnected)
+        );
     }
 
     #[test]

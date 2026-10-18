@@ -5,6 +5,7 @@ use std::fmt;
 use std::future::poll_fn;
 use std::num::NonZeroU32;
 use std::task::{Context as TaskContext, Poll, Waker};
+use std::time::Duration;
 
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
@@ -126,6 +127,11 @@ impl Socket<Dish> {
         wait::block_on(|cx| self.poll_recv_group(cx))
     }
 
+    /// The next message and its group, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(Group, Frame)> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv_group(cx))
+    }
+
     /// The next message and its group, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (Group, Frame) {
         poll_fn(|cx| self.poll_recv_group(cx)).await
@@ -192,6 +198,11 @@ impl Socket<Client> {
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Frame {
         wait::block_on(|cx| self.poll_recv_frame(cx))
+    }
+
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv_frame(cx))
     }
 
     /// The next message, waiting until one arrives.
@@ -329,6 +340,11 @@ impl Socket<Gather> {
         wait::block_on(|cx| self.poll_gather(cx))
     }
 
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_gather(cx))
+    }
+
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
         poll_fn(|cx| self.poll_gather(cx)).await
@@ -351,6 +367,14 @@ impl Socket<Server> {
     pub fn recv(&mut self) -> (ClientId, Frame) {
         let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
         (ClientId(id), frame)
+    }
+
+    /// The next message and its sender's id, blocking for at most
+    /// `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(ClientId, Frame)> {
+        let (id, frame) =
+            wait::block_on_until(wait::deadline(timeout), |cx| poll_recv_routed(self, cx))?;
+        Some((ClientId(id), frame))
     }
 
     /// The next message and its sender's id, waiting until one arrives.
@@ -464,6 +488,14 @@ impl Socket<Peer> {
     pub fn recv(&mut self) -> (PeerId, Frame) {
         let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
         (PeerId(id), frame)
+    }
+
+    /// The next message and its sender's id, blocking for at most
+    /// `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(PeerId, Frame)> {
+        let (id, frame) =
+            wait::block_on_until(wait::deadline(timeout), |cx| poll_recv_routed(self, cx))?;
+        Some((PeerId(id), frame))
     }
 
     /// The next message and its sender's id, waiting until one arrives.
@@ -609,6 +641,11 @@ impl Socket<Channel> {
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Frame {
         wait::block_on(|cx| self.poll_channel_recv(cx))
+    }
+
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_channel_recv(cx))
     }
 
     /// The next message, waiting until one arrives.

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use zmq_pipe::{Hwm, Reader, Writer, pipe};
+use zmq_pipe::{Hwm, Reader, RecvTimeoutError, Writer, pipe};
 use zmtp::{CurveError, DecodeError, GreetingError, HandshakeError};
 
 /// Events a monitor holds before dropping new ones, as libzmq's monitor
@@ -143,6 +143,12 @@ impl Monitor {
     /// its connections are gone.
     pub fn recv_blocking(&mut self) -> Option<Event> {
         self.events.recv_blocking()
+    }
+
+    /// The next event, blocking the thread for at most `timeout`. Fails
+    /// with `Disconnected` once the socket and all its connections are gone.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Event, RecvTimeoutError> {
+        self.events.recv_timeout(timeout)
     }
 }
 

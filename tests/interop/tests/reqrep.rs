@@ -5,7 +5,10 @@ use std::task::{Context as TaskContext, Waker};
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Frame, Message, PeerGone, Reconnect, Rep, Req, RouteOutcome, SocketOptions};
+use zmq::{
+    Context, Frame, Message, PeerGone, Reconnect, Rep, Req, RequestError, RouteOutcome,
+    SocketOptions,
+};
 use zmq_interop::libzmq::{Kind, Socket};
 
 /// Runs `f` on another thread and fails the test if it takes longer than
@@ -237,4 +240,24 @@ fn try_recv_does_not_block() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
     assert!(rep.try_recv().is_none());
+}
+
+#[test]
+fn a_timed_out_request_to_a_libzmq_rep_leaves_the_socket_usable() {
+    let rep = Socket::new(Kind::Rep);
+    let addr = rep.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut req = context.socket::<Req>();
+    req.connect(&format!("tcp://{addr}")).unwrap();
+    let first = req.request_timeout("first", Duration::from_millis(100));
+    assert_eq!(first, Err(RequestError::TimedOut));
+    assert_eq!(rep.recv().unwrap(), [b"first".to_vec()]);
+    rep.send(&[b"late"]).unwrap();
+    let answer = spawn(move || req.request_timeout("second", FIVE));
+    assert_eq!(rep.recv().unwrap(), [b"second".to_vec()]);
+    rep.send(&[b"fresh"]).unwrap();
+    assert_eq!(
+        answer.recv_timeout(FIVE).unwrap(),
+        Ok(Message::from("fresh"))
+    );
 }

@@ -186,6 +186,10 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
   libzmq's default.
 - REQ's `request` returns `PeerGone` if the peer's connection closes before
   it replies; libzmq waits forever.
+- Receive timeouts are per call: `recv_timeout(duration)` beside every
+  blocking `recv`, rather than the `RCVTIMEO` socket option. REQ's
+  `request_timeout` leaves the socket usable after a timeout, turning on
+  request correlation to drop the late reply.
 - XPUB receives typed `XPubEvent`s rather than `0x01`/`0x00`-prefixed messages.
 - `ManualXPub` (`XPUB_MANUAL`) hands out a `SubscriptionRequest` per
   subscription, tied to the peer that sent it.

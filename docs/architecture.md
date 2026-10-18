@@ -365,3 +365,4 @@ heartbeats run over a `Stream` that is either kind. Unix only.
 | 12 | ZAP for NULL connections | done |
 | 13 | Socket options: ROUTER mandatory, handover and probe; `IMMEDIATE`; `CONFLATE`; XPUB verbose, manual, welcome, nodrop and invert matching | done |
 | 14 | Benchmarks against libzmq: throughput and latency over tcp, ipc and inproc ([benchmarks.md](benchmarks.md)) | done |
+| 15 | Receive timeouts: `recv_timeout` on every receiving socket and `Monitor`, REQ `request_timeout` | done |

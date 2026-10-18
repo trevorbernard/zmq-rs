@@ -4,6 +4,7 @@ use std::fmt;
 use std::future::poll_fn;
 use std::marker::PhantomData;
 use std::task::{Context as TaskContext, Poll, Waker};
+use std::time::Duration;
 
 use zmq_core::{
     ConnectionConfig, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting, PeerGone,
@@ -499,6 +500,11 @@ impl Socket<Pair> {
         wait::block_on(|cx| self.poll_recv(cx))
     }
 
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+    }
+
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
         poll_fn(|cx| self.poll_recv(cx)).await
@@ -642,6 +648,11 @@ impl Socket<Sub> {
         wait::block_on(|cx| self.poll_recv(cx))
     }
 
+    /// The next message on a subscribed topic, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+    }
+
     /// The next message on a subscribed topic, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
         poll_fn(|cx| self.poll_recv(cx)).await
@@ -676,6 +687,11 @@ impl Socket<XPub> {
     /// The next event, blocking until one arrives.
     pub fn recv(&mut self) -> XPubEvent {
         wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next event, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<XPubEvent> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
     }
 
     /// The next event, waiting until one arrives.
@@ -714,6 +730,18 @@ impl Socket<ManualXPub> {
             peer,
             event,
         }
+    }
+
+    /// The next request, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<SubscriptionRequest<'_>> {
+        let (peer, event) =
+            wait::block_on_until(wait::deadline(timeout), |cx| self.poll_request(cx))?;
+        Some(SubscriptionRequest {
+            socket: self,
+            peer,
+            event,
+        })
     }
 
     /// The next request, waiting until one arrives.
@@ -859,6 +887,11 @@ impl Socket<XSub> {
         wait::block_on(|cx| self.poll_recv(cx))
     }
 
+    /// The next message on a subscribed topic, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+    }
+
     /// The next message on a subscribed topic, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
         poll_fn(|cx| self.poll_recv(cx)).await
@@ -879,6 +912,11 @@ impl Socket<Pull> {
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
         wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
     }
 
     /// The next message, waiting until one arrives.
@@ -919,6 +957,11 @@ impl Socket<Dealer> {
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
         wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
     }
 
     /// The next message, waiting until one arrives.
@@ -966,6 +1009,31 @@ impl Socket<Req> {
     pub fn request(&mut self, message: impl Into<Message>) -> Result<Message, PeerGone> {
         let mut state = RequestState::Sending(Some(message.into()));
         wait::block_on(|cx| self.poll_request(&mut state, cx))
+    }
+
+    /// Sends `message` to the next peer with room and waits for its reply,
+    /// blocking the thread for at most `timeout` in all. On timeout the
+    /// request is abandoned and the socket stays usable, unlike libzmq's
+    /// REQ after `ZMQ_RCVTIMEO`.
+    ///
+    /// Turns [correlation](Self::set_correlation) on for good, so that the
+    /// reply to a timed-out request is never taken for a later one's. From
+    /// then on a ROUTER application serving this socket sees the request
+    /// id as an extra envelope frame; REP peers do not notice.
+    pub fn request_timeout(
+        &mut self,
+        message: impl Into<Message>,
+        timeout: Duration,
+    ) -> Result<Message, RequestError> {
+        self.set_correlation(true);
+        let mut state = RequestState::Sending(Some(message.into()));
+        match wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_request(&mut state, cx)
+        }) {
+            Some(Ok(reply)) => Ok(reply),
+            Some(Err(PeerGone)) => Err(RequestError::PeerGone),
+            None => Err(RequestError::TimedOut),
+        }
     }
 
     /// Sends `message` to the next peer with room and waits for its reply.
@@ -1033,6 +1101,16 @@ impl Socket<Rep> {
         }
     }
 
+    /// The next request, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Request<'_>> {
+        let received = wait::block_on_until(wait::deadline(timeout), |cx| self.poll_received(cx))?;
+        Some(Request {
+            socket: self,
+            received,
+        })
+    }
+
     /// The next request, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Request<'_> {
         let received = poll_fn(|cx| self.poll_received(cx)).await;
@@ -1092,6 +1170,26 @@ impl fmt::Display for UnknownRoutingId {
 }
 
 impl std::error::Error for UnknownRoutingId {}
+
+/// Why [`Socket::request_timeout`] got no reply.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestError {
+    /// The peer the request went to closed before replying.
+    PeerGone,
+    /// No reply arrived in time. The request is abandoned.
+    TimedOut,
+}
+
+impl fmt::Display for RequestError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::PeerGone => PeerGone.fmt(f),
+            Self::TimedOut => f.write_str("no reply in time"),
+        }
+    }
+}
+
+impl std::error::Error for RequestError {}
 
 impl Socket<Router> {
     /// Sends `message` to the peer with routing id `to` if it is known and
@@ -1173,6 +1271,12 @@ impl Socket<Router> {
     /// arrives.
     pub fn recv(&mut self) -> (RoutingId, Message) {
         wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    /// The next message and its sender's routing id, blocking for at most
+    /// `timeout`; `None` if none arrives in time.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(RoutingId, Message)> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
     }
 
     /// The next message and its sender's routing id, waiting until one
