@@ -31,8 +31,9 @@ pub struct SocketOptions {
     /// messages queue on it from [`connect`](crate::Socket::connect) on and
     /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
     pub immediate: bool,
-    /// The largest frame accepted from peers (`ZMQ_MAXMSGSIZE`).
-    pub max_frame_size: Option<u64>,
+    /// The largest message accepted from peers, counting all its frames
+    /// (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is disconnected.
+    pub max_message_size: Option<u64>,
     /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
     /// default.
     pub security: Security,
@@ -54,7 +55,7 @@ impl Default for SocketOptions {
             linger: Linger::default(),
             reconnect: Reconnect::default(),
             immediate: false,
-            max_frame_size: None,
+            max_message_size: None,
             security: Security::default(),
             heartbeat: None,
             handshake_timeout: Some(Duration::from_secs(30)),

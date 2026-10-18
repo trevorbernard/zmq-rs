@@ -472,7 +472,7 @@ impl Engine {
         let mut decoder = Decoder::new(
             peer.version(),
             DecoderConfig {
-                max_frame_size: self.config.max_frame_size,
+                max_message_size: self.config.max_message_size,
             },
         );
         // An unversioned ZMTP 1.0 peer's greeting octets were the start of

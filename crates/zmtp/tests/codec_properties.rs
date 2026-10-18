@@ -172,27 +172,33 @@ proptest! {
         prop_assert_eq!(decoded, expected);
     }
 
-    /// Decoding stops at the first frame over the limit, before its body
-    /// arrives, having delivered every whole message before it.
+    /// Decoding stops at the first frame that takes its message over the
+    /// limit, before that frame's body arrives, having delivered every
+    /// whole message before it.
     #[test]
-    fn stops_at_the_first_frame_over_the_limit(
+    fn stops_at_the_first_message_over_the_limit(
         (version, items) in traffic(),
         arrival in arrival(),
         max in prop_oneof![Just(0u64), Just(255), Just(256), 0u64..10_000],
     ) {
-        let config = DecoderConfig { max_frame_size: Some(max) };
+        let config = DecoderConfig { max_message_size: Some(max) };
         let input = encode(version, &items);
         let (decoded, error) = decode(version, config, &input, &arrival);
-        let first_over = items.iter().position(|item| {
-            item.frames().iter().any(|f| f.len() as u64 > max)
-        });
+        let over = |item: &Item| {
+            item.frames()
+                .iter()
+                .scan(0u64, |size, frame| {
+                    *size += (frame.len() as u64).max(1);
+                    Some(*size)
+                })
+                .find(|&size| size > max)
+        };
+        let first_over = items.iter().position(|item| over(item).is_some());
         let whole = first_over.unwrap_or(items.len());
         let expected: Vec<Incoming> = items[..whole].iter().map(Item::incoming).collect();
         prop_assert_eq!(decoded, expected);
-        let expected_error = first_over.map(|i| {
-            let size = items[i].frames().into_iter().find(|f| f.len() as u64 > max).map(<[u8]>::len);
-            DecodeError::FrameTooLarge { size: size.expect("over the limit") as u64 }
-        });
+        let expected_error = first_over
+            .map(|i| DecodeError::MessageTooLarge { size: over(&items[i]).expect("over the limit") });
         prop_assert_eq!(error, expected_error);
     }
 
@@ -212,7 +218,7 @@ proptest! {
             input[at] = octet;
         }
         input.truncate(truncate.index(input.len() + 1));
-        let config = DecoderConfig { max_frame_size: max };
+        let config = DecoderConfig { max_message_size: max };
         let whole = Arrival { prefix: input.len(), reads: vec![1] };
         prop_assert_eq!(
             decode(version, config, &input, &arrival),

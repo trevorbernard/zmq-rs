@@ -8,11 +8,11 @@ use zmtp::{Decoder, DecoderConfig, Greeting, GreetingConfig, Incoming, PeerGreet
 
 /// libzmq's harnesses cap ZMQ_MAXMSGSIZE at 64 MiB to keep the sanitizer
 /// allocator happy; so do we.
-pub const MAX_FRAME_SIZE: u64 = 64 * 1024 * 1024;
+pub const MAX_MESSAGE_SIZE: u64 = 64 * 1024 * 1024;
 
 pub fn decoder_config() -> DecoderConfig {
     DecoderConfig {
-        max_frame_size: Some(MAX_FRAME_SIZE),
+        max_message_size: Some(MAX_MESSAGE_SIZE),
     }
 }
 

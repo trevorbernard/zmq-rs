@@ -55,7 +55,7 @@ fn defaults_match_libzmq() {
     assert_eq!(config.send_hwm, thousand);
     assert_eq!(config.recv_hwm, thousand);
     assert_eq!(config.identity, Identity::default());
-    assert_eq!(config.max_frame_size, None);
+    assert_eq!(config.max_message_size, None);
     assert_eq!(config.linger, Linger::Forever);
 }
 

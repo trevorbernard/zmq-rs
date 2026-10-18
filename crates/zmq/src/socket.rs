@@ -332,7 +332,7 @@ impl<T: SocketType> Socket<T> {
             immediate: options.immediate && !is_peer(T::KIND),
             linger: options.linger,
             reconnect: options.reconnect,
-            max_frame_size: options.max_frame_size,
+            max_message_size: options.max_message_size,
             security: options.security,
             heartbeat: options.heartbeat,
             handshake_timeout: options.handshake_timeout,

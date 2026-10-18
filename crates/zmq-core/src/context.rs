@@ -88,8 +88,8 @@ pub struct ConnectionConfig {
     /// Keep only the latest message towards the peer, ignoring `send_hwm`
     /// (`ZMQ_CONFLATE`).
     pub conflate_outbound: bool,
-    /// The largest frame accepted from the peer.
-    pub max_frame_size: Option<u64>,
+    /// The largest message accepted from the peer, counting all its frames.
+    pub max_message_size: Option<u64>,
     /// How a connecting session retries. Accepted connections never do.
     pub reconnect: Reconnect,
     /// Whether a TCP or IPC connection reaches the socket only once its
@@ -421,7 +421,7 @@ impl ConnectionConfig {
             recv_hwm: hwm,
             conflate_inbound: false,
             conflate_outbound: false,
-            max_frame_size: None,
+            max_message_size: None,
             reconnect: Reconnect::default(),
             immediate: false,
             linger: Linger::default(),
