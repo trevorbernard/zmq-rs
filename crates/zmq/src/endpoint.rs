@@ -205,6 +205,9 @@ impl std::error::Error for Error {
 }
 
 #[cfg(test)]
+mod properties;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

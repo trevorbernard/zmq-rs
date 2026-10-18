@@ -19,5 +19,8 @@ zmq-core.workspace = true
 zmq-pipe.workspace = true
 zmtp.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
