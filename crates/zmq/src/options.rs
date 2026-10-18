@@ -21,7 +21,8 @@ pub struct SocketOptions {
     /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000).
     pub recv_hwm: Hwm,
     /// How long queued messages are still delivered after the socket is
-    /// dropped (`ZMQ_LINGER`, default forever).
+    /// dropped (`ZMQ_LINGER`, default forever). Dropping the context waits
+    /// that long for them.
     pub linger: Linger,
     /// How connections retry (`ZMQ_RECONNECT_IVL`, default 100 ms).
     pub reconnect: Reconnect,

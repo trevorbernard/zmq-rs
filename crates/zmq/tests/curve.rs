@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Heartbeat, Keypair, Message, Metadata, Pub, Pull, Push, Router,
+    Context, Dealer, Frame, Heartbeat, Keypair, Linger, Message, Metadata, Pub, Pull, Push, Router,
     Security, SocketOptions, Sub, ZapCredentials, ZapReply, ZapRequest,
 };
 
@@ -106,10 +106,13 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
-    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
-        Keypair::generate(),
-        Keypair::generate().public(),
-    )));
+    let mut push = context.socket_with::<Push>(SocketOptions {
+        linger: Linger::For(Duration::ZERO),
+        ..secured(Security::curve_client(
+            Keypair::generate(),
+            Keypair::generate().public(),
+        ))
+    });
     push.connect(&bound.to_string()).unwrap();
     push.send("lost");
     thread::sleep(Duration::from_millis(300));
@@ -122,7 +125,10 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket_with::<Push>(SocketOptions {
+        linger: Linger::For(Duration::ZERO),
+        ..SocketOptions::default()
+    });
     push.connect(&bound.to_string()).unwrap();
     push.send("in the clear");
     thread::sleep(Duration::from_millis(300));

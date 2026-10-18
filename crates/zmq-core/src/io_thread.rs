@@ -30,9 +30,10 @@ pub(crate) enum IoCommand {
     /// Accept peers on a bound listener.
     Listen(Box<ListenRequest>),
     /// Close listeners, let connections deliver what they have queued until
-    /// `deadline`, then exit and report how many were cut off.
+    /// `deadline`, or for as long as their linger allows if `None`, then
+    /// exit and report how many were cut off.
     Shutdown {
-        deadline: Instant,
+        deadline: Option<Instant>,
         done: mpsc::Sender<usize>,
     },
     /// Close every connection and listener at once, and exit.
@@ -143,7 +144,7 @@ struct EventLoop {
     /// has since changed state is harmless: driving it finds nothing to do.
     timers: BinaryHeap<Reverse<(Instant, usize)>>,
     /// Set once shutdown starts: when it must end, and where to report.
-    shutdown: Option<(Instant, mpsc::Sender<usize>)>,
+    shutdown: Option<(Option<Instant>, mpsc::Sender<usize>)>,
     /// Ids are never reused, so a late wakeup for something closed cannot
     /// reach a newcomer.
     next_id: usize,
@@ -212,7 +213,7 @@ impl EventLoop {
             }
             if let Some((deadline, done)) = &self.shutdown {
                 let finished = self.sessions.is_empty();
-                if finished || Instant::now() >= *deadline {
+                if finished || deadline.is_some_and(|deadline| Instant::now() >= deadline) {
                     let _ = done.send(self.sessions.len());
                     return;
                 }
@@ -222,7 +223,11 @@ impl EventLoop {
 
     /// Closes the listeners and starts closing every session: each delivers
     /// what it has queued, within its linger and the shutdown deadline.
-    fn start_shutdown(&mut self, deadline: Instant, done: mpsc::Sender<usize>) -> Vec<usize> {
+    fn start_shutdown(
+        &mut self,
+        deadline: Option<Instant>,
+        done: mpsc::Sender<usize>,
+    ) -> Vec<usize> {
         for (_, mut entry) in self.listeners.drain() {
             let _ = self.poll.registry().deregister(&mut entry.listener);
             entry
@@ -237,7 +242,9 @@ impl EventLoop {
             // so only a shorter linger gets a deadline of its own.
             let linger = match session.config.linger {
                 Linger::Forever => None,
-                Linger::For(linger) => Some(now + linger).filter(|&at| at < deadline),
+                Linger::For(linger) => {
+                    Some(now + linger).filter(|&at| deadline.is_none_or(|deadline| at < deadline))
+                }
             };
             let at = match session.closing {
                 Some(Closing {
@@ -252,7 +259,9 @@ impl EventLoop {
             due.push(id);
         }
         // Wake at the deadline even if no session has a timer of its own.
-        self.timers.push(Reverse((deadline, WAKER.0)));
+        if let Some(deadline) = deadline {
+            self.timers.push(Reverse((deadline, WAKER.0)));
+        }
         self.shutdown = Some((deadline, done));
         due
     }
@@ -388,16 +397,18 @@ impl EventLoop {
             return;
         };
         let now = Instant::now();
+        let mut cx = Context::from_waker(&session.task_waker);
+        // The socket is gone while it holds none of our pipes. Checked even
+        // when closing, as a shutdown may start closing us before the
+        // socket's drop is seen here.
+        if let Some(immediate) = &mut session.immediate
+            && immediate.connections.poll_closed(&mut cx).is_ready()
+            && immediate.pending.is_some()
+        {
+            self.close_session(id);
+            return;
+        }
         if session.closing.is_none() {
-            let mut cx = Context::from_waker(&session.task_waker);
-            // The socket is gone while it holds none of our pipes.
-            if let Some(immediate) = &mut session.immediate
-                && immediate.connections.poll_closed(&mut cx).is_ready()
-                && immediate.pending.is_some()
-            {
-                self.close_session(id);
-                return;
-            }
             // The socket dropped its sender: deliver what is queued, within
             // the linger, then close.
             if session.outbound.poll_closed(&mut cx).is_ready() {
@@ -421,6 +432,14 @@ impl EventLoop {
             .and_then(|closing| closing.deadline)
             .is_some_and(|at| at <= now)
         {
+            self.close_session(id);
+            return;
+        }
+        // Nothing left to deliver and no connection to deliver on, as
+        // libzmq ends a session whose pipe has terminated: lingering would
+        // reconnect forever for nothing.
+        let established = session.engine.as_ref().is_some_and(Engine::is_established);
+        if session.closing.is_some() && !established && session.outbound.is_drained() {
             self.close_session(id);
             return;
         }

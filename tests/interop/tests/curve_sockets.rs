@@ -5,8 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
-    Context, Dealer, Frame, Heartbeat, Keypair, Message, Metadata, Pub, Push, Reconnect, Router,
-    Security, SocketOptions, ZapCredentials, ZapReply, ZapRequest,
+    Context, Dealer, Frame, Heartbeat, Keypair, Linger, Message, Metadata, Pub, Push, Reconnect,
+    Router, Security, SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_interop::libzmq::{Kind, Socket};
 
@@ -154,10 +154,13 @@ fn libzmq_refuses_our_client_with_the_wrong_server_key() {
     pull.set_curve_server(Keypair::generate().secret().expose());
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
-        Keypair::generate(),
-        Keypair::generate().public(),
-    )));
+    let mut push = context.socket_with::<Push>(SocketOptions {
+        linger: Linger::For(Duration::ZERO),
+        ..secured(Security::curve_client(
+            Keypair::generate(),
+            Keypair::generate().public(),
+        ))
+    });
     push.connect(&format!("tcp://{addr}")).unwrap();
     push.send("never");
     assert!(pull.recv().is_err());

@@ -141,6 +141,10 @@ pub use zmtp::{
 pub use zmtp::{Group, InvalidGroup};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
+///
+/// Once the last clone and every socket are dropped, the drop blocks until
+/// each socket's queued messages are delivered or its
+/// [`linger`](SocketOptions::linger) runs out, as libzmq's `zmq_ctx_term`.
 #[derive(Debug, Clone)]
 pub struct Context {
     core: zmq_core::Context,

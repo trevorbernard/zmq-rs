@@ -105,6 +105,8 @@ struct Shared {
     reader_closed: AtomicBool,
     /// Set by the writer before it goes away.
     writer_closed: AtomicBool,
+    /// Items the writer sent in all, stored once as it goes away.
+    final_written: AtomicU64,
     reader: CachePadded<ReaderWait>,
     writer_waker: CachePadded<AtomicWaker>,
 }
@@ -310,6 +312,9 @@ impl<T> Drop for Writer<T> {
     fn drop(&mut self) {
         // Disconnect first, so a reader woken here sees the pipe closed.
         drop(self.sender.take());
+        self.shared
+            .final_written
+            .store(self.written, Ordering::Relaxed);
         self.shared.writer_closed.store(true, Ordering::Release);
         self.shared.reader.waker.wake();
     }
@@ -360,6 +365,19 @@ impl<T> Reader<T> {
     /// Whether the writer is gone. Items it sent may still be queued.
     pub fn is_closed(&self) -> bool {
         self.shared.writer_closed.load(Ordering::Acquire)
+    }
+
+    /// Whether the writer is gone and every item it sent has been taken,
+    /// found without taking one.
+    pub fn is_drained(&self) -> bool {
+        // Acquire pairs with the writer's release, publishing its count.
+        if !self.is_closed() {
+            return false;
+        }
+        match &self.receiver {
+            Receiver::Queue(_) => self.read == self.shared.final_written.load(Ordering::Relaxed),
+            Receiver::Latest(latest) => lock(latest).is_none(),
+        }
     }
 
     /// Ready once the writer is gone, even if items are still queued.
@@ -605,6 +623,25 @@ mod tests {
         assert_eq!(reader.try_recv(), Ok(1));
         assert_eq!(reader.try_recv(), Err(TryRecvError::Closed));
         assert_eq!(reader.recv_blocking(), None);
+    }
+
+    #[test]
+    fn drained_once_the_writer_is_gone_and_nothing_is_left() {
+        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
+        assert!(!reader.is_drained());
+        writer.try_send(1).unwrap();
+        drop(writer);
+        assert!(!reader.is_drained());
+        assert_eq!(reader.try_recv(), Ok(1));
+        assert!(reader.is_drained());
+
+        let (mut writer, mut reader) = pipe_conflated();
+        writer.try_send(1).unwrap();
+        writer.try_send(2).unwrap();
+        drop(writer);
+        assert!(!reader.is_drained());
+        assert_eq!(reader.try_recv(), Ok(2));
+        assert!(reader.is_drained());
     }
 
     #[test]

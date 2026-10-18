@@ -32,7 +32,8 @@ const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
 /// Owns the I/O threads. Cloning shares them; they stop when the last clone
-/// is dropped, closing every connection on them.
+/// is dropped, once every connection on them has delivered what it queued
+/// or its linger has run out.
 #[derive(Debug, Clone)]
 pub struct Context {
     inner: Arc<Inner>,
@@ -705,12 +706,28 @@ impl Context {
     /// queued messages for up to `timeout` (or less, per their [`Linger`]),
     /// then stops the I/O threads. Affects every clone of this context.
     ///
-    /// Dropping the last clone without calling this closes everything at
-    /// once, discarding queued messages.
+    /// Dropping the last clone does the same with no timeout, waiting as
+    /// long as each connection's linger allows, as libzmq's `zmq_ctx_term`.
     pub fn shutdown(&self, timeout: Duration) -> Result<(), ShutdownTimedOut> {
-        let deadline = Instant::now() + timeout;
+        match self.inner.shutdown(Instant::now().checked_add(timeout)) {
+            0 => Ok(()),
+            abandoned => Err(ShutdownTimedOut { abandoned }),
+        }
+    }
+
+    /// The next I/O thread, round robin.
+    fn io_thread(&self) -> &IoThread {
+        let threads = &self.inner.io_threads;
+        &threads[self.inner.next.fetch_add(1, Ordering::Relaxed) % threads.len()]
+    }
+}
+
+impl Inner {
+    /// Shuts the I/O threads down by `deadline`, or as their connections'
+    /// lingers allow if `None`, and returns how many connections were cut
+    /// off.
+    fn shutdown(&self, deadline: Option<Instant>) -> usize {
         let reports: Vec<mpsc::Receiver<usize>> = self
-            .inner
             .io_threads
             .iter()
             .map(|thread| {
@@ -720,22 +737,20 @@ impl Context {
             })
             .collect();
         let mut abandoned = 0;
-        for (thread, report) in self.inner.io_threads.iter().zip(reports) {
+        for (thread, report) in self.io_threads.iter().zip(reports) {
             // A thread already stopped by an earlier shutdown reports nothing.
             abandoned += report.recv().unwrap_or(0);
             thread.join();
         }
-        if abandoned == 0 {
-            Ok(())
-        } else {
-            Err(ShutdownTimedOut { abandoned })
-        }
+        abandoned
     }
+}
 
-    /// The next I/O thread, round robin.
-    fn io_thread(&self) -> &IoThread {
-        let threads = &self.inner.io_threads;
-        &threads[self.inner.next.fetch_add(1, Ordering::Relaxed) % threads.len()]
+impl Drop for Inner {
+    /// Every socket is gone, as each holds a clone: lets their connections
+    /// deliver what they queued, within their linger.
+    fn drop(&mut self) {
+        self.shutdown(None);
     }
 }
 

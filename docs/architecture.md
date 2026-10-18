@@ -78,14 +78,18 @@ signal again for data it has already reported.
 - Dropping a connection's sender starts its linger: queued messages keep
   being delivered, across reconnects, until the queue is written or the
   `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at
-  once. Dropping only the receiver discards incoming messages but keeps the
-  connection sending.
+  once. A lingering session with nothing left queued and no established
+  connection ends at once, as libzmq's does. Dropping only the receiver
+  discards incoming messages but keeps the connection sending.
 - `Context::shutdown(timeout)` closes listeners and every session, lets each
   deliver its queue within its linger and the timeout, then joins the I/O
   threads. Connections still delivering or still disconnected at the
   deadline are reported as abandoned.
-- Dropping the last `Context` clone without `shutdown` closes everything at
-  once. Unlike libzmq's `zmq_ctx_term`, nothing ever blocks on drop.
+- Dropping the last `Context` clone, which every socket holds, shuts down
+  with no deadline: as libzmq's `zmq_ctx_term`, it blocks until each
+  connection has delivered its queue or its linger has run out, so with the
+  default `Linger::Forever` a queue towards an unreachable peer blocks it
+  for good.
 - `bind` binds immediately, so errors such as an address in use are reported
   to the caller, then hands the listener to an I/O thread.
 - An accepted connection reaches the `Listener` only once its handshake has
