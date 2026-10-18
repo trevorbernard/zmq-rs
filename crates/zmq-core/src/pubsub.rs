@@ -496,6 +496,9 @@ fn tell_all(peers: &mut PeerList, subscription: &Subscription) {
 }
 
 #[cfg(test)]
+mod properties;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::*;

@@ -17,5 +17,8 @@ mio.workspace = true
 zmtp.workspace = true
 zmq-pipe.workspace = true
 
+[dev-dependencies]
+proptest.workspace = true
+
 [lints]
 workspace = true
