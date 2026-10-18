@@ -309,3 +309,29 @@ buckets' already-keyed hashes, against the shared index above:
 - **Matching costs about 1.2 ns per message octet,** from about 24: the
   per-octet hash step is all that is left.
 - **About 107 ns per peer at 1000 peers is spent outside matching.**
+
+### Results: cheaper sync and peer lookups (`19ab4c2`)
+
+`sync` reading with `try_recv` instead of registering a no-op waker on
+every peer, and a multiplicative hasher for maps keyed by peer, against
+the length lookups above:
+
+| Case | Length lookups | Cheaper sync | Change |
+|---|---|---|---|
+| `one_match_among_many/1` | 221 ns | 152 ns | −31% |
+| `one_match_among_many/10` | 1.00 µs | 339 ns | −66% |
+| `one_match_among_many/100` | 8.85 µs | 2.17 µs | −75% |
+| `one_match_among_many/1000` | 107 µs | 30.1 µs | −72% |
+| `long_topics/16` | 8.92 µs | 2.20 µs | −75% |
+| `long_topics/256` | 9.17 µs | 2.51 µs | −73% |
+| `long_topics/4096` | 13.7 µs | 6.87 µs | −50% |
+| `all_match/1` | 205 ns | 134 ns | −35% |
+| `all_match/10` | 1.53 µs | 913 ns | −40% |
+| `all_match/100` | 16.2 µs | 9.36 µs | −42% |
+
+- **Each peer cost about 107 ns at 1000 peers, matching aside.** Timed
+  apart: about 44 ns polling its empty pipe, 16 ns hashing its key for
+  `subscribers`, 14 ns for the rest of `sync`, and 35 ns in the send
+  loop, mostly hashing its key twice more.
+- **About 30 ns per peer is left.** Visiting only matched peers, and
+  reading only peers with input waiting, would remove most of it.

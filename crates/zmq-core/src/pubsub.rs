@@ -992,6 +992,22 @@ mod tests {
     }
 
     #[test]
+    fn sending_keeps_the_waker_waiting_for_events() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        assert_eq!(publisher.poll_event(&mut peers, &mut cx), Poll::Pending);
+        publisher.send(&mut peers, msg("x"));
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert!(
+            count.0.load(Ordering::SeqCst) > 0,
+            "a subscription after a send still wakes it"
+        );
+    }
+
+    #[test]
     fn xpub_reports_a_legacy_peers_implicit_subscription() {
         let (a, sa) = connection(10);
         let mut peers = list(vec![a]);
