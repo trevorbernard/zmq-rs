@@ -5,7 +5,8 @@
 //! subscribed to a prefix of its first frame. Subscribers filter too, so
 //! publishers that do not (ZMTP 1.0) are harmless.
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
+use std::hash::{BuildHasher, Hasher, RandomState};
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmtp::{Frame, Message, Subscription};
@@ -14,67 +15,110 @@ use crate::FairQueue;
 use crate::socket::{PeerKey, PeerList};
 
 /// Topics and how many times each was subscribed, matched by prefix.
+///
+/// Peers choose the topics, so matching must not cost more than linear time
+/// in the message: hashing every prefix of it afresh would be quadratic in
+/// the longest topic. Topics are kept by a hash fed one octet at a time, so
+/// one pass over the message yields every prefix's hash.
 #[derive(Debug, Clone, Default)]
 pub struct Topics {
-    counts: HashMap<Box<[u8]>, usize>,
-    /// The longest topic's length, so matching tries no longer prefixes.
-    longest: usize,
+    buckets: HashMap<u64, Bucket>,
+    /// How many topics have each length, so matching tries no longer
+    /// prefixes than the longest.
+    lengths: BTreeMap<usize, usize>,
+    /// Keyed per set, so peers cannot aim topics at one bucket.
+    hasher: RandomState,
 }
+
+/// The topics sharing a hash, each with its subscription count.
+type Bucket = Vec<(Box<[u8]>, usize)>;
 
 impl Topics {
     /// Adds a subscription to `topic`. Returns whether it is new.
     pub fn add(&mut self, topic: &[u8]) -> bool {
-        if let Some(count) = self.counts.get_mut(topic) {
+        let hash = self.hash(topic);
+        let bucket = self.buckets.entry(hash).or_default();
+        if let Some((_, count)) = bucket.iter_mut().find(|(t, _)| **t == *topic) {
             *count += 1;
             return false;
         }
-        self.counts.insert(topic.into(), 1);
-        self.longest = self.longest.max(topic.len());
+        bucket.push((topic.into(), 1));
+        *self.lengths.entry(topic.len()).or_default() += 1;
         true
     }
 
     /// Removes one subscription to `topic`. Returns whether that was the
     /// last, so the topic is gone.
     pub fn remove(&mut self, topic: &[u8]) -> bool {
-        let Some(count) = self.counts.get_mut(topic) else {
+        let hash = self.hash(topic);
+        let Some(bucket) = self.buckets.get_mut(&hash) else {
             return false;
         };
-        *count -= 1;
-        if *count > 0 {
+        let Some(at) = bucket.iter().position(|(t, _)| **t == *topic) else {
+            return false;
+        };
+        bucket[at].1 -= 1;
+        if bucket[at].1 > 0 {
             return false;
         }
-        self.counts.remove(topic);
-        if topic.len() == self.longest {
-            self.longest = self
-                .counts
-                .keys()
-                .map(|topic| topic.len())
-                .max()
-                .unwrap_or(0);
+        bucket.swap_remove(at);
+        if bucket.is_empty() {
+            self.buckets.remove(&hash);
+        }
+        if let btree_map::Entry::Occupied(mut entry) = self.lengths.entry(topic.len()) {
+            *entry.get_mut() -= 1;
+            if *entry.get() == 0 {
+                entry.remove();
+            }
         }
         true
     }
 
     /// Whether `topic` is subscribed.
     pub fn contains(&self, topic: &[u8]) -> bool {
-        self.counts.contains_key(topic)
+        self.find(self.hash(topic), topic)
     }
 
     /// Whether a message whose first frame is `data` is wanted: some topic
     /// is a prefix of it.
     pub fn matches(&self, data: &[u8]) -> bool {
-        !self.counts.is_empty()
-            && (0..=self.longest.min(data.len())).any(|len| self.counts.contains_key(&data[..len]))
+        let Some(&longest) = self.lengths.keys().next_back() else {
+            return false;
+        };
+        let mut state = self.hasher.build_hasher();
+        if self.find(state.finish(), b"") {
+            return true;
+        }
+        let prefix = &data[..longest.min(data.len())];
+        (1..=prefix.len()).any(|len| {
+            state.write_u8(prefix[len - 1]);
+            self.find(state.finish(), &prefix[..len])
+        })
     }
 
     /// The subscribed topics, in no particular order.
     pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
-        self.counts.keys().map(|topic| &**topic)
+        self.buckets.values().flatten().map(|(topic, _)| &**topic)
     }
 
     /// Whether nothing is subscribed.
     pub fn is_empty(&self) -> bool {
-        self.counts.is_empty()
+        self.buckets.is_empty()
+    }
+
+    /// Hashes octet by octet, as `matches` extends a prefix.
+    fn hash(&self, topic: &[u8]) -> u64 {
+        let mut state = self.hasher.build_hasher();
+        for &octet in topic {
+            state.write_u8(octet);
+        }
+        state.finish()
+    }
+
+    fn find(&self, hash: u64, topic: &[u8]) -> bool {
+        self.buckets
+            .get(&hash)
+            .is_some_and(|bucket| bucket.iter().any(|(t, _)| **t == *topic))
     }
 }
 
@@ -551,6 +595,21 @@ mod tests {
         topics.remove(b"ab");
         assert!(!topics.matches(b"abcdef"));
         assert!(topics.matches(b"xyz"));
+    }
+
+    // Hashing each prefix afresh took 7 s for the miss alone, optimized:
+    // 2^18 prefixes of up to 2^18 octets.
+    #[test]
+    fn a_long_topic_matches_in_linear_time() {
+        let mut topics = Topics::default();
+        let long = vec![b'a'; 1 << 18];
+        topics.add(&long);
+        assert!(topics.matches(&long));
+        let mut miss = long.clone();
+        *miss.last_mut().unwrap() = b'b';
+        assert!(!topics.matches(&miss));
+        assert!(topics.remove(&long));
+        assert!(!topics.matches(&long));
     }
 
     #[test]
