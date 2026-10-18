@@ -287,3 +287,25 @@ against matching each peer's own topics (`0efa9cc`):
   one set lookup rather than a hash per octet of the message.
 - **It loses about 40 ns with one peer subscribed to everything,**
   the cost of collecting the matched set.
+
+### Results: looking up only topic lengths (`prefixes_of`)
+
+Looking up only prefix lengths some topic has, and not rehashing the
+buckets' already-keyed hashes, against the shared index above:
+
+| Case | Shared index | Length lookups | Change |
+|---|---|---|---|
+| `one_match_among_many/1` | 447 ns | 219 ns | −51% |
+| `one_match_among_many/10` | 1.20 µs | 980 ns | −18% |
+| `one_match_among_many/100` | 9.02 µs | 8.87 µs | −2% |
+| `one_match_among_many/1000` | 107 µs | 109 µs | +2% |
+| `long_topics/16` | 9.37 µs | 8.78 µs | −6% |
+| `long_topics/256` | 14.9 µs | 9.15 µs | −38% |
+| `long_topics/4096` | 111 µs | 13.6 µs | −88% |
+| `all_match/1` | 206 ns | 207 ns | 0% |
+| `all_match/10` | 1.57 µs | 1.54 µs | −2% |
+| `all_match/100` | 16.1 µs | 16.0 µs | −1% |
+
+- **Matching costs about 1.2 ns per message octet,** from about 24: the
+  per-octet hash step is all that is left.
+- **About 107 ns per peer at 1000 peers is spent outside matching.**

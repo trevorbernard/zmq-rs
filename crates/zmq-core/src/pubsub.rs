@@ -6,7 +6,7 @@
 //! publishers that do not (ZMTP 1.0) are harmless.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, btree_map};
-use std::hash::{BuildHasher, Hasher, RandomState};
+use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmtp::{Frame, Message, Subscription};
@@ -74,9 +74,9 @@ impl Topics {
 /// one pass over the message yields every prefix's hash.
 #[derive(Debug, Clone)]
 struct PrefixMap<V> {
-    buckets: HashMap<u64, Bucket<V>>,
-    /// How many topics have each length, so a search tries no longer
-    /// prefixes than the longest.
+    buckets: HashMap<u64, Bucket<V>, BuildHasherDefault<HashedKey>>,
+    /// How many topics have each length, so a search looks up only the
+    /// prefixes some topic is as long as.
     lengths: BTreeMap<usize, usize>,
     /// Keyed per map, so peers cannot aim topics at one bucket.
     hasher: RandomState,
@@ -85,10 +85,30 @@ struct PrefixMap<V> {
 /// The topics sharing a hash, with their values.
 type Bucket<V> = Vec<(Box<[u8]>, V)>;
 
+/// Hashes `buckets`' keys, which are already keyed hashes, as themselves.
+#[derive(Debug, Clone, Copy, Default)]
+struct HashedKey(u64);
+
+impl Hasher for HashedKey {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &octet in bytes {
+            self.0 = self.0.rotate_left(8) ^ u64::from(octet);
+        }
+    }
+
+    fn write_u64(&mut self, key: u64) {
+        self.0 = key;
+    }
+}
+
 impl<V> Default for PrefixMap<V> {
     fn default() -> Self {
         Self {
-            buckets: HashMap::new(),
+            buckets: HashMap::default(),
             lengths: BTreeMap::new(),
             hasher: RandomState::new(),
         }
@@ -138,23 +158,17 @@ impl<V> PrefixMap<V> {
 
     /// The values of the topics that are prefixes of `data`, shortest first.
     fn prefixes_of<'a>(&'a self, data: &'a [u8]) -> impl Iterator<Item = &'a V> {
-        let longest = self.lengths.keys().next_back().copied();
-        let data = &data[..longest.unwrap_or(0).min(data.len())];
         let mut state = self.hasher.build_hasher();
-        let mut len = longest.map(|_| 0);
-        std::iter::from_fn(move || {
-            while let Some(at) = len {
-                let found = self.find(state.finish(), &data[..at]);
-                len = data.get(at).map(|&octet| {
+        let mut hashed = 0;
+        self.lengths
+            .range(..=data.len())
+            .filter_map(move |(&len, _)| {
+                for &octet in &data[hashed..len] {
                     state.write_u8(octet);
-                    at + 1
-                });
-                if found.is_some() {
-                    return found;
                 }
-            }
-            None
-        })
+                hashed = len;
+                self.find(state.finish(), &data[..len])
+            })
     }
 
     fn iter(&self) -> impl Iterator<Item = (&[u8], &V)> {
