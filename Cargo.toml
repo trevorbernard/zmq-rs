@@ -14,6 +14,7 @@ publish = false
 [workspace.dependencies]
 atomic-waker = "1"
 bytes = "1"
+criterion = "0.8"
 crypto_box = "0.9"
 crypto_secretbox = "0.1"
 mio = { version = "1", features = ["net", "os-poll"] }

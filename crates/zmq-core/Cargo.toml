@@ -18,7 +18,12 @@ zmtp.workspace = true
 zmq-pipe.workspace = true
 
 [dev-dependencies]
+criterion.workspace = true
 proptest.workspace = true
 
 [lints]
 workspace = true
+
+[[bench]]
+name = "fanout"
+harness = false

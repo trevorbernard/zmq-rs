@@ -245,3 +245,45 @@ libraries' runs spread too widely to compare. Our throughput is level
   both (ours 43.8–79.1 µs, libzmq 42.5–64.7 µs). The machine was idle
   before the run but ran the `schedutil` governor; rerun with the
   `performance` governor before acting on a difference there.
+
+## Publisher fan-out
+
+`Publisher::send` alone, with criterion, for routing changes:
+
+```sh
+cargo bench -p zmq-core --bench fanout                      # everything, about 2 minutes
+cargo bench -p zmq-core --bench fanout -- long_topics       # one group
+cargo bench -p zmq-core --bench fanout -- --save-baseline a # compare later with --baseline a
+```
+
+Peers are inproc SUB connections, each with one subscription; their
+queues are drained outside the timed sends.
+
+| Group | Peers | Topics | Message matches |
+|---|---|---|---|
+| `one_match_among_many/N` | N | distinct, 10 octets | one peer |
+| `long_topics/L` | 100 | L octets, differing in the last two | one peer |
+| `all_match/N` | N | empty | every peer |
+
+### Results: shared topic index (`e091061`)
+
+Median per send on the Intel Xeon E5-1650 v4 (`schedutil` governor),
+against matching each peer's own topics (`0efa9cc`):
+
+| Case | Per-peer | Shared index | Change |
+|---|---|---|---|
+| `one_match_among_many/1` | 446 ns | 433 ns | −3% |
+| `one_match_among_many/10` | 3.93 µs | 1.25 µs | −68% |
+| `one_match_among_many/100` | 39.0 µs | 8.94 µs | −77% |
+| `one_match_among_many/1000` | 426 µs | 106 µs | −75% |
+| `long_topics/16` | 55.8 µs | 9.19 µs | −84% |
+| `long_topics/256` | 721 µs | 15.0 µs | −98% |
+| `long_topics/4096` | 11.4 ms | 108 µs | −99% |
+| `all_match/1` | 164 ns | 206 ns | +26% |
+| `all_match/10` | 1.48 µs | 1.54 µs | +4% |
+| `all_match/100` | 17.3 µs | 15.9 µs | −8% |
+
+- **The index wins once peers or topic lengths grow:** each peer costs
+  one set lookup rather than a hash per octet of the message.
+- **It loses about 40 ns with one peer subscribed to everything,**
+  the cost of collecting the matched set.
