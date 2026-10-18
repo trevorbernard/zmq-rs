@@ -12,7 +12,7 @@ use std::fmt;
 use std::future::poll_fn;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{self, AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
@@ -104,8 +104,18 @@ struct Shared {
     reader_closed: AtomicBool,
     /// Set by the writer before it goes away.
     writer_closed: AtomicBool,
-    reader_waker: CachePadded<AtomicWaker>,
+    reader: CachePadded<ReaderWait>,
     writer_waker: CachePadded<AtomicWaker>,
+}
+
+/// How a waiting reader is woken. One line: the writer reads `waiting` on
+/// every send, and touches `waker` only when that is set.
+#[derive(Debug, Default)]
+struct ReaderWait {
+    /// Raised by a reader about to wait, so the writer wakes it only then,
+    /// as libzmq's ypipe signals only a reader that found it empty.
+    waiting: AtomicBool,
+    waker: AtomicWaker,
 }
 
 /// Aligns `T` to its own cache line. 128 octets covers Apple silicon's line
@@ -184,7 +194,14 @@ impl<T> Writer<T> {
             None => return Err(TrySendError::Closed(item)),
         }
         self.written += 1;
-        self.shared.reader_waker.wake();
+        // Pairs with the fence in `Reader::poll_recv`: either the reader's
+        // last check sees this item, or this load sees its flag.
+        atomic::fence(Ordering::SeqCst);
+        if self.shared.reader.waiting.load(Ordering::Relaxed)
+            && self.shared.reader.waiting.swap(false, Ordering::Acquire)
+        {
+            self.shared.reader.waker.wake();
+        }
         Ok(())
     }
 
@@ -283,7 +300,7 @@ impl<T> Drop for Writer<T> {
         // Disconnect first, so a reader woken here sees the pipe closed.
         drop(self.sender.take());
         self.shared.writer_closed.store(true, Ordering::Release);
-        self.shared.reader_waker.wake();
+        self.shared.reader.waker.wake();
     }
 }
 
@@ -321,8 +338,11 @@ impl<T> Reader<T> {
         if let Poll::Ready(item) = self.ready() {
             return Poll::Ready(item);
         }
-        // Register, then check again so a send in between is not missed.
-        self.shared.reader_waker.register(cx.waker());
+        // Register and raise the flag, then check again so a send in
+        // between is not missed.
+        self.shared.reader.waker.register(cx.waker());
+        self.shared.reader.waiting.store(true, Ordering::Release);
+        atomic::fence(Ordering::SeqCst);
         self.ready()
     }
 
@@ -337,7 +357,7 @@ impl<T> Reader<T> {
             return Poll::Ready(());
         }
         // Register, then check again so a drop in between is not missed.
-        self.shared.reader_waker.register(cx.waker());
+        self.shared.reader.waker.register(cx.waker());
         if self.is_closed() {
             Poll::Ready(())
         } else {
@@ -705,7 +725,7 @@ mod tests {
         let shared = Shared::default();
         let lines = [
             std::ptr::from_ref(&shared.read).addr() / LINE,
-            std::ptr::from_ref(&shared.reader_waker).addr() / LINE,
+            std::ptr::from_ref(&shared.reader).addr() / LINE,
             std::ptr::from_ref(&shared.writer_waker).addr() / LINE,
         ];
         assert!(
