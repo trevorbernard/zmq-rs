@@ -2,6 +2,7 @@
 //! against naive models over generated traffic from several peers.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::task::Waker;
 
 use proptest::prelude::*;
 

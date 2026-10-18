@@ -7,8 +7,9 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, btree_map};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
-use std::task::{Context as TaskContext, Poll, Waker};
+use std::task::{Context as TaskContext, Poll};
 
+use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
@@ -84,6 +85,31 @@ struct PrefixMap<V> {
 
 /// The topics sharing a hash, with their values.
 type Bucket<V> = Vec<(Box<[u8]>, V)>;
+
+/// Maps and sets keyed by peer. We assign peer keys from a counter, so no
+/// peer can choose one, and they need no protection from flooding.
+type PeerMap<V> = HashMap<PeerKey, V, BuildHasherDefault<PeerKeyHasher>>;
+type PeerSet = HashSet<PeerKey, BuildHasherDefault<PeerKeyHasher>>;
+
+/// Spreads a peer key's bits with one multiplication (Fibonacci hashing).
+#[derive(Debug, Clone, Copy, Default)]
+struct PeerKeyHasher(u64);
+
+impl Hasher for PeerKeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &octet in bytes {
+            self.write_u64(self.0.rotate_left(8) ^ u64::from(octet));
+        }
+    }
+
+    fn write_u64(&mut self, key: u64) {
+        self.0 = key.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
 
 /// Hashes `buckets`' keys, which are already keyed hashes, as themselves.
 #[derive(Debug, Clone, Copy, Default)]
@@ -231,12 +257,12 @@ pub enum Verbosity {
 /// that match.
 #[derive(Debug, Default)]
 pub struct Publisher {
-    subscribers: HashMap<PeerKey, PeerTopics>,
+    subscribers: PeerMap<PeerTopics>,
     /// The peers subscribed to each topic, so that one pass over a message
     /// finds every peer it matches, however many there are.
     index: PeerIndex,
     /// The peers the message being sent matches, kept for its capacity.
-    matched: HashSet<PeerKey>,
+    matched: PeerSet,
     /// What XPUB has yet to receive, and from which peer. `None` for PUB,
     /// which discards it.
     events: Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
@@ -306,7 +332,7 @@ impl Publisher {
         peers: &mut PeerList,
         cx: &mut TaskContext<'_>,
     ) -> Poll<(Option<PeerKey>, XPubEvent)> {
-        self.drain(peers, cx);
+        self.drain(peers, Some(cx));
         match self.events.as_mut().and_then(VecDeque::pop_front) {
             Some(request) => Poll::Ready(request),
             None => Poll::Pending,
@@ -348,11 +374,13 @@ impl Publisher {
     /// Applies the subscriptions peers have sent, and forgets peers that
     /// are gone.
     pub fn sync(&mut self, peers: &mut PeerList) {
-        self.drain(peers, &mut TaskContext::from_waker(Waker::noop()));
+        self.drain(peers, None);
     }
 
-    /// Reads everything peers have sent, registering `cx` with each.
-    fn drain(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) {
+    /// Reads everything peers have sent, registering `cx`, if given, with
+    /// each. Without one, nothing is registered, so a waker registered
+    /// earlier stays in place.
+    fn drain(&mut self, peers: &mut PeerList, mut cx: Option<&mut TaskContext<'_>>) {
         let Self {
             subscribers,
             index,
@@ -382,7 +410,15 @@ impl Publisher {
                 }
             }
             loop {
-                match peer.connection.rx.poll_recv(cx) {
+                let next = match cx.as_deref_mut() {
+                    Some(cx) => peer.connection.rx.poll_recv(cx),
+                    None => match peer.connection.rx.try_recv() {
+                        Ok(message) => Poll::Ready(Some(message)),
+                        Err(TryRecvError::Empty) => Poll::Pending,
+                        Err(TryRecvError::Closed) => Poll::Ready(None),
+                    },
+                };
+                match next {
                     Poll::Ready(Some(message)) => match Subscription::from_message(&message) {
                         Some(Subscription::Subscribe(topic)) => changes.subscribe(entry, topic),
                         Some(Subscription::Cancel(topic)) => changes.cancel(entry, topic),
@@ -424,7 +460,7 @@ impl Publisher {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<usize> {
-        self.drain(peers, cx);
+        self.drain(peers, Some(cx));
         let Some(message) = slot.take() else {
             return Poll::Ready(0);
         };
@@ -467,7 +503,7 @@ impl Publisher {
     }
 }
 
-type PeerIndex = PrefixMap<HashSet<PeerKey>>;
+type PeerIndex = PrefixMap<PeerSet>;
 
 /// Adds `key` to the peers subscribed to `topic`. Returns whether it is
 /// the first.
@@ -478,7 +514,7 @@ fn join(index: &mut PeerIndex, topic: &[u8], key: PeerKey) -> bool {
             false
         }
         None => {
-            index.insert(topic, HashSet::from([key]));
+            index.insert(topic, PeerSet::from_iter([key]));
             true
         }
     }
@@ -686,6 +722,7 @@ mod tests {
     use super::*;
     use crate::test_support::*;
     use std::sync::atomic::Ordering;
+    use std::task::Waker;
 
     fn subscribe(topic: &'static str) -> Message {
         Subscription::Subscribe(Frame::from(topic)).to_message()
