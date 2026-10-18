@@ -476,6 +476,7 @@ name = "zmq-pipe"
 version = "0.1.0-dev"
 dependencies = [
  "atomic-waker",
+ "proptest",
 ]
 
 [[package]]
