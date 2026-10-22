@@ -337,6 +337,82 @@ heartbeats run over a `Stream` that is either kind. Unix only.
   tests use `std::env::temp_dir()`, so check that their paths fit within
   Linux's 108-octet `sun_path`.
 
+## Compared with libzmq
+
+The runtime shape is the same: sockets in user threads, one session and
+engine per peer on an I/O thread, two SPSC pipes between them. What
+differs is what a pipe carries, how a sleeping thread is woken, and how
+things are torn down. Solid arrows below carry messages; dashed arrows
+carry wakeups. Shaded steps happen only when the other side was asleep.
+
+![Threads and wakeup paths in libzmq and zmq-rs](diagrams/threads.svg)
+
+libzmq wakes a thread by posting a `command_t` into its `mailbox_t`, whose
+signaler fd the poller (or `ZMQ_FD`) watches. Here a wakeup is a
+`std::task::Waker`: `TokenWaker` queues a session id and wakes `mio`, and
+a socket is unparked or its task woken. Sockets have no mailbox.
+
+### Sending
+
+libzmq writes each frame into the pipe separately and flushes on the last,
+so the pipe provides multipart atomicity. Here a whole `Message` is one
+pipe item, so the type provides it. `lb_t._more`, `fq_t._more`,
+router's `current_out` and `pipe_t::rollback` have no counterpart, and a
+peer leaving mid-message cannot leave half a message behind. The cost is
+that a multipart message is built in full before it is sent.
+
+![libzmq send path](diagrams/send-libzmq.svg)
+
+![zmq-rs send path](diagrams/send-zmq-rs.svg)
+
+### Receiving
+
+![libzmq receive path](diagrams/recv-libzmq.svg)
+
+![zmq-rs receive path](diagrams/recv-zmq-rs.svg)
+
+Step 10 is the edge-triggered case from [Event flow](#event-flow): a
+stalled engine is resumed by the pipe's writer waker, not by the stream.
+
+### High-water marks
+
+Both wake a blocked writer at the low-water mark, half the HWM. libzmq's
+reader reports progress with an `activate_write` command, which the writer
+sees only once its thread runs `process_commands`; that is why
+`socket_base_t::send` calls it first. Here the reader stores its count in
+a shared atomic and wakes the writer's waker.
+
+![libzmq HWM feedback](diagrams/hwm-libzmq.svg)
+
+![zmq-rs HWM feedback](diagrams/hwm-zmq-rs.svg)
+
+### Routing
+
+![ROUTER send outcomes](diagrams/router.svg)
+
+![PUB fan-out](diagrams/pub.svg)
+
+![Load balancing and fair queuing](diagrams/lb-fq.svg)
+
+### Summary
+
+| Concern | libzmq | zmq-rs |
+|---|---|---|
+| Pipe item | `msg_t` per frame, `MORE` flag, flush on last | Whole `Message` |
+| Pipe | `ypipe_t` over chunked `yqueue_t`; CAS marks a sleeping reader | `mpsc` plus a `waiting` flag and `AtomicWaker` |
+| Wakeups | `command_t` into a `mailbox_t`, signaler fd | `Waker`: `TokenWaker`, thread unpark, task waker |
+| HWM feedback | `activate_write` command every LWM messages | Shared atomic read count, waker at LWM |
+| Blocking | Poll the mailbox fd in `process_commands` | One `poll_*` path for `try_`, blocking and `async` |
+| Frames | 64-octet `msg_t`, ≤33 octets inline, else refcounted | `Frame`: inline when small, else `Bytes` |
+| Socket API | One `socket_base_t`; bad options are `EINVAL` | `Socket<T>`; bad operations and options do not compile |
+| Protocol | Engine owns mechanism, encoder, decoder | `zmtp`: sans-IO state machines |
+| Event loop | Own poller over epoll, kqueue, poll, select | `mio`, edge-triggered |
+| Teardown | `own_t` tree, `term`/`term_ack`, reaper thread; `zmq_ctx_term` blocks | `Arc`, `Drop`, closed flags; dropping `Context` never blocks |
+| Reconnect | `tcp_connecter_t` child of the session | `Session` with `Origin::Connect` and `Reconnect` |
+| ROUTER, unknown id | Dropped unless `ZMQ_ROUTER_MANDATORY` | Always handed back |
+| PUB matching | `mtrie_t` plus `dist_t` array partitions | `PrefixMap` keyed rolling hash plus `PeerIndex` |
+| Output batching | Encoder fills 8 KiB (`out_batch_size`) | Takes messages while under 64 KiB unsent |
+
 ## Status
 
 | Slice | Contents | State |

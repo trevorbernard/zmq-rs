@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="290" viewBox="0 0 1000 290" role="img" aria-label="zmq-rs HWM: the reader publishes progress in a shared atomic counter and wakes the writer&#x27;s waker at the low-water mark." font-family="IBM Plex Sans, system-ui, sans-serif"><rect width="100%" height="100%" fill="#ffffff"/><style>text{fill:#1b2230}
+text { fill: #1b2230; }
+.muted, .num { fill: #5a6476; }
+.lbl { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
+.t-cpp { fill: #0f7c86; } .t-rs { fill: #b4501c; }
+.on-accent { fill: #ffffff; }
+.fill-fg { fill: #1b2230; } .fill-cpp { fill: #0f7c86; } .fill-rs { fill: #b4501c; }
+.ln-fg { stroke: #1b2230; stroke-width: 1.4; fill: none; }
+.ln-cpp { stroke: #0f7c86; stroke-width: 1.6; } .ln-rs { stroke: #b4501c; stroke-width: 1.6; }
+.dash { stroke-dasharray: 5 4; }
+.life { stroke: #d9dee6; stroke-width: 1.2; stroke-dasharray: 3 4; }
+.head-cpp { fill: #e3f3f4; stroke: #0f7c86; }
+.head-rs { fill: #fbece4; stroke: #b4501c; }
+.grp-cpp { fill: #e3f3f4; fill-opacity: .45; stroke: #0f7c86; stroke-dasharray: 4 3; }
+.grp-rs { fill: #fbece4; fill-opacity: .45; stroke: #b4501c; stroke-dasharray: 4 3; }
+.box { fill: #ffffff; stroke: #1b2230; }
+.diamond { fill: #ffffff; stroke: #1b2230; stroke-width: 2; }
+.good { fill: #e5f3ea; stroke: #2f7d4a; }
+.bad { fill: #f8e4e5; stroke: #b0303a; }</style>
+<defs>
+<marker id="hr-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-fg"/></marker>
+<marker id="hr-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-rs"/></marker>
+</defs>
+<line x1="180" y1="56" x2="180" y2="286" class="life"/>
+<line x1="500" y1="56" x2="500" y2="286" class="life"/>
+<line x1="820" y1="56" x2="820" y2="286" class="life"/>
+<rect x="148" y="16" width="65" height="40" rx="4" class="head-rs"/>
+<text x="180" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Socket</text>
+<text x="180" y="48" text-anchor="middle" font-size="10" class="muted">Writer</text>
+<rect x="434" y="16" width="132" height="40" rx="4" class="head-rs"/>
+<text x="500" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Shared</text>
+<text x="500" y="48" text-anchor="middle" font-size="10" class="muted">cache-padded atomics</text>
+<rect x="784" y="16" width="72" height="40" rx="4" class="head-rs"/>
+<text x="820" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Session</text>
+<text x="820" y="48" text-anchor="middle" font-size="10" class="muted">Reader</text>
+<line x1="183" y1="82" x2="497" y2="82" class="ln-fg" marker-end="url(#hr-a)"/>
+<text x="190" y="76" text-anchor="start" font-size="12" class="lbl">load read: written − read == hwm → Full</text>
+<text x="170" y="86" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">1</text>
+<line x1="183" y1="116" x2="497" y2="116" class="ln-fg" marker-end="url(#hr-a)"/>
+<text x="190" y="110" text-anchor="start" font-size="12" class="lbl">register writer_waker, park</text>
+<text x="170" y="120" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">2</text>
+<line x1="817" y1="150" x2="503" y2="150" class="ln-fg" marker-end="url(#hr-a)"/>
+<text x="510" y="144" text-anchor="start" font-size="12" class="lbl">read.store(n) per message</text>
+<text x="830" y="154" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">3</text>
+<line x1="817" y1="184" x2="503" y2="184" class="ln-rs dash" marker-end="url(#hr-w)"/>
+<text x="510" y="178" text-anchor="start" font-size="12" class="lbl t-rs">crossed lwm → writer_waker.wake()</text>
+<text x="830" y="188" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">4</text>
+<line x1="497" y1="218" x2="183" y2="218" class="ln-rs dash" marker-end="url(#hr-w)"/>
+<text x="190" y="212" text-anchor="start" font-size="12" class="lbl t-rs">unpark / wake task</text>
+<text x="510" y="222" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">5</text>
+<line x1="183" y1="252" x2="497" y2="252" class="ln-fg" marker-end="url(#hr-a)"/>
+<text x="190" y="246" text-anchor="start" font-size="12" class="lbl">reload read, try_send succeeds</text>
+<text x="170" y="256" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">6</text>
+</svg>

@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="468" viewBox="0 0 1000 468" role="img" aria-label="libzmq receive: decoder produces frames, session pushes them into the pipe, an activate_read command wakes the socket, the app reads frame by frame." font-family="IBM Plex Sans, system-ui, sans-serif"><rect width="100%" height="100%" fill="#ffffff"/><style>text{fill:#1b2230}
+text { fill: #1b2230; }
+.muted, .num { fill: #5a6476; }
+.lbl { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
+.t-cpp { fill: #0f7c86; } .t-rs { fill: #b4501c; }
+.on-accent { fill: #ffffff; }
+.fill-fg { fill: #1b2230; } .fill-cpp { fill: #0f7c86; } .fill-rs { fill: #b4501c; }
+.ln-fg { stroke: #1b2230; stroke-width: 1.4; fill: none; }
+.ln-cpp { stroke: #0f7c86; stroke-width: 1.6; } .ln-rs { stroke: #b4501c; stroke-width: 1.6; }
+.dash { stroke-dasharray: 5 4; }
+.life { stroke: #d9dee6; stroke-width: 1.2; stroke-dasharray: 3 4; }
+.head-cpp { fill: #e3f3f4; stroke: #0f7c86; }
+.head-rs { fill: #fbece4; stroke: #b4501c; }
+.grp-cpp { fill: #e3f3f4; fill-opacity: .45; stroke: #0f7c86; stroke-dasharray: 4 3; }
+.grp-rs { fill: #fbece4; fill-opacity: .45; stroke: #b4501c; stroke-dasharray: 4 3; }
+.box { fill: #ffffff; stroke: #1b2230; }
+.diamond { fill: #ffffff; stroke: #1b2230; stroke-width: 2; }
+.good { fill: #e5f3ea; stroke: #2f7d4a; }
+.bad { fill: #f8e4e5; stroke: #b0303a; }</style>
+<defs>
+<marker id="rc-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-fg"/></marker>
+<marker id="rc-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-cpp"/></marker>
+</defs>
+<line x1="89" y1="56" x2="89" y2="464" class="life"/>
+<line x1="226" y1="56" x2="226" y2="464" class="life"/>
+<line x1="363" y1="56" x2="363" y2="464" class="life"/>
+<line x1="500" y1="56" x2="500" y2="464" class="life"/>
+<line x1="637" y1="56" x2="637" y2="464" class="life"/>
+<line x1="774" y1="56" x2="774" y2="464" class="life"/>
+<line x1="911" y1="56" x2="911" y2="464" class="life"/>
+<rect x="14" y="246" width="972" height="64" rx="5" class="grp-cpp"/>
+<rect x="14" y="246" width="250" height="18" rx="5" class="fill-cpp"/>
+<text x="22" y="259" text-anchor="start" font-size="11" font-weight="500" class="on-accent">only if the socket&#x27;s reader was asleep</text>
+<rect x="56" y="16" width="65" height="40" rx="4" class="head-cpp"/>
+<text x="89" y="41" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">TCP fd</text>
+<rect x="188" y="16" width="76" height="40" rx="4" class="head-cpp"/>
+<text x="226" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">poller</text>
+<text x="226" y="48" text-anchor="middle" font-size="10" class="muted">I/O thread</text>
+<rect x="312" y="16" width="102" height="40" rx="4" class="head-cpp"/>
+<text x="363" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">zmtp_engine</text>
+<text x="363" y="48" text-anchor="middle" font-size="10" class="muted">v2 decoder</text>
+<rect x="438" y="16" width="124" height="40" rx="4" class="head-cpp"/>
+<text x="500" y="41" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">session_base_t</text>
+<rect x="605" y="16" width="65" height="40" rx="4" class="head-cpp"/>
+<text x="637" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">pipe_t</text>
+<text x="637" y="48" text-anchor="middle" font-size="10" class="muted">ypipe</text>
+<rect x="716" y="16" width="117" height="40" rx="4" class="head-cpp"/>
+<text x="774" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">socket_base_t</text>
+<text x="774" y="48" text-anchor="middle" font-size="10" class="muted">fq_t</text>
+<rect x="876" y="16" width="70" height="40" rx="4" class="head-cpp"/>
+<text x="911" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">app</text>
+<text x="911" y="48" text-anchor="middle" font-size="10" class="muted">user code</text>
+<line x1="92" y1="82" x2="223" y2="82" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="99" y="76" text-anchor="start" font-size="12" class="lbl">readable</text>
+<text x="79" y="86" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">1</text>
+<line x1="229" y1="116" x2="360" y2="116" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="236" y="110" text-anchor="start" font-size="12" class="lbl">in_event</text>
+<text x="216" y="120" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">2</text>
+<path d="M366,141 h18 v12 h-15" class="ln-fg" fill="none" marker-end="url(#rc-a)"/>
+<text x="391" y="150" text-anchor="start" font-size="12" class="lbl">decode one msg_t per frame</text>
+<text x="353" y="151" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">3</text>
+<line x1="366" y1="184" x2="497" y2="184" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="373" y="178" text-anchor="start" font-size="12" class="lbl">push_msg(frame)</text>
+<text x="353" y="188" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">4</text>
+<line x1="503" y1="218" x2="634" y2="218" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="510" y="212" text-anchor="start" font-size="12" class="lbl">write, flush on last frame</text>
+<text x="490" y="222" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">5</text>
+<line x1="640" y1="284" x2="771" y2="284" class="ln-cpp dash" marker-end="url(#rc-w)"/>
+<text x="647" y="278" text-anchor="start" font-size="12" class="lbl t-cpp">activate_read → socket mailbox (ZMQ_FD readable)</text>
+<text x="627" y="288" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">6</text>
+<line x1="908" y1="328" x2="777" y2="328" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="784" y="322" text-anchor="start" font-size="12" class="lbl">zmq_msg_recv</text>
+<text x="921" y="332" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">7</text>
+<path d="M777,353 h18 v12 h-15" class="ln-fg" fill="none" marker-end="url(#rc-a)"/>
+<text x="764" y="362" text-anchor="end" font-size="12" class="lbl">process_commands: fq_t activates pipe</text>
+<text x="802" y="363" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">8</text>
+<line x1="771" y1="396" x2="640" y2="396" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="647" y="390" text-anchor="start" font-size="12" class="lbl">read one frame</text>
+<text x="784" y="400" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">9</text>
+<line x1="777" y1="430" x2="908" y2="430" class="ln-fg" marker-end="url(#rc-a)"/>
+<text x="784" y="424" text-anchor="start" font-size="12" class="lbl">frame 1 + RCVMORE, app loops</text>
+<text x="764" y="434" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">10</text>
+</svg>

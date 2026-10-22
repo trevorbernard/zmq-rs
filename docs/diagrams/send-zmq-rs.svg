@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="434" viewBox="0 0 1000 434" role="img" aria-label="zmq-rs send: the whole message goes into the pipe in one try_send; the TokenWaker queues the session id and wakes mio only if the reader was waiting." font-family="IBM Plex Sans, system-ui, sans-serif"><rect width="100%" height="100%" fill="#ffffff"/><style>text{fill:#1b2230}
+text { fill: #1b2230; }
+.muted, .num { fill: #5a6476; }
+.lbl { paint-order: stroke; stroke: #ffffff; stroke-width: 4px; stroke-linejoin: round; }
+.t-cpp { fill: #0f7c86; } .t-rs { fill: #b4501c; }
+.on-accent { fill: #ffffff; }
+.fill-fg { fill: #1b2230; } .fill-cpp { fill: #0f7c86; } .fill-rs { fill: #b4501c; }
+.ln-fg { stroke: #1b2230; stroke-width: 1.4; fill: none; }
+.ln-cpp { stroke: #0f7c86; stroke-width: 1.6; } .ln-rs { stroke: #b4501c; stroke-width: 1.6; }
+.dash { stroke-dasharray: 5 4; }
+.life { stroke: #d9dee6; stroke-width: 1.2; stroke-dasharray: 3 4; }
+.head-cpp { fill: #e3f3f4; stroke: #0f7c86; }
+.head-rs { fill: #fbece4; stroke: #b4501c; }
+.grp-cpp { fill: #e3f3f4; fill-opacity: .45; stroke: #0f7c86; stroke-dasharray: 4 3; }
+.grp-rs { fill: #fbece4; fill-opacity: .45; stroke: #b4501c; stroke-dasharray: 4 3; }
+.box { fill: #ffffff; stroke: #1b2230; }
+.diamond { fill: #ffffff; stroke: #1b2230; stroke-width: 2; }
+.good { fill: #e5f3ea; stroke: #2f7d4a; }
+.bad { fill: #f8e4e5; stroke: #b0303a; }</style>
+<defs>
+<marker id="sr-a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-fg"/></marker>
+<marker id="sr-w" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="fill-rs"/></marker>
+</defs>
+<line x1="89" y1="56" x2="89" y2="430" class="life"/>
+<line x1="226" y1="56" x2="226" y2="430" class="life"/>
+<line x1="363" y1="56" x2="363" y2="430" class="life"/>
+<line x1="500" y1="56" x2="500" y2="430" class="life"/>
+<line x1="637" y1="56" x2="637" y2="430" class="life"/>
+<line x1="774" y1="56" x2="774" y2="430" class="life"/>
+<line x1="911" y1="56" x2="911" y2="430" class="life"/>
+<rect x="14" y="212" width="972" height="98" rx="5" class="grp-rs"/>
+<rect x="14" y="212" width="318" height="18" rx="5" class="fill-rs"/>
+<text x="22" y="225" text-anchor="start" font-size="11" font-weight="500" class="on-accent">only if the session&#x27;s Reader set its waiting flag</text>
+<rect x="53" y="16" width="70" height="40" rx="4" class="head-rs"/>
+<text x="89" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">app</text>
+<text x="89" y="48" text-anchor="middle" font-size="10" class="muted">user code</text>
+<rect x="171" y="16" width="109" height="40" rx="4" class="head-rs"/>
+<text x="226" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Socket&lt;Push&gt;</text>
+<text x="226" y="48" text-anchor="middle" font-size="10" class="muted">zmq crate</text>
+<rect x="308" y="16" width="109" height="40" rx="4" class="head-rs"/>
+<text x="363" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">LoadBalancer</text>
+<text x="363" y="48" text-anchor="middle" font-size="10" class="muted">socket.rs</text>
+<rect x="468" y="16" width="65" height="40" rx="4" class="head-rs"/>
+<text x="500" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Writer</text>
+<text x="500" y="48" text-anchor="middle" font-size="10" class="muted">zmq-pipe</text>
+<rect x="590" y="16" width="94" height="40" rx="4" class="head-rs"/>
+<text x="637" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">TokenWaker</text>
+<text x="637" y="48" text-anchor="middle" font-size="10" class="muted">io_thread.rs</text>
+<rect x="731" y="16" width="87" height="40" rx="4" class="head-rs"/>
+<text x="774" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">EventLoop</text>
+<text x="774" y="48" text-anchor="middle" font-size="10" class="muted">I/O thread</text>
+<rect x="875" y="16" width="72" height="40" rx="4" class="head-rs"/>
+<text x="911" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">Session</text>
+<text x="911" y="48" text-anchor="middle" font-size="10" class="muted">+ Engine</text>
+<line x1="92" y1="82" x2="223" y2="82" class="ln-fg" marker-end="url(#sr-a)"/>
+<text x="99" y="76" text-anchor="start" font-size="12" class="lbl">send(Message [f1, f2])</text>
+<text x="79" y="86" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">1</text>
+<path d="M229,107 h18 v12 h-15" class="ln-fg" fill="none" marker-end="url(#sr-a)"/>
+<text x="254" y="116" text-anchor="start" font-size="12" class="lbl">Peers::accept(): take in new connections</text>
+<text x="216" y="117" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">2</text>
+<line x1="229" y1="150" x2="360" y2="150" class="ln-fg" marker-end="url(#sr-a)"/>
+<text x="236" y="144" text-anchor="start" font-size="12" class="lbl">poll_send(peers, msg, cx)</text>
+<text x="216" y="154" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">3</text>
+<line x1="366" y1="184" x2="497" y2="184" class="ln-fg" marker-end="url(#sr-a)"/>
+<text x="373" y="178" text-anchor="start" font-size="12" class="lbl">poll_ready, try_send(msg)</text>
+<text x="353" y="188" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">4</text>
+<line x1="503" y1="250" x2="634" y2="250" class="ln-rs dash" marker-end="url(#sr-w)"/>
+<text x="510" y="244" text-anchor="start" font-size="12" class="lbl t-rs">AtomicWaker::wake</text>
+<text x="490" y="254" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">5</text>
+<line x1="640" y1="284" x2="771" y2="284" class="ln-rs dash" marker-end="url(#sr-w)"/>
+<text x="647" y="278" text-anchor="start" font-size="12" class="lbl t-rs">ready.send(id), mio::Waker::wake</text>
+<text x="627" y="288" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">6</text>
+<line x1="777" y1="328" x2="908" y2="328" class="ln-fg" marker-end="url(#sr-a)"/>
+<text x="784" y="322" text-anchor="start" font-size="12" class="lbl">drive_session(id)</text>
+<text x="764" y="332" text-anchor="end" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">7</text>
+<path d="M914,353 h18 v12 h-15" class="ln-fg" fill="none" marker-end="url(#sr-a)"/>
+<text x="901" y="362" text-anchor="end" font-size="12" class="lbl">take msgs while &lt; 64 KiB unsent</text>
+<text x="939" y="363" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">8</text>
+<path d="M914,387 h18 v12 h-15" class="ln-fg" fill="none" marker-end="url(#sr-a)"/>
+<text x="901" y="396" text-anchor="end" font-size="12" class="lbl">encode, write until WouldBlock</text>
+<text x="939" y="397" text-anchor="start" font-size="10" font-family="IBM Plex Mono, ui-monospace, monospace" class="num">9</text>
+</svg>
