@@ -78,6 +78,7 @@ pub struct Iter<'a> {
 impl<'a> Iterator for Iter<'a> {
     type Item = &'a Frame;
 
+    #[inline]
     fn next(&mut self) -> Option<&'a Frame> {
         self.first.take().or_else(|| self.rest.next())
     }

@@ -350,6 +350,7 @@ pub const MAX_FRAME_HEADER: usize = 9;
 /// Writes the ZMTP 2.0/3.x header of a message frame with a body of `len`
 /// octets into `out` and returns its length: the octets
 /// [`Encoder::encode`] writes before that body.
+#[inline]
 pub fn frame_header(len: u64, more: bool, out: &mut [u8; MAX_FRAME_HEADER]) -> usize {
     let flags = if more { MORE } else { 0 };
     match u8::try_from(len) {

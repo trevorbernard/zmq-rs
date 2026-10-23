@@ -31,9 +31,11 @@ const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 /// libzmq's default ZMQ_SNDHWM and ZMQ_RCVHWM.
 const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
-/// The octets of a PUSH connection's send log: room for several 64 KiB
-/// messages, as libzmq's socket buffers would hold.
-const DEFAULT_SEND_LOG: NonZeroUsize = NonZeroUsize::new(256 * 1024).unwrap();
+/// The octets of a PUSH connection's send log: about a full HWM of 4 KiB
+/// messages, so the sender rarely waits on octets before messages. At
+/// 256 KiB, 64 KiB messages waited on each other and ran 10% slower than
+/// through a pipe.
+const DEFAULT_SEND_LOG: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
 
 /// Owns the I/O threads. Cloning shares them; they stop when the last clone
 /// is dropped, closing every connection on them.
@@ -421,7 +423,7 @@ fn reported<T>(result: io::Result<T>, config: &ConnectionConfig, endpoint: &str)
 
 impl ConnectionConfig {
     /// libzmq's defaults: empty identity, HWM 1000 each way, no frame limit.
-    /// PUSH also sends through a 256 KiB log.
+    /// PUSH also sends through a 4 MiB log.
     pub fn new(socket_type: SocketType) -> Self {
         let hwm = Hwm::Messages(DEFAULT_HWM);
         Self {

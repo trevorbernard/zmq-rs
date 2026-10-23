@@ -16,6 +16,9 @@ use zmtp::{Decoder, DecoderConfig, Identity, Incoming, SocketType, Version};
 
 const FIVE: Duration = Duration::from_secs(5);
 
+/// More than PUSH's send log holds.
+const LARGER_THAN_THE_LOG: usize = 5 * 1024 * 1024;
+
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
 fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> T {
@@ -42,9 +45,9 @@ fn messages_larger_than_the_log_arrive_whole_and_in_order() {
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
     let sent = [
-        large(1024 * 1024),
+        large(LARGER_THAN_THE_LOG),
         Message::from("small"),
-        large(3 * 1024 * 1024 + 7),
+        large(2 * LARGER_THAN_THE_LOG + 7),
         Message::from("last"),
     ];
     let expected = sent.clone();
@@ -68,7 +71,7 @@ fn try_send_hands_back_a_message_larger_than_the_log() {
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
-    let big = large(1024 * 1024);
+    let big = large(LARGER_THAN_THE_LOG);
     assert_eq!(push.try_send(big.clone()), Err(big));
     push.send("fits");
     assert_eq!(within(FIVE, move || pull.recv()), Message::from("fits"));

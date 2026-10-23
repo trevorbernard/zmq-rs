@@ -45,6 +45,7 @@ impl Frame {
     }
 
     /// The payload.
+    #[inline]
     pub fn as_slice(&self) -> &[u8] {
         match &self.0 {
             Repr::Inline { len, buf } => &buf[..usize::from(*len)],
@@ -74,6 +75,7 @@ impl Default for Frame {
 impl Deref for Frame {
     type Target = [u8];
 
+    #[inline]
     fn deref(&self) -> &[u8] {
         self.as_slice()
     }

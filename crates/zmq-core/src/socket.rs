@@ -317,7 +317,19 @@ impl LoadBalancer {
             let index = (self.next + offset) % count;
             let peer = &mut peers.peers[index];
             let tx = &mut peer.connection.tx;
-            // Closed peers are skipped; full ones register `cx`.
+            // Try first; only a full peer registers `cx`, then is tried once
+            // more in case room appeared in between. Closed peers are skipped.
+            match tx.try_send(message) {
+                Ok(()) => {
+                    self.next = (index + 1) % count;
+                    return Ok(peer.key);
+                }
+                Err(TrySendError::Closed(back)) => {
+                    message = back;
+                    continue;
+                }
+                Err(TrySendError::Full(back)) => message = back,
+            }
             if let Poll::Ready(Ok(())) = tx.poll_ready_for(cx, &message) {
                 match tx.try_send(message) {
                     Ok(()) => {

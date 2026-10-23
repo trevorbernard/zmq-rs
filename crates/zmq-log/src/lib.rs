@@ -161,12 +161,14 @@ pub struct LogWriter {
 
 impl LogWriter {
     /// The log's size in octets.
+    #[inline]
     pub fn capacity(&self) -> usize {
         self.capacity as usize
     }
 
     /// Octets that can be put now, reloading the reader's progress only when
     /// the cached view has less than `want` free.
+    #[inline]
     fn free_for(&mut self, want: u64) -> u64 {
         let free = self.capacity - (self.tail - self.released);
         if free >= want {
@@ -177,11 +179,13 @@ impl LogWriter {
     }
 
     /// Octets that can be put now.
+    #[inline]
     pub fn free(&mut self) -> usize {
         self.free_for(u64::MAX) as usize
     }
 
     /// Whether another message is allowed under the high-water mark.
+    #[inline]
     fn under_hwm(&mut self) -> bool {
         let Some(hwm) = self.hwm else {
             return true;
@@ -195,6 +199,7 @@ impl LogWriter {
 
     /// Whether `octets` fit now (all of the log, if more than that) and
     /// another message is allowed.
+    #[inline]
     pub fn has_room(&mut self, octets: usize) -> bool {
         let want = (octets as u64).min(self.capacity);
         self.free_for(want) >= want && self.under_hwm()
@@ -255,6 +260,7 @@ impl LogWriter {
     /// # Panics
     ///
     /// If `data` is longer than [`free`](Self::free).
+    #[inline]
     pub fn put(&mut self, data: &[u8]) {
         let len = data.len() as u64;
         assert!(
@@ -271,18 +277,22 @@ impl LogWriter {
         // and `[0, len - first)`, both inside the buffer.
         unsafe {
             std::ptr::copy_nonoverlapping(data.as_ptr(), base.add(start), first);
-            std::ptr::copy_nonoverlapping(data.as_ptr().add(first), base, data.len() - first);
+            if first < data.len() {
+                std::ptr::copy_nonoverlapping(data.as_ptr().add(first), base, data.len() - first);
+            }
         }
         self.tail += len;
     }
 
     /// Counts one more message, published with the next commit.
+    #[inline]
     pub fn end_message(&mut self) {
         self.messages_written += 1;
     }
 
     /// Publishes everything put and every message ended so far, and wakes
     /// the reader if it is waiting.
+    #[inline]
     pub fn commit(&mut self) {
         if self.tail == self.published && self.messages_written == self.messages_published {
             return;
