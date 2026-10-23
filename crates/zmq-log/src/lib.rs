@@ -43,6 +43,7 @@ pub fn log(capacity: NonZeroUsize, hwm: Option<NonZeroUsize>) -> (LogWriter, Log
         released: CachePadded(AtomicU64::new(0)),
         messages_written: CachePadded(AtomicU64::new(0)),
         messages_released: CachePadded(AtomicU64::new(0)),
+        abandoned_at: AtomicU64::new(NOT_ABANDONED),
         writer_closed: AtomicBool::new(false),
         reader_closed: AtomicBool::new(false),
         reader: CachePadded(ReaderWait::default()),
@@ -69,6 +70,9 @@ pub fn log(capacity: NonZeroUsize, hwm: Option<NonZeroUsize>) -> (LogWriter, Log
     (writer, reader)
 }
 
+/// `Shared::abandoned_at` when no message has been abandoned.
+const NOT_ABANDONED: u64 = u64::MAX;
+
 struct Shared {
     buf: Box<[UnsafeCell<u8>]>,
     /// Octets committed by the writer.
@@ -77,6 +81,9 @@ struct Shared {
     released: CachePadded<AtomicU64>,
     messages_written: CachePadded<AtomicU64>,
     messages_released: CachePadded<AtomicU64>,
+    /// Where the writer gave up on a message it had partly committed, or
+    /// `NOT_ABANDONED`.
+    abandoned_at: AtomicU64,
     writer_closed: AtomicBool,
     reader_closed: AtomicBool,
     reader: CachePadded<ReaderWait>,
@@ -284,6 +291,71 @@ impl LogWriter {
         self.tail += len;
     }
 
+    /// The free space after what has been put, in order: the second slice
+    /// is non-empty only when it wraps around the end of the buffer. Fill a
+    /// prefix, such as with `read_vectored`, then [`advance`](Self::advance)
+    /// past it.
+    pub fn spare(&mut self) -> [&mut [u8]; 2] {
+        let free = self.free_for(u64::MAX) as usize;
+        let start = (self.tail & (self.capacity - 1)) as usize;
+        let first = free.min(self.capacity as usize - start);
+        let base = self.shared.base();
+        // SAFETY: `[tail, tail + free)` lies within `[released, released +
+        // capacity)`, which only the writer touches until it commits, and
+        // `&mut self` keeps it to one borrow at a time. The slices cover
+        // `[start, start + first)` and `[0, free - first)`, which do not
+        // overlap and lie inside the buffer.
+        unsafe {
+            [
+                std::slice::from_raw_parts_mut(base.add(start), first),
+                std::slice::from_raw_parts_mut(base, free - first),
+            ]
+        }
+    }
+
+    /// Counts `octets` written into [`spare`](Self::spare) space as put.
+    ///
+    /// # Panics
+    ///
+    /// If `octets` is more than is free.
+    #[inline]
+    pub fn advance(&mut self, octets: usize) {
+        let octets = octets as u64;
+        assert!(
+            self.free_for(octets) >= octets,
+            "advance of {octets} octets with {} free",
+            self.free_for(octets)
+        );
+        self.tail += octets;
+    }
+
+    /// Octets put but not yet committed.
+    pub fn uncommitted(&self) -> usize {
+        (self.tail - self.published) as usize
+    }
+
+    /// Drops everything put since the last commit, and messages ended since.
+    pub fn abandon(&mut self) {
+        self.tail = self.published;
+        self.messages_written = self.messages_published;
+    }
+
+    /// Drops everything put since the last commit, and marks the end of what
+    /// is committed as the end of a message given up on part way, so the
+    /// reader can discard what it has of it. One mark is kept at a time:
+    /// `Err(())` if the reader has not yet reached the last one.
+    pub fn abandon_message(&mut self) -> Result<(), ()> {
+        self.abandon();
+        let previous = self.shared.abandoned_at.load(Ordering::Acquire);
+        if previous != NOT_ABANDONED && self.shared.released.load(Ordering::Acquire) < previous {
+            return Err(());
+        }
+        self.shared
+            .abandoned_at
+            .store(self.published, Ordering::Release);
+        Ok(())
+    }
+
     /// Counts one more message, published with the next commit.
     #[inline]
     pub fn end_message(&mut self) {
@@ -370,6 +442,18 @@ impl LogReader {
                 std::slice::from_raw_parts(base, len - first),
             ]
         }
+    }
+
+    /// Octets released so far: the reader's position in the stream.
+    pub fn position(&self) -> u64 {
+        self.released
+    }
+
+    /// Where the writer last gave up on a partly committed message, if it
+    /// has. Positions compare with [`position`](Self::position).
+    pub fn abandoned_at(&self) -> Option<u64> {
+        let at = self.shared.abandoned_at.load(Ordering::Acquire);
+        (at != NOT_ABANDONED).then_some(at)
     }
 
     /// Octets committed and not yet released, as last seen.
@@ -760,6 +844,60 @@ mod tests {
             drop(writer);
             assert_eq!(consumer.join().unwrap(), total, "capacity {capacity}");
         }
+    }
+
+    #[test]
+    fn octets_read_into_spare_space_are_committed_in_order() {
+        let (mut writer, mut reader) = log(n(16), None);
+        writer.put(&[0; 12]);
+        writer.commit();
+        reader.release(12, 0);
+        let [first, second] = writer.spare();
+        assert_eq!((first.len(), second.len()), (4, 12));
+        first.copy_from_slice(&[1, 2, 3, 4]);
+        second[..2].copy_from_slice(&[5, 6]);
+        writer.advance(6);
+        assert_eq!(writer.uncommitted(), 6);
+        writer.commit();
+        assert_eq!(read_all(&mut reader), [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn abandoning_drops_only_what_is_uncommitted() {
+        let (mut writer, mut reader) = log(n(16), None);
+        writer.put(b"kept");
+        writer.end_message();
+        writer.commit();
+        writer.put(b"dropped");
+        writer.end_message();
+        writer.abandon();
+        assert_eq!(writer.uncommitted(), 0);
+        assert_eq!(writer.free(), 12);
+        writer.commit();
+        assert_eq!(read_all(&mut reader), b"kept");
+    }
+
+    #[test]
+    fn an_abandoned_message_is_marked_until_the_reader_passes_it() {
+        let (mut writer, mut reader) = log(n(16), None);
+        assert_eq!(reader.abandoned_at(), None);
+        writer.put(b"part");
+        writer.commit();
+        writer.put(b"more");
+        assert_eq!(writer.abandon_message(), Ok(()));
+        assert_eq!(reader.abandoned_at(), Some(4));
+        assert_eq!(read_all(&mut reader), b"part");
+        writer.put(b"next");
+        writer.commit();
+        assert_eq!(
+            writer.abandon_message(),
+            Err(()),
+            "the reader has not reached the first mark"
+        );
+        reader.release(4, 0);
+        assert_eq!(reader.position(), 4);
+        assert_eq!(writer.abandon_message(), Ok(()));
+        assert_eq!(reader.abandoned_at(), Some(8));
     }
 
     fn thread_waker() -> Waker {
