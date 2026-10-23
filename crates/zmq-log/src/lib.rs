@@ -306,6 +306,7 @@ impl LogWriter {
             return Poll::Ready(());
         }
         self.shared.writer.waker.register(cx.waker());
+        fence(Ordering::SeqCst);
         if self.is_closed() {
             Poll::Ready(())
         } else {
@@ -317,6 +318,8 @@ impl LogWriter {
 impl Drop for LogWriter {
     fn drop(&mut self) {
         self.shared.writer_closed.store(true, Ordering::Release);
+        // Pairs with the fence in `LogReader::poll_committed` and `poll_closed`.
+        fence(Ordering::SeqCst);
         self.shared.reader.waker.wake();
     }
 }
@@ -336,9 +339,7 @@ impl LogReader {
     /// The committed octets not yet released, in order: the second slice is
     /// non-empty only when they wrap around the end of the buffer.
     pub fn committed(&mut self) -> [&[u8]; 2] {
-        if self.written == self.released {
-            self.written = self.shared.written.load(Ordering::Acquire);
-        }
+        self.written = self.shared.written.load(Ordering::Acquire);
         let len = (self.written - self.released) as usize;
         let start = (self.released & (self.capacity - 1)) as usize;
         let first = len.min(self.capacity as usize - start);
@@ -439,6 +440,7 @@ impl LogReader {
             return Poll::Ready(());
         }
         self.shared.reader.waker.register(cx.waker());
+        fence(Ordering::SeqCst);
         if self.is_closed() {
             Poll::Ready(())
         } else {
@@ -450,6 +452,8 @@ impl LogReader {
 impl Drop for LogReader {
     fn drop(&mut self) {
         self.shared.reader_closed.store(true, Ordering::Release);
+        // Pairs with the fence in `LogWriter::poll_writable` and `poll_closed`.
+        fence(Ordering::SeqCst);
         self.shared.writer.waker.wake();
     }
 }

@@ -344,6 +344,114 @@ impl Decoder {
     }
 }
 
+/// The longest ZMTP 2.0/3.x frame header: flags and eight size octets.
+pub const MAX_FRAME_HEADER: usize = 9;
+
+/// Writes the ZMTP 2.0/3.x header of a message frame with a body of `len`
+/// octets into `out` and returns its length: the octets
+/// [`Encoder::encode`] writes before that body.
+pub fn frame_header(len: u64, more: bool, out: &mut [u8; MAX_FRAME_HEADER]) -> usize {
+    let flags = if more { MORE } else { 0 };
+    match u8::try_from(len) {
+        Ok(short) => {
+            out[0] = flags;
+            out[1] = short;
+            2
+        }
+        Err(_) => {
+            out[0] = flags | LONG;
+            out[1..].copy_from_slice(&len.to_be_bytes());
+            MAX_FRAME_HEADER
+        }
+    }
+}
+
+/// Follows ZMTP 2.0/3.x message frames through octets fed in pieces, to
+/// find where messages end without decoding them. The octets must be
+/// well-formed message frames, such as those written with
+/// [`frame_header`]; commands are not expected.
+#[derive(Debug, Clone, Default)]
+pub struct FrameWalker {
+    /// Header octets seen so far, while in a header.
+    header: [u8; MAX_FRAME_HEADER],
+    have: usize,
+    /// Body octets still to come, once a header is complete.
+    body: Option<u64>,
+    more: bool,
+    /// A frame with MORE has ended and its message has not.
+    in_message: bool,
+}
+
+impl FrameWalker {
+    /// A walker at the start of a message.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Whether the octets walked so far end exactly at the end of a message.
+    pub fn at_message_boundary(&self) -> bool {
+        self.have == 0 && self.body.is_none() && !self.in_message
+    }
+
+    /// Walks `data`, stopping just after the first message that ends in it
+    /// if `stop_at_end`. Returns how many octets it walked and how many
+    /// messages ended in them.
+    pub fn walk(&mut self, data: &[u8], stop_at_end: bool) -> (usize, u64) {
+        let mut pos = 0;
+        let mut ended = 0;
+        loop {
+            match self.body {
+                None => {
+                    if pos == data.len() {
+                        return (pos, ended);
+                    }
+                    let needed = if self.have > 0 && self.header[0] & LONG != 0 {
+                        MAX_FRAME_HEADER
+                    } else {
+                        2
+                    };
+                    let take = (needed - self.have).min(data.len() - pos);
+                    self.header[self.have..self.have + take].copy_from_slice(&data[pos..pos + take]);
+                    self.have += take;
+                    pos += take;
+                    // A LONG flag only becomes known with the first octet.
+                    let needed = if self.header[0] & LONG != 0 {
+                        MAX_FRAME_HEADER
+                    } else {
+                        2
+                    };
+                    if self.have == needed {
+                        let size = if needed == 2 {
+                            u64::from(self.header[1])
+                        } else {
+                            read_u64(&self.header[1..]).expect("eight size octets")
+                        };
+                        self.more = self.header[0] & MORE != 0;
+                        self.body = Some(size);
+                        self.have = 0;
+                    }
+                }
+                Some(remaining) => {
+                    let take = remaining.min((data.len() - pos) as u64);
+                    pos += take as usize;
+                    if take < remaining {
+                        self.body = Some(remaining - take);
+                        return (pos, ended);
+                    }
+                    self.body = None;
+                    self.in_message = self.more;
+                    if !self.more {
+                        ended += 1;
+                        if stop_at_end {
+                            return (pos, ended);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn read_u64(buf: &[u8]) -> Option<u64> {
     buf.first_chunk().copied().map(u64::from_be_bytes)
 }

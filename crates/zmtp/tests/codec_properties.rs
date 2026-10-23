@@ -226,3 +226,55 @@ proptest! {
         );
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// Headers from `frame_header` are the ones the encoder writes, and the
+    /// walker finds every message end however the octets are split.
+    #[test]
+    fn walker_finds_every_message_end(
+        messages in prop::collection::vec(prop::collection::vec(body(), 1..4), 1..6),
+        splits in prop::collection::vec(1usize..2_000, 1..40),
+    ) {
+        let encoder = Encoder::new(Version::V3_1);
+        let mut encoded = Vec::new();
+        let mut by_header = Vec::new();
+        let mut ends = Vec::new();
+        for frames in &messages {
+            encoder.encode(&message(frames), &mut encoded);
+            for (i, frame) in frames.iter().enumerate() {
+                let mut header = [0; zmtp::MAX_FRAME_HEADER];
+                let len = zmtp::frame_header(frame.len() as u64, i + 1 < frames.len(), &mut header);
+                by_header.extend_from_slice(&header[..len]);
+                by_header.extend_from_slice(frame);
+            }
+            ends.push(by_header.len());
+        }
+        prop_assert_eq!(&by_header, &encoded);
+
+        let mut walker = zmtp::FrameWalker::new();
+        let mut pos = 0;
+        let mut ended = 0;
+        let mut split = splits.iter().cycle();
+        while pos < encoded.len() {
+            let end = (pos + split.next().unwrap()).min(encoded.len());
+            let (walked, n) = walker.walk(&encoded[pos..end], false);
+            prop_assert_eq!(walked, end - pos);
+            pos = end;
+            ended += n;
+            prop_assert_eq!(walker.at_message_boundary(), ends.contains(&pos));
+        }
+        prop_assert_eq!(ended, messages.len() as u64);
+
+        // Stopping at each end lands exactly on the boundaries.
+        let mut walker = zmtp::FrameWalker::new();
+        let mut pos = 0;
+        for &end in &ends {
+            let (walked, n) = walker.walk(&encoded[pos..], true);
+            prop_assert_eq!(n, 1);
+            pos += walked;
+            prop_assert_eq!(pos, end);
+        }
+    }
+}

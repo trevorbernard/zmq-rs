@@ -15,7 +15,7 @@ atomic-waker.workspace = true
 proptest.workspace = true
 zmq-pipe.workspace = true
 
-[target.'cfg(loom)'.dev-dependencies]
+[target.'cfg(loom)'.dependencies]
 loom = "0.7"
 
 # The workspace denies `unsafe`; this crate is where it is contained.
