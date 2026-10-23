@@ -220,6 +220,17 @@ impl Decoder {
         self.filled = end;
     }
 
+    /// How many octets are read but not yet decoded.
+    pub fn buffered(&self) -> usize {
+        self.filled
+    }
+
+    /// Whether the decoder holds nothing: no undecoded octets, and no
+    /// message part way through.
+    pub fn is_idle(&self) -> bool {
+        matches!(self.state, State::Header) && self.partial.is_none() && self.filled == 0
+    }
+
     /// The octets read but not yet decoded, if the decoder is between
     /// messages; it is left empty. `None`, taking nothing, if a message or
     /// frame is part way through.

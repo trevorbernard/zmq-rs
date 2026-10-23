@@ -148,6 +148,11 @@ impl<T> Deref for CachePadded<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Closed;
 
+/// [`LogWriter::abandon_message`] found the last mark not yet reached by the
+/// reader.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MarkBusy;
+
 /// The writing end of a log.
 #[derive(Debug)]
 pub struct LogWriter {
@@ -329,6 +334,33 @@ impl LogWriter {
         self.tail += octets;
     }
 
+    /// The last `octets` put and not yet committed, in order: the second
+    /// slice is non-empty only when they wrap around the end of the buffer.
+    ///
+    /// # Panics
+    ///
+    /// If `octets` is more than [`uncommitted`](Self::uncommitted).
+    pub fn uncommitted_tail(&self, octets: usize) -> [&[u8]; 2] {
+        assert!(
+            octets <= self.uncommitted(),
+            "{octets} octets asked for with {} uncommitted",
+            self.uncommitted()
+        );
+        let start = ((self.tail - octets as u64) & (self.capacity - 1)) as usize;
+        let first = octets.min(self.capacity as usize - start);
+        let base = self.shared.base();
+        // SAFETY: `[tail - octets, tail)` is put but not committed, so the
+        // reader does not touch it, and `&self` rules out `put` or `spare`
+        // writing it while these borrows live. Both slices lie inside the
+        // buffer.
+        unsafe {
+            [
+                std::slice::from_raw_parts(base.add(start), first),
+                std::slice::from_raw_parts(base, octets - first),
+            ]
+        }
+    }
+
     /// Octets put but not yet committed.
     pub fn uncommitted(&self) -> usize {
         (self.tail - self.published) as usize
@@ -343,12 +375,12 @@ impl LogWriter {
     /// Drops everything put since the last commit, and marks the end of what
     /// is committed as the end of a message given up on part way, so the
     /// reader can discard what it has of it. One mark is kept at a time:
-    /// `Err(())` if the reader has not yet reached the last one.
-    pub fn abandon_message(&mut self) -> Result<(), ()> {
+    /// [`MarkBusy`] if the reader has not yet reached the last one.
+    pub fn abandon_message(&mut self) -> Result<(), MarkBusy> {
         self.abandon();
         let previous = self.shared.abandoned_at.load(Ordering::Acquire);
         if previous != NOT_ABANDONED && self.shared.released.load(Ordering::Acquire) < previous {
-            return Err(());
+            return Err(MarkBusy);
         }
         self.shared
             .abandoned_at
@@ -925,7 +957,7 @@ mod tests {
         writer.commit();
         assert_eq!(
             writer.abandon_message(),
-            Err(()),
+            Err(MarkBusy),
             "the reader has not reached the first mark"
         );
         reader.release(4, 0);
