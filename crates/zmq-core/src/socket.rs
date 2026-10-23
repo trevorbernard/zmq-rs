@@ -14,7 +14,7 @@ use zmq_pipe::{Reader, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
 use crate::transport::Address;
-use crate::{Connection, ConnectionConfig, Context, Streaming};
+use crate::{Connection, ConnectionConfig, Context, MessageRef, Streaming};
 
 /// A stable name for a peer within one socket. Keys only grow, so peers
 /// stay sorted by key.
@@ -424,6 +424,39 @@ impl FairQueue {
                 }
                 // Session gone and everything it delivered has been read.
                 // The next peer slides into `index`.
+                Poll::Ready(None) => {
+                    peers.remove(index);
+                    self.next = index;
+                }
+                Poll::Pending => {
+                    self.next = index + 1;
+                    tried += 1;
+                }
+            }
+        }
+        Poll::Pending
+    }
+}
+
+impl FairQueue {
+    /// Like [`poll_recv`](Self::poll_recv), but lends the message to `f`,
+    /// taken from its slot only once a message is ready: in place, without
+    /// copying, when a peer's receive log holds it whole.
+    pub fn poll_recv_with<R>(
+        &mut self,
+        peers: &mut PeerList,
+        cx: &mut TaskContext<'_>,
+        f: &mut Option<impl FnOnce(MessageRef<'_>) -> R>,
+    ) -> Poll<(PeerKey, R)> {
+        let mut tried = 0;
+        while tried < peers.len() {
+            let index = self.next % peers.len();
+            let peer = &mut peers.peers[index];
+            match peer.connection.rx.poll_recv_with(cx, f) {
+                Poll::Ready(Some(lent)) => {
+                    self.next = index + 1;
+                    return Poll::Ready((peer.key, lent));
+                }
                 Poll::Ready(None) => {
                     peers.remove(index);
                     self.next = index;

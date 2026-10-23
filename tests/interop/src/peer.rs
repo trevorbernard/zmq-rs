@@ -246,6 +246,11 @@ impl Peer {
         self.stream.write_all(&out)
     }
 
+    /// Sends `octets` as they are, such as part of an encoded message.
+    pub fn send_raw(&mut self, octets: &[u8]) -> io::Result<()> {
+        self.stream.write_all(octets)
+    }
+
     /// Sends a ZMTP 3.x command.
     pub fn send_command(&mut self, command: &Command) -> io::Result<()> {
         let mut body = Vec::new();

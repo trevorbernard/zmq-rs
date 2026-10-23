@@ -128,9 +128,9 @@ pub use socket::{
 #[cfg(feature = "draft")]
 pub use zmq_core::ServerSendError;
 pub use zmq_core::{
-    Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
-    ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, RouterSendError, Security, Verbosity,
-    XPubEvent, ZapResponder,
+    Authenticator, Event, EventKind, Frames, HandshakeFailure, Heartbeat, Linger, MessageRef,
+    Monitor, PeerGone, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, RouterSendError,
+    Security, Verbosity, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{

@@ -7,9 +7,9 @@ use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
 
 use zmq_core::{
-    ConnectionConfig, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting, PeerGone,
-    PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterSendError,
-    RouterTable, Subscriber, Verbosity, XPubEvent,
+    ConnectionConfig, FairQueue, LoadBalancer, MessageRef, Outstanding, Pair as PairRouting,
+    PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome,
+    RouterSendError, RouterTable, Subscriber, Verbosity, XPubEvent,
 };
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Message, Subscription};
@@ -985,6 +985,33 @@ impl Socket<Pull> {
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
         poll_fn(|cx| self.poll_recv(cx)).await
+    }
+
+    /// Lends the next message to `f`, if one is waiting, and returns what `f`
+    /// returns. A message lying whole in a peer's receive log is lent in
+    /// place, without copying it.
+    pub fn try_recv_with<R>(&mut self, f: impl FnOnce(MessageRef<'_>) -> R) -> Option<R> {
+        let mut f = Some(f);
+        ready(self.poll_recv_with(&mut TaskContext::from_waker(Waker::noop()), &mut f))
+    }
+
+    /// Lends the next message to `f`, blocking until one arrives, and returns
+    /// what `f` returns. A message lying whole in a peer's receive log is lent
+    /// in place, without copying it.
+    pub fn recv_with<R>(&mut self, f: impl FnOnce(MessageRef<'_>) -> R) -> R {
+        let mut f = Some(f);
+        wait::block_on(|cx| self.poll_recv_with(cx, &mut f))
+    }
+
+    fn poll_recv_with<R>(
+        &mut self,
+        cx: &mut TaskContext<'_>,
+        f: &mut Option<impl FnOnce(MessageRef<'_>) -> R>,
+    ) -> Poll<R> {
+        self.peers.accept(cx);
+        self.routing
+            .poll_recv_with(self.peers.list_mut(), cx, f)
+            .map(|(_, lent)| lent)
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {

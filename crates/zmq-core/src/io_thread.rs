@@ -12,14 +12,17 @@ use std::time::Instant;
 
 use mio::{Events, Interest, Token};
 use zmq_pipe::{Hwm, Writer};
-use zmtp::{FrameWalker, Message};
+use zmtp::FrameWalker;
 
 use crate::context::{PeerSlot, message_pipe};
 use crate::engine::{Engine, EngineError, Pipes};
+use crate::inbound::SessionInbound;
 use crate::outbound::SessionOutbound;
 use crate::reconnect::Retry;
 use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
-use crate::{Connection, ConnectionConfig, EventKind, Linger, Outbound, Topics};
+use crate::{
+    Connection, ConnectionConfig, EventKind, Inbound, Linger, LogInbound, Outbound, Topics,
+};
 
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
@@ -617,7 +620,7 @@ struct Session {
     closing: Option<Closing>,
     /// The engine deadline a timer is already set for.
     scheduled: Option<Instant>,
-    inbound: Writer<Message>,
+    inbound: SessionInbound,
     outbound: SessionOutbound,
     /// Shared with the socket's [`Connection`].
     peer: PeerSlot,
@@ -642,7 +645,7 @@ struct Progress {
 
 /// The session's ends of a connection, and the slot for its peer.
 pub(crate) struct SessionPipes {
-    inbound: Writer<Message>,
+    inbound: SessionInbound,
     outbound: SessionOutbound,
     peer: PeerSlot,
 }
@@ -669,7 +672,23 @@ impl SessionPipes {
                 (Outbound::Pipe(writer), SessionOutbound::Pipe(reader))
             }
         };
-        let (inbound, rx) = message_pipe(config.recv_hwm, config.conflate_inbound);
+        let (inbound, rx) = match config.recv_log {
+            Some(capacity) if !config.conflate_inbound => {
+                let hwm = match config.recv_hwm {
+                    Hwm::Unlimited => None,
+                    Hwm::Messages(hwm) => Some(hwm),
+                };
+                let (writer, reader) = zmq_log::log(capacity, hwm);
+                (
+                    SessionInbound::Log(writer),
+                    Inbound::Log(Box::new(LogInbound::new(reader))),
+                )
+            }
+            _ => {
+                let (writer, reader) = message_pipe(config.recv_hwm, config.conflate_inbound);
+                (SessionInbound::Pipe(writer), Inbound::Pipe(reader))
+            }
+        };
         let peer = PeerSlot::default();
         let connection = Connection {
             tx,

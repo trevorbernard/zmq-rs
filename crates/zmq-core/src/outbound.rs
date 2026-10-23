@@ -116,43 +116,7 @@ impl Outbound {
         let Self::Log(writer) = self else {
             panic!("only a log streams");
         };
-        let frames = streaming.message.len().get();
-        while streaming.frame < frames {
-            let frame = streaming.message.get(streaming.frame).expect("frame");
-            let more = streaming.frame + 1 < frames;
-            let mut header = [0; MAX_FRAME_HEADER];
-            let header_len = frame_header(frame.len() as u64, more, &mut header);
-            let total = header_len + frame.len();
-            while streaming.offset < total {
-                // The header goes in whole, so wait for room for all of it.
-                let want = if streaming.offset < header_len {
-                    header_len - streaming.offset
-                } else {
-                    1
-                };
-                match writer.poll_writable(cx, want) {
-                    Poll::Ready(Ok(())) => {}
-                    Poll::Ready(Err(_)) => return Poll::Ready(Err(())),
-                    Poll::Pending => return Poll::Pending,
-                }
-                let mut free = writer.free();
-                if streaming.offset < header_len {
-                    writer.put(&header[streaming.offset..header_len]);
-                    free -= header_len - streaming.offset;
-                    streaming.offset = header_len;
-                }
-                let body_offset = streaming.offset - header_len;
-                let take = free.min(frame.len() - body_offset);
-                writer.put(&frame[body_offset..body_offset + take]);
-                streaming.offset += take;
-                writer.commit();
-            }
-            streaming.frame += 1;
-            streaming.offset = 0;
-        }
-        writer.end_message();
-        writer.commit();
-        Poll::Ready(Ok(()))
+        poll_stream_into(writer, streaming, cx)
     }
 
     /// Whether the peer's side is gone.
@@ -234,8 +198,54 @@ impl SessionOutbound {
     }
 }
 
+/// Writes as much of a streaming message into `writer` as fits, committing
+/// each piece, until it is all written. `Err(())` once the reader is gone.
+pub(crate) fn poll_stream_into(
+    writer: &mut LogWriter,
+    streaming: &mut Streaming,
+    cx: &mut Context<'_>,
+) -> Poll<Result<(), ()>> {
+    let frames = streaming.message.len().get();
+    while streaming.frame < frames {
+        let frame = streaming.message.get(streaming.frame).expect("frame");
+        let more = streaming.frame + 1 < frames;
+        let mut header = [0; MAX_FRAME_HEADER];
+        let header_len = frame_header(frame.len() as u64, more, &mut header);
+        let total = header_len + frame.len();
+        while streaming.offset < total {
+            // The header goes in whole, so wait for room for all of it.
+            let want = if streaming.offset < header_len {
+                header_len - streaming.offset
+            } else {
+                1
+            };
+            match writer.poll_writable(cx, want) {
+                Poll::Ready(Ok(())) => {}
+                Poll::Ready(Err(_)) => return Poll::Ready(Err(())),
+                Poll::Pending => return Poll::Pending,
+            }
+            let mut free = writer.free();
+            if streaming.offset < header_len {
+                writer.put(&header[streaming.offset..header_len]);
+                free -= header_len - streaming.offset;
+                streaming.offset = header_len;
+            }
+            let body_offset = streaming.offset - header_len;
+            let take = free.min(frame.len() - body_offset);
+            writer.put(&frame[body_offset..body_offset + take]);
+            streaming.offset += take;
+            writer.commit();
+        }
+        streaming.frame += 1;
+        streaming.offset = 0;
+    }
+    writer.end_message();
+    writer.commit();
+    Poll::Ready(Ok(()))
+}
+
 /// The octets `message` takes as ZMTP 2.0/3.x frames.
-fn encoded_len(message: &Message) -> usize {
+pub(crate) fn encoded_len(message: &Message) -> usize {
     message
         .iter()
         .map(|frame| if frame.len() <= 255 { 2 } else { MAX_FRAME_HEADER } + frame.len())
@@ -243,7 +253,7 @@ fn encoded_len(message: &Message) -> usize {
 }
 
 /// Writes `message`, which fits, as ZMTP 3.x frames and commits it.
-fn write_message(writer: &mut LogWriter, message: &Message) {
+pub(crate) fn write_message(writer: &mut LogWriter, message: &Message) {
     let last = message.len().get() - 1;
     let mut header = [0; MAX_FRAME_HEADER];
     for (i, frame) in message.iter().enumerate() {

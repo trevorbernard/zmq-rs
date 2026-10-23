@@ -8,6 +8,7 @@
 
 mod context;
 mod engine;
+mod inbound;
 mod io_thread;
 mod monitor;
 mod outbound;
@@ -31,6 +32,7 @@ pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
     ShutdownTimedOut,
 };
+pub use inbound::{Frames, Inbound, LogInbound, MessageRef};
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
 pub use outbound::{Outbound, Streaming};
 pub use pair::Pair;

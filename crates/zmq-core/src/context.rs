@@ -23,7 +23,7 @@ use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
 use crate::transport::{Address, IpcCleanup, StreamListener};
-use crate::{EventKind, MonitorSink, Outbound, Reconnect, Security};
+use crate::{EventKind, Inbound, MonitorSink, Outbound, Reconnect, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -36,6 +36,9 @@ const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 /// 256 KiB, 64 KiB messages waited on each other and ran 10% slower than
 /// through a pipe.
 const DEFAULT_SEND_LOG: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
+
+/// The octets of a PULL connection's receive log, matching the send log.
+const DEFAULT_RECV_LOG: NonZeroUsize = NonZeroUsize::new(4 * 1024 * 1024).unwrap();
 
 /// Owns the I/O threads. Cloning shares them; they stop when the last clone
 /// is dropped, closing every connection on them.
@@ -123,6 +126,12 @@ pub struct ConnectionConfig {
     /// queueing them whole. Used by tcp and ipc connections that are not
     /// conflated; `inproc` always queues whole messages.
     pub send_log: Option<NonZeroUsize>,
+    /// Read messages from the peer straight into a byte log of this many
+    /// octets, decoded on the socket's thread, instead of decoding them on
+    /// the I/O thread and queueing them whole. Used by tcp and ipc
+    /// connections that are not conflated; `inproc` always queues whole
+    /// messages.
+    pub recv_log: Option<NonZeroUsize>,
 }
 
 /// ZMTP 3.1 heartbeats: libzmq's `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT`
@@ -180,7 +189,7 @@ pub struct Connection {
     /// Messages to the peer.
     pub tx: Outbound,
     /// Messages from the peer.
-    pub rx: Reader<Message>,
+    pub rx: Inbound,
     pub(crate) peer: PeerSlot,
 }
 
@@ -423,7 +432,7 @@ fn reported<T>(result: io::Result<T>, config: &ConnectionConfig, endpoint: &str)
 
 impl ConnectionConfig {
     /// libzmq's defaults: empty identity, HWM 1000 each way, no frame limit.
-    /// PUSH also sends through a 4 MiB log.
+    /// PUSH also sends through a 4 MiB log, and PULL receives through one.
     pub fn new(socket_type: SocketType) -> Self {
         let hwm = Hwm::Messages(DEFAULT_HWM);
         Self {
@@ -442,6 +451,7 @@ impl ConnectionConfig {
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
             send_log: (socket_type == SocketType::Push).then_some(DEFAULT_SEND_LOG),
+            recv_log: (socket_type == SocketType::Pull).then_some(DEFAULT_RECV_LOG),
         }
     }
 }
@@ -627,12 +637,12 @@ impl Context {
         let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
         let client = Connection {
             tx: Outbound::Pipe(tx),
-            rx,
+            rx: Inbound::Pipe(rx),
             peer: PeerSlot::default(),
         };
         let server = Connection {
             tx: Outbound::Pipe(server_tx),
-            rx: server_rx,
+            rx: Inbound::Pipe(server_rx),
             peer: PeerSlot::default(),
         };
         match binding {

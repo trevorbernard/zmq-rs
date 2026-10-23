@@ -11,20 +11,21 @@ use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use zmq_log::LogReader;
+use zmq_log::{LogReader, LogWriter};
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
     CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    FrameWalker, Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming,
-    LegacyPeers, Membership, Message, NullHandshake, NullZapConfig, PeerGreeting,
+    FrameWalker, Greeting, GreetingConfig, GreetingError, Group, HandshakeError, InboundWalker,
+    Incoming, LegacyPeers, Membership, Message, NullHandshake, NullZapConfig, PeerGreeting,
     PendingAuthentication, PendingCurveAuthentication, PendingNullAuthentication, Ping,
     PingContext, PlainClient, PlainServer, PlainServerConfig, Role, ServerStep, SocketType,
     Subscription, Ttl, Version, WalkUntil, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
-use crate::outbound::SessionOutbound;
+use crate::inbound::SessionInbound;
+use crate::outbound::{SessionOutbound, Streaming, encoded_len, poll_stream_into, write_message};
 use crate::transport::Stream;
 use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
 
@@ -62,6 +63,15 @@ struct LogProgress {
     mid_message: bool,
     /// Rebuilds messages for peers whose framing differs from the log's.
     decoder: Option<Decoder>,
+    /// Reading straight into the receive log, past the handshake's decoder.
+    direct: bool,
+    /// Follows what was read into the receive log.
+    walker: Option<InboundWalker>,
+    /// Part of the message being received is already committed, so the
+    /// socket must be told if it never finishes.
+    partial_committed: bool,
+    /// A decoded message larger than the receive log, part way into it.
+    inbound_streaming: Option<Streaming>,
 }
 
 /// When the engine must act or give up, all `None` while not applicable.
@@ -161,6 +171,10 @@ pub(crate) enum EngineError {
     Timeout,
     /// A CURVE frame did not open, or arrived out of order.
     Curve(CurveError),
+    /// The connection broke part way through a second message larger than
+    /// the receive log before the socket had read past the first, so the
+    /// log could not mark both; the session ends.
+    InboundBacklog,
 }
 
 impl EngineError {
@@ -194,7 +208,9 @@ impl EngineError {
             Self::Greeting(err) => protocol(ProtocolError::Greeting(err.clone())),
             Self::Decode(err) => protocol(ProtocolError::Decode(err.clone())),
             Self::Curve(err) => protocol(ProtocolError::Curve(*err)),
-            Self::Io(_) | Self::PeerClosed | Self::Timeout => HandshakeFailure::NoDetail,
+            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::InboundBacklog => {
+                HandshakeFailure::NoDetail
+            }
         }
     }
 
@@ -208,7 +224,7 @@ impl EngineError {
 /// The session's pipe ends, lent to the engine while it runs.
 pub(crate) struct Pipes<'a> {
     /// Towards the socket.
-    pub(crate) inbound: &'a mut Writer<Message>,
+    pub(crate) inbound: &'a mut SessionInbound,
     /// From the socket.
     pub(crate) outbound: &'a mut SessionOutbound,
     /// Where the handshake's outcome goes, for the socket to read.
@@ -336,6 +352,35 @@ impl Engine {
     /// Does all the work currently possible: writing, taking messages from
     /// the socket, reading, and handing messages to the socket.
     pub(crate) fn drive(
+        &mut self,
+        pipes: &mut Pipes<'_>,
+        cx: &mut Context<'_>,
+    ) -> Result<(), EngineError> {
+        let result = self.drive_until_idle(pipes, cx);
+        match result {
+            Err(err) => Err(self.abandon_inbound(pipes.inbound).unwrap_or(err)),
+            ok => ok,
+        }
+    }
+
+    /// Drops what the connection delivered of a message it did not finish:
+    /// uncommitted octets, or a mark for the socket if part was committed.
+    /// Returns the error that ends the session if the log cannot mark it.
+    fn abandon_inbound(&mut self, inbound: &mut SessionInbound) -> Option<EngineError> {
+        let SessionInbound::Log(writer) = inbound else {
+            return None;
+        };
+        if !self.log.partial_committed {
+            writer.abandon();
+            return None;
+        }
+        writer
+            .abandon_message()
+            .err()
+            .map(|zmq_log::MarkBusy| EngineError::InboundBacklog)
+    }
+
+    fn drive_until_idle(
         &mut self,
         pipes: &mut Pipes<'_>,
         cx: &mut Context<'_>,
@@ -578,7 +623,16 @@ impl Engine {
                 encoder,
                 mut pending,
             } => {
-                let result = self.receive_active(&mut decoder, encoder, &mut pending, pipes, cx);
+                // The log holds 2.0/3.x framing: a peer sending it without
+                // CURVE is read straight in; the rest is decoded first.
+                let direct = matches!(pipes.inbound, SessionInbound::Log(_))
+                    && self.curve.is_none()
+                    && encoder.version() != Version::V1;
+                let result = if direct {
+                    self.receive_direct(&mut decoder, encoder, &mut pending, pipes.inbound, cx)
+                } else {
+                    self.receive_active(&mut decoder, encoder, &mut pending, pipes.inbound, cx)
+                };
                 self.state = State::Active {
                     decoder,
                     encoder,
@@ -917,14 +971,22 @@ impl Engine {
         decoder: &mut Decoder,
         encoder: Encoder,
         pending: &mut Option<Message>,
-        pipes: &mut Pipes<'_>,
+        inbound: &mut SessionInbound,
         cx: &mut Context<'_>,
     ) -> Result<bool, EngineError> {
+        if let SessionInbound::Log(writer) = inbound
+            && !self.poll_inbound_streaming(writer, cx)
+        {
+            return Ok(false);
+        }
         let mut progressed = false;
         if let Some(message) = pending.take() {
-            if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+            if let Some(refused) = self.deliver(inbound, message, cx)? {
                 *pending = Some(refused);
                 return Ok(false);
+            }
+            if self.log.inbound_streaming.is_some() {
+                return Ok(true);
             }
             progressed = true;
         }
@@ -947,15 +1009,18 @@ impl Engine {
             }
             match item {
                 Some(Incoming::Message(message)) => {
-                    if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+                    if let Some(refused) = self.deliver(inbound, message, cx)? {
                         *pending = Some(refused);
                         return Ok(progressed);
+                    }
+                    if self.log.inbound_streaming.is_some() {
+                        return Ok(true);
                     }
                     progressed = true;
                 }
                 Some(Incoming::Command(body)) => {
                     if let Some(message) = self.handle_command(&body, encoder)?
-                        && let Some(refused) = deliver(pipes.inbound, message, cx)?
+                        && let Some(refused) = self.deliver(inbound, message, cx)?
                     {
                         *pending = Some(refused);
                         return Ok(true);
@@ -969,6 +1034,255 @@ impl Engine {
                     progressed = true;
                 }
             }
+        }
+    }
+
+    /// Offers `message` to the socket. Returns it if there is no room, in
+    /// which case the socket's reading brings the engine back. If the socket
+    /// dropped its receiver the message is discarded, so lingering sends
+    /// carry on. A message larger than a receive log streams into it.
+    fn deliver(
+        &mut self,
+        inbound: &mut SessionInbound,
+        message: Message,
+        cx: &mut Context<'_>,
+    ) -> Result<Option<Message>, EngineError> {
+        let writer = match inbound {
+            SessionInbound::Pipe(writer) => return deliver_to_pipe(writer, message, cx),
+            SessionInbound::Log(writer) => writer,
+        };
+        let len = encoded_len(&message);
+        if len > writer.capacity() {
+            self.log.inbound_streaming = Some(Streaming::new(message));
+            self.log.partial_committed = true;
+            self.poll_inbound_streaming(writer, cx);
+            return Ok(None);
+        }
+        match writer.poll_writable(cx, len) {
+            Poll::Ready(Ok(())) => {
+                write_message(writer, &message);
+                Ok(None)
+            }
+            Poll::Ready(Err(_)) => Ok(None),
+            Poll::Pending => Ok(Some(message)),
+        }
+    }
+
+    /// Continues a message streaming into the receive log. Whether it is
+    /// done, or the socket is gone.
+    fn poll_inbound_streaming(&mut self, writer: &mut LogWriter, cx: &mut Context<'_>) -> bool {
+        let Some(streaming) = &mut self.log.inbound_streaming else {
+            return true;
+        };
+        if poll_stream_into(writer, streaming, cx).is_pending() {
+            return false;
+        }
+        self.log.inbound_streaming = None;
+        self.log.partial_committed = false;
+        true
+    }
+
+    /// Reads from the stream straight into the receive log, for a ZMTP 2.0
+    /// or 3.x peer without CURVE. Only complete messages are committed,
+    /// unless one grows past half the log; commands are answered as they
+    /// are found. The handshake's decoder is emptied into the log first.
+    fn receive_direct(
+        &mut self,
+        decoder: &mut Decoder,
+        encoder: Encoder,
+        pending: &mut Option<Message>,
+        inbound: &mut SessionInbound,
+        cx: &mut Context<'_>,
+    ) -> Result<bool, EngineError> {
+        let mut progressed = false;
+        if !self.log.direct {
+            // What the handshake's reads brought past it: deliver what decodes,
+            // then hand the decoder's octets, between messages, to the log.
+            loop {
+                if pending.is_some() {
+                    let (moved, done) = self.hand_over(decoder, encoder, pending, inbound, cx)?;
+                    progressed |= moved;
+                    if !done {
+                        return Ok(progressed);
+                    }
+                    continue;
+                }
+                let SessionInbound::Log(writer) = inbound else {
+                    unreachable!("direct reads need a log");
+                };
+                if writer.free() < decoder.buffered() {
+                    if writer.poll_writable(cx, decoder.buffered()).is_pending() {
+                        return Ok(progressed);
+                    }
+                    continue;
+                }
+                if let Some(octets) = decoder.take_buffered() {
+                    writer.put(&octets);
+                    self.log.direct = true;
+                    self.take_in(writer, octets.len(), encoder)?;
+                    progressed = true;
+                    break;
+                }
+                let (moved, done) = self.hand_over(decoder, encoder, pending, inbound, cx)?;
+                progressed |= moved;
+                if !done {
+                    return Ok(progressed);
+                }
+            }
+        }
+        let SessionInbound::Log(writer) = inbound else {
+            unreachable!("direct reads need a log");
+        };
+        loop {
+            if writer.is_closed() {
+                // The socket is gone: answer heartbeats, drop the rest.
+                let mut scratch = [0u8; 8192];
+                let n = match self.read_into(&mut [io::IoSliceMut::new(&mut scratch)])? {
+                    Some(n) => n,
+                    None => return Ok(progressed),
+                };
+                let mut commands = Vec::new();
+                let walker = self.inbound_walker(encoder);
+                let walked = walker.walk(&scratch[..n], |body| commands.push(body.to_vec()));
+                for body in commands {
+                    self.handle_command(&body, encoder)?;
+                }
+                if let Some(err) = walked.error {
+                    return Err(EngineError::Decode(err));
+                }
+                progressed = true;
+                continue;
+            }
+            if !writer.has_room(1) {
+                if writer.uncommitted() > 0 {
+                    // A message fills the log: the socket must start on it.
+                    writer.commit();
+                    self.log.partial_committed = true;
+                }
+                match writer.poll_writable(cx, 1) {
+                    Poll::Ready(_) => continue,
+                    Poll::Pending => return Ok(progressed),
+                }
+            }
+            let [first, second] = writer.spare();
+            let read =
+                self.read_into(&mut [io::IoSliceMut::new(first), io::IoSliceMut::new(second)])?;
+            let Some(n) = read else {
+                return Ok(progressed);
+            };
+            writer.advance(n);
+            self.take_in(writer, n, encoder)?;
+            progressed = true;
+        }
+    }
+
+    /// Delivers the pending message, or decodes and delivers the next from
+    /// the handshake's decoder, reading more if it needs it. Returns whether
+    /// anything moved, and whether to carry on.
+    fn hand_over(
+        &mut self,
+        decoder: &mut Decoder,
+        encoder: Encoder,
+        pending: &mut Option<Message>,
+        inbound: &mut SessionInbound,
+        cx: &mut Context<'_>,
+    ) -> Result<(bool, bool), EngineError> {
+        if let Some(message) = pending.take() {
+            if let Some(refused) = self.deliver(inbound, message, cx)? {
+                *pending = Some(refused);
+                return Ok((false, false));
+            }
+            return Ok((true, true));
+        }
+        match decoder.decode().map_err(EngineError::Decode)? {
+            Some(Incoming::Message(message)) => {
+                self.deadlines.heard_from_peer();
+                *pending = Some(message);
+                Ok((true, true))
+            }
+            Some(Incoming::Command(body)) => {
+                self.deadlines.heard_from_peer();
+                self.handle_command(&body, encoder)?;
+                Ok((true, true))
+            }
+            None => {
+                let filled = self.fill(decoder)?;
+                Ok((filled, filled))
+            }
+        }
+    }
+
+    /// Reads from the stream into `bufs`. `None` if the OS would block.
+    fn read_into(&mut self, bufs: &mut [io::IoSliceMut<'_>]) -> Result<Option<usize>, EngineError> {
+        loop {
+            match self.stream.read_vectored(bufs) {
+                Ok(0) => return Err(EngineError::PeerClosed),
+                Ok(n) => {
+                    self.deadlines.heard_from_peer();
+                    return Ok(Some(n));
+                }
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(None),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
+                Err(err) => return Err(EngineError::Io(err)),
+            }
+        }
+    }
+
+    fn inbound_walker(&mut self, encoder: Encoder) -> &mut InboundWalker {
+        let config = DecoderConfig {
+            max_message_size: self.config.max_message_size,
+        };
+        self.log
+            .walker
+            .get_or_insert_with(|| InboundWalker::new(encoder.version(), config))
+    }
+
+    /// Walks the last `n` octets put into the receive log, answers the
+    /// commands among them, and commits up to the last complete message.
+    /// The rest of a message stays uncommitted unless it passes half the
+    /// log, when it is committed for the socket to start decoding.
+    fn take_in(
+        &mut self,
+        writer: &mut LogWriter,
+        n: usize,
+        encoder: Encoder,
+    ) -> Result<(), EngineError> {
+        let before = writer.uncommitted() - n;
+        let mut commands = Vec::new();
+        let walker = self.inbound_walker(encoder);
+        let [first, second] = writer.uncommitted_tail(n);
+        let mut walked = walker.walk(first, |body| commands.push(body.to_vec()));
+        if walked.error.is_none() {
+            let more = walker.walk(second, |body| commands.push(body.to_vec()));
+            walked.messages += more.messages;
+            if let Some(boundary) = more.last_boundary {
+                walked.last_boundary = Some(first.len() + boundary);
+            }
+            walked.error = more.error;
+        }
+        let at_boundary = walker.at_boundary();
+        for _ in 0..walked.messages {
+            writer.end_message();
+        }
+        if at_boundary && walked.error.is_none() {
+            writer.commit();
+            self.log.partial_committed = false;
+        } else {
+            if let Some(boundary) = walked.last_boundary {
+                writer.commit_prefix(before + boundary);
+                self.log.partial_committed = false;
+            }
+            if writer.uncommitted() > writer.capacity() / 2 {
+                writer.commit();
+                self.log.partial_committed = true;
+            }
+        }
+        for body in commands {
+            self.handle_command(&body, encoder)?;
+        }
+        match walked.error {
+            Some(err) => Err(EngineError::Decode(err)),
+            None => Ok(()),
         }
     }
 
@@ -1091,10 +1405,11 @@ fn remember_membership(groups: &mut Topics, change: &Membership) {
     }
 }
 
-/// Offers `message` to the socket. Returns it if the pipe is full, in which
-/// case the pipe's waker will bring the engine back. If the socket dropped
-/// its receiver the message is discarded, so lingering sends carry on.
-fn deliver(
+/// Offers `message` to the socket's pipe. Returns it if the pipe is full, in
+/// which case the pipe's waker will bring the engine back. If the socket
+/// dropped its receiver the message is discarded, so lingering sends carry
+/// on.
+fn deliver_to_pipe(
     inbound: &mut Writer<Message>,
     message: Message,
     cx: &mut Context<'_>,

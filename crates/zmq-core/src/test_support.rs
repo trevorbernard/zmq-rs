@@ -57,7 +57,7 @@ pub(crate) fn connection(hwm: usize) -> (Connection, FakeSession) {
     (
         Connection {
             tx: crate::Outbound::Pipe(tx),
-            rx,
+            rx: crate::Inbound::Pipe(rx),
             peer: peer.clone(),
         },
         FakeSession {
