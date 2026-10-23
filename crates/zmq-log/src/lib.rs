@@ -366,15 +366,36 @@ impl LogWriter {
     /// the reader if it is waiting.
     #[inline]
     pub fn commit(&mut self) {
-        if self.tail == self.published && self.messages_written == self.messages_published {
+        self.publish(self.tail);
+    }
+
+    /// Publishes the first `octets` put since the last commit, and every
+    /// message ended so far, which must all end within them. The rest stays
+    /// put but unpublished.
+    ///
+    /// # Panics
+    ///
+    /// If `octets` is more than [`uncommitted`](Self::uncommitted).
+    pub fn commit_prefix(&mut self, octets: usize) {
+        assert!(
+            octets <= self.uncommitted(),
+            "commit of {octets} octets with {} uncommitted",
+            self.uncommitted()
+        );
+        self.publish(self.published + octets as u64);
+    }
+
+    #[inline]
+    fn publish(&mut self, end: u64) {
+        if end == self.published && self.messages_written == self.messages_published {
             return;
         }
-        self.published = self.tail;
+        self.published = end;
         self.messages_published = self.messages_written;
         self.shared
             .messages_written
             .store(self.messages_written, Ordering::Release);
-        self.shared.written.store(self.tail, Ordering::Release);
+        self.shared.written.store(end, Ordering::Release);
         // Pairs with the fence in `LogReader::poll_committed`.
         fence(Ordering::SeqCst);
         let wait = &self.shared.reader;
@@ -860,6 +881,19 @@ mod tests {
         assert_eq!(writer.uncommitted(), 6);
         writer.commit();
         assert_eq!(read_all(&mut reader), [1, 2, 3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn a_prefix_commits_and_the_rest_waits() {
+        let (mut writer, mut reader) = log(n(16), None);
+        writer.put(b"donepart");
+        writer.end_message();
+        writer.commit_prefix(4);
+        assert_eq!(read_all(&mut reader), b"done");
+        assert_eq!(writer.uncommitted(), 4);
+        writer.abandon();
+        writer.commit();
+        assert_eq!(read_all(&mut reader), b"done");
     }
 
     #[test]
