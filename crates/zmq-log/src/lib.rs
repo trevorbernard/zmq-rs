@@ -206,7 +206,11 @@ impl LogWriter {
     /// least half the log, or half the high-water mark, has drained.
     /// Anything put but not committed is committed first, so the reader can
     /// make the room.
-    pub fn poll_writable(&mut self, cx: &mut Context<'_>, octets: usize) -> Poll<Result<(), Closed>> {
+    pub fn poll_writable(
+        &mut self,
+        cx: &mut Context<'_>,
+        octets: usize,
+    ) -> Poll<Result<(), Closed>> {
         if self.is_closed() {
             return Poll::Ready(Err(Closed));
         }
@@ -227,8 +231,10 @@ impl LogWriter {
         };
         let wait = &self.shared.writer;
         wait.waker.register(cx.waker());
-        wait.wanted_released.store(wanted_released, Ordering::Relaxed);
-        wait.wanted_messages.store(wanted_messages, Ordering::Relaxed);
+        wait.wanted_released
+            .store(wanted_released, Ordering::Relaxed);
+        wait.wanted_messages
+            .store(wanted_messages, Ordering::Relaxed);
         wait.waiting.store(true, Ordering::Release);
         // Pairs with the fence in `LogReader::release`: either the reader's
         // check sees `waiting`, or these loads see its release.

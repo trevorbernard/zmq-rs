@@ -14,7 +14,7 @@ use zmq_pipe::{Reader, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
 use crate::transport::Address;
-use crate::{Connection, ConnectionConfig, Context};
+use crate::{Connection, ConnectionConfig, Context, Streaming};
 
 /// A stable name for a peer within one socket. Keys only grow, so peers
 /// stay sorted by key.
@@ -293,25 +293,32 @@ fn add(list: &mut PeerList, greeting: Option<&Message>, mut connection: Connecti
 #[derive(Debug, Default)]
 pub struct LoadBalancer {
     next: usize,
+    /// A message too large for its peer's log, part way through it. Like
+    /// libzmq's `_more`, nothing else is sent until it is done.
+    streaming: Option<(PeerKey, Streaming)>,
 }
 
 impl LoadBalancer {
     /// Sends `message` to the next peer with room and returns that peer.
     /// Hands the message back, with `cx` registered on every peer, if none
-    /// has room or there are no peers.
+    /// has room or there are no peers. Never streams: a message too large
+    /// for a peer's log is not sent to that peer.
     pub fn poll_send(
         &mut self,
         peers: &mut PeerList,
         mut message: Message,
         cx: &mut TaskContext<'_>,
     ) -> Result<PeerKey, Message> {
+        if self.poll_streaming(peers, cx).is_pending() {
+            return Err(message);
+        }
         let count = peers.peers.len();
         for offset in 0..count {
             let index = (self.next + offset) % count;
             let peer = &mut peers.peers[index];
             let tx = &mut peer.connection.tx;
             // Closed peers are skipped; full ones register `cx`.
-            if let Poll::Ready(Ok(())) = tx.poll_ready(cx) {
+            if let Poll::Ready(Ok(())) = tx.poll_ready_for(cx, &message) {
                 match tx.try_send(message) {
                     Ok(()) => {
                         self.next = (index + 1) % count;
@@ -322,6 +329,60 @@ impl LoadBalancer {
             }
         }
         Err(message)
+    }
+
+    /// Like [`poll_send`](Self::poll_send), but a message too large for the
+    /// next peer's log is streamed through it once that log has drained,
+    /// staying on that peer until the message is written. Takes the message
+    /// from `slot` once it is queued or streaming has started; `Ready` once
+    /// it is all queued.
+    pub fn poll_send_streaming(
+        &mut self,
+        peers: &mut PeerList,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        loop {
+            if self.poll_streaming(peers, cx).is_pending() {
+                return Poll::Pending;
+            }
+            let Some(message) = slot.take() else {
+                return Poll::Ready(());
+            };
+            let message = match self.poll_send(peers, message, cx) {
+                Ok(_) => return Poll::Ready(()),
+                Err(message) => message,
+            };
+            let count = peers.peers.len();
+            let chosen = (0..count)
+                .map(|offset| (self.next + offset) % count)
+                .find(|&index| {
+                    let tx = &mut peers.peers[index].connection.tx;
+                    tx.needs_streaming(&message)
+                        && matches!(tx.poll_ready_for(cx, &message), Poll::Ready(Ok(())))
+                });
+            let Some(index) = chosen else {
+                *slot = Some(message);
+                return Poll::Pending;
+            };
+            self.next = (index + 1) % count;
+            self.streaming = Some((peers.peers[index].key, Streaming::new(message)));
+        }
+    }
+
+    /// Continues a message being streamed. `Ready` once there is none, or
+    /// its peer is gone, which discards the rest.
+    fn poll_streaming(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) -> Poll<()> {
+        let Some((key, streaming)) = &mut self.streaming else {
+            return Poll::Ready(());
+        };
+        if let Some(peer) = peers.get_mut(*key)
+            && peer.connection.tx.poll_stream(streaming, cx).is_pending()
+        {
+            return Poll::Pending;
+        }
+        self.streaming = None;
+        Poll::Ready(())
     }
 }
 

@@ -441,7 +441,7 @@ impl Socket<Push> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
         let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_send_whole(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
         slot.map_or(Ok(()), Err)
     }
 
@@ -477,7 +477,30 @@ impl Socket<Push> {
         // PUSH never receives: discard anything peers send, and drop peers
         // that are gone.
         self.peers.prune_send_only();
-        poll_load_balanced(&mut self.peers, &mut self.routing, slot, cx)
+        poll_load_balanced(
+            &mut self.peers,
+            &mut self.routing,
+            slot,
+            cx,
+            Oversized::Stream,
+        )
+    }
+
+    /// Like `poll_send`, but never starts streaming a message too large for a
+    /// peer's log, so the message is either queued whole or handed back.
+    fn poll_send_whole(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        self.peers.prune_send_only();
+        poll_load_balanced(
+            &mut self.peers,
+            &mut self.routing,
+            slot,
+            cx,
+            Oversized::HandBack,
+        )
     }
 }
 
@@ -1026,7 +1049,13 @@ impl Socket<Dealer> {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        poll_load_balanced(&mut self.peers, &mut self.routing.send, slot, cx)
+        poll_load_balanced(
+            &mut self.peers,
+            &mut self.routing.send,
+            slot,
+            cx,
+            Oversized::Stream,
+        )
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
@@ -1381,16 +1410,30 @@ impl Socket<Router> {
 
 /// Sends the message in `slot` to the next peer with room, putting it back
 /// and returning `Pending` if none has room. Shared by PUSH and DEALER.
+/// What a load-balanced send does with a message too large for a peer's
+/// send log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Oversized {
+    /// Stream it through the log, staying on that peer until it is written.
+    Stream,
+    /// Hand it back, so the send is whole or nothing.
+    HandBack,
+}
+
 fn poll_load_balanced(
     peers: &mut Peers,
     balancer: &mut LoadBalancer,
     slot: &mut Option<Message>,
     cx: &mut TaskContext<'_>,
+    oversized: Oversized,
 ) -> Poll<()> {
+    peers.accept(cx);
+    if oversized == Oversized::Stream {
+        return balancer.poll_send_streaming(peers.list_mut(), slot, cx);
+    }
     let Some(message) = slot.take() else {
         return Poll::Ready(());
     };
-    peers.accept(cx);
     match balancer.poll_send(peers.list_mut(), message, cx) {
         Ok(_) => Poll::Ready(()),
         Err(message) => {

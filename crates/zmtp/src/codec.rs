@@ -366,6 +366,15 @@ pub fn frame_header(len: u64, more: bool, out: &mut [u8; MAX_FRAME_HEADER]) -> u
     }
 }
 
+/// How far [`FrameWalker::walk`] goes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalkUntil {
+    /// Through all the octets given.
+    End,
+    /// Just past the first message that ends in them, if one does.
+    MessageEnd,
+}
+
 /// Follows ZMTP 2.0/3.x message frames through octets fed in pieces, to
 /// find where messages end without decoding them. The octets must be
 /// well-formed message frames, such as those written with
@@ -393,10 +402,9 @@ impl FrameWalker {
         self.have == 0 && self.body.is_none() && !self.in_message
     }
 
-    /// Walks `data`, stopping just after the first message that ends in it
-    /// if `stop_at_end`. Returns how many octets it walked and how many
-    /// messages ended in them.
-    pub fn walk(&mut self, data: &[u8], stop_at_end: bool) -> (usize, u64) {
+    /// Walks `data` as far as `until` says. Returns how many octets it
+    /// walked and how many messages ended in them.
+    pub fn walk(&mut self, data: &[u8], until: WalkUntil) -> (usize, u64) {
         let mut pos = 0;
         let mut ended = 0;
         loop {
@@ -411,7 +419,8 @@ impl FrameWalker {
                         2
                     };
                     let take = (needed - self.have).min(data.len() - pos);
-                    self.header[self.have..self.have + take].copy_from_slice(&data[pos..pos + take]);
+                    self.header[self.have..self.have + take]
+                        .copy_from_slice(&data[pos..pos + take]);
                     self.have += take;
                     pos += take;
                     // A LONG flag only becomes known with the first octet.
@@ -442,7 +451,7 @@ impl FrameWalker {
                     self.in_message = self.more;
                     if !self.more {
                         ended += 1;
-                        if stop_at_end {
+                        if until == WalkUntil::MessageEnd {
                             return (pos, ended);
                         }
                     }

@@ -21,6 +21,7 @@ mio = { version = "1", features = ["net", "os-poll"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 zeroize = "1"
 zmtp = { path = "crates/zmtp" }
+zmq-log = { path = "crates/zmq-log" }
 zmq-pipe = { path = "crates/zmq-pipe" }
 zmq-core = { path = "crates/zmq-core" }
 

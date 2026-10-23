@@ -146,6 +146,10 @@ impl Write for Stream {
         delegate!(self, stream => stream.write(buf))
     }
 
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        delegate!(self, stream => stream.write_vectored(bufs))
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         delegate!(self, stream => stream.flush())
     }

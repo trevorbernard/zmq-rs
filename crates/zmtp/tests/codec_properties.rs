@@ -259,7 +259,7 @@ proptest! {
         let mut split = splits.iter().cycle();
         while pos < encoded.len() {
             let end = (pos + split.next().unwrap()).min(encoded.len());
-            let (walked, n) = walker.walk(&encoded[pos..end], false);
+            let (walked, n) = walker.walk(&encoded[pos..end], zmtp::WalkUntil::End);
             prop_assert_eq!(walked, end - pos);
             pos = end;
             ended += n;
@@ -271,7 +271,7 @@ proptest! {
         let mut walker = zmtp::FrameWalker::new();
         let mut pos = 0;
         for &end in &ends {
-            let (walked, n) = walker.walk(&encoded[pos..], true);
+            let (walked, n) = walker.walk(&encoded[pos..], zmtp::WalkUntil::MessageEnd);
             prop_assert_eq!(n, 1);
             pos += walked;
             prop_assert_eq!(pos, end);

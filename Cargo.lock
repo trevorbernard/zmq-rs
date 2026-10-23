@@ -1165,6 +1165,7 @@ dependencies = [
  "criterion",
  "mio",
  "proptest",
+ "zmq-log",
  "zmq-pipe",
  "zmtp",
 ]

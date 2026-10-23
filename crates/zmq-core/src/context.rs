@@ -23,13 +23,17 @@ use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
 use crate::transport::{Address, IpcCleanup, StreamListener};
-use crate::{EventKind, MonitorSink, Reconnect, Security};
+use crate::{EventKind, MonitorSink, Outbound, Reconnect, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// libzmq's default ZMQ_SNDHWM and ZMQ_RCVHWM.
 const DEFAULT_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
+
+/// The octets of a PUSH connection's send log: room for several 64 KiB
+/// messages, as libzmq's socket buffers would hold.
+const DEFAULT_SEND_LOG: NonZeroUsize = NonZeroUsize::new(256 * 1024).unwrap();
 
 /// Owns the I/O threads. Cloning shares them; they stop when the last clone
 /// is dropped, closing every connection on them.
@@ -112,6 +116,11 @@ pub struct ConnectionConfig {
     ///
     /// [`Event`]: crate::Event
     pub monitor: MonitorSink,
+    /// Encode messages to the peer straight into a byte log of this many
+    /// octets, which the engine writes to the stream as it is, instead of
+    /// queueing them whole. Used by tcp and ipc connections that are not
+    /// conflated; `inproc` always queues whole messages.
+    pub send_log: Option<NonZeroUsize>,
 }
 
 /// ZMTP 3.1 heartbeats: libzmq's `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT`
@@ -167,7 +176,7 @@ pub struct ShutdownTimedOut {
 #[derive(Debug)]
 pub struct Connection {
     /// Messages to the peer.
-    pub tx: Writer<Message>,
+    pub tx: Outbound,
     /// Messages from the peer.
     pub rx: Reader<Message>,
     pub(crate) peer: PeerSlot,
@@ -412,6 +421,7 @@ fn reported<T>(result: io::Result<T>, config: &ConnectionConfig, endpoint: &str)
 
 impl ConnectionConfig {
     /// libzmq's defaults: empty identity, HWM 1000 each way, no frame limit.
+    /// PUSH also sends through a 256 KiB log.
     pub fn new(socket_type: SocketType) -> Self {
         let hwm = Hwm::Messages(DEFAULT_HWM);
         Self {
@@ -429,6 +439,7 @@ impl ConnectionConfig {
             heartbeat: None,
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
+            send_log: (socket_type == SocketType::Push).then_some(DEFAULT_SEND_LOG),
         }
     }
 }
@@ -613,12 +624,12 @@ impl Context {
         let (tx, server_rx) = message_pipe(send_hwm, conflate_out);
         let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
         let client = Connection {
-            tx,
+            tx: Outbound::Pipe(tx),
             rx,
             peer: PeerSlot::default(),
         };
         let server = Connection {
-            tx: server_tx,
+            tx: Outbound::Pipe(server_tx),
             rx: server_rx,
             peer: PeerSlot::default(),
         };

@@ -11,18 +11,20 @@ use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
+use zmq_log::LogReader;
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
     CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
-    Membership, Message, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
-    PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
-    PlainServer, PlainServerConfig, Role, ServerStep, SocketType, Subscription, Ttl, Version,
-    ZapFailure, ZapReply,
+    FrameWalker, Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming,
+    LegacyPeers, Membership, Message, NullHandshake, NullZapConfig, PeerGreeting,
+    PendingAuthentication, PendingCurveAuthentication, PendingNullAuthentication, Ping,
+    PingContext, PlainClient, PlainServer, PlainServerConfig, Role, ServerStep, SocketType,
+    Subscription, Ttl, Version, WalkUntil, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
+use crate::outbound::SessionOutbound;
 use crate::transport::Stream;
 use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
 
@@ -44,6 +46,22 @@ pub(crate) struct Engine {
     deadlines: Deadlines,
     /// Boxes and unboxes every frame once a CURVE handshake is done.
     curve: Option<CurveCodec>,
+    /// How this engine takes from a log, once it starts to.
+    log: LogProgress,
+}
+
+/// An engine's progress through the socket's log.
+#[derive(Default)]
+struct LogProgress {
+    /// Whether the engine has looked at the log yet.
+    started: bool,
+    /// Dropping what is left of a message an earlier connection was part
+    /// way through sending.
+    skipping: bool,
+    /// The stream ends part way through a message, so commands must wait.
+    mid_message: bool,
+    /// Rebuilds messages for peers whose framing differs from the log's.
+    decoder: Option<Decoder>,
 }
 
 /// When the engine must act or give up, all `None` while not applicable.
@@ -192,7 +210,7 @@ pub(crate) struct Pipes<'a> {
     /// Towards the socket.
     pub(crate) inbound: &'a mut Writer<Message>,
     /// From the socket.
-    pub(crate) outbound: &'a mut Reader<Message>,
+    pub(crate) outbound: &'a mut SessionOutbound,
     /// Where the handshake's outcome goes, for the socket to read.
     pub(crate) peer: &'a PeerSlot,
     /// The topics a SUB or XSUB has subscribed to over this session's
@@ -232,6 +250,7 @@ impl Engine {
             outbound_empty: false,
             deadlines: Deadlines::default(),
             curve: None,
+            log: LogProgress::default(),
         }
     }
 
@@ -358,6 +377,10 @@ impl Engine {
 
     /// Writes pending output until done or the OS would block.
     fn flush(&mut self) -> Result<bool, EngineError> {
+        // A command must not land between the frames of a message.
+        if self.log.mid_message {
+            return Ok(false);
+        }
         let mut progressed = false;
         while self.out_pos < self.out.len() {
             match self.stream.write(&self.out[self.out_pos..]) {
@@ -378,7 +401,8 @@ impl Engine {
         Ok(progressed)
     }
 
-    /// Encodes messages from the socket while output is not backed up.
+    /// Takes what the socket has queued: whole messages from a pipe, or
+    /// encoded octets from a log.
     fn pull_outbound(
         &mut self,
         pipes: &mut Pipes<'_>,
@@ -388,15 +412,138 @@ impl Engine {
             return Ok(false);
         };
         let encoder = *encoder;
+        match pipes.outbound {
+            SessionOutbound::Pipe(reader) => {
+                self.pull_pipe(encoder, reader, pipes.subscriptions, cx)
+            }
+            SessionOutbound::Log { reader, walker } => self.pull_log(encoder, reader, walker, cx),
+        }
+    }
+
+    /// Writes the socket's log to the stream: as it is for ZMTP 2.0 and 3.x
+    /// peers without CURVE, since the log holds their framing, and decoded
+    /// and encoded again for the rest.
+    fn pull_log(
+        &mut self,
+        encoder: Encoder,
+        reader: &mut LogReader,
+        walker: &mut FrameWalker,
+        cx: &mut Context<'_>,
+    ) -> Result<bool, EngineError> {
+        if !self.log.started {
+            self.log.started = true;
+            // The rest of a message an earlier connection was part way
+            // through is dropped, as libzmq drops what its engine held.
+            self.log.skipping = !walker.at_message_boundary();
+        }
+        let as_is = self.curve.is_none() && encoder.version() != Version::V1;
+        let mut progressed = false;
+        loop {
+            let [first, second] = reader.committed();
+            if first.is_empty() {
+                // Register, then look again so a commit in between is seen.
+                match reader.poll_committed(cx) {
+                    Poll::Ready(true) => continue,
+                    Poll::Ready(false) | Poll::Pending => {
+                        self.outbound_empty = true;
+                        return Ok(progressed);
+                    }
+                }
+            }
+            self.outbound_empty = false;
+            if self.log.skipping {
+                let (walked, ended) = walker.walk(first, WalkUntil::MessageEnd);
+                reader.release(walked, ended);
+                self.log.skipping = ended == 0;
+                progressed = true;
+                continue;
+            }
+            if !as_is {
+                if self.out.len() - self.out_pos >= MAX_PENDING_OUTPUT {
+                    return Ok(progressed);
+                }
+                let decoder = self
+                    .log
+                    .decoder
+                    .get_or_insert_with(|| Decoder::new(Version::V3_1, DecoderConfig::default()));
+                decoder.extend_from_slice(first);
+                decoder.extend_from_slice(second);
+                let len = first.len() + second.len();
+                let ended =
+                    walker.walk(first, WalkUntil::End).1 + walker.walk(second, WalkUntil::End).1;
+                reader.release(len, ended);
+                let mut decoder = self.log.decoder.take().expect("decoder");
+                while let Some(incoming) = decoder.decode().map_err(EngineError::Decode)? {
+                    let Incoming::Message(message) = incoming else {
+                        unreachable!("the log holds no commands");
+                    };
+                    self.write_message(encoder, &message)?;
+                }
+                self.log.decoder = Some(decoder);
+                progressed = true;
+                continue;
+            }
+            // Queued commands go out between messages: finish the message
+            // under way, then send them.
+            let mut limit = first.len() + second.len();
+            if !self.out.is_empty() {
+                if self.log.mid_message {
+                    let mut probe = walker.clone();
+                    let (walked, ended) = probe.walk(first, WalkUntil::MessageEnd);
+                    limit = if ended > 0 {
+                        walked
+                    } else {
+                        walked + probe.walk(second, WalkUntil::MessageEnd).0
+                    };
+                } else {
+                    self.flush()?;
+                    if !self.out.is_empty() {
+                        return Ok(progressed);
+                    }
+                }
+            }
+            let (first, second) = (
+                &first[..limit.min(first.len())],
+                &second[..limit.saturating_sub(first.len())],
+            );
+            let written = match self
+                .stream
+                .write_vectored(&[io::IoSlice::new(first), io::IoSlice::new(second)])
+            {
+                Ok(0) => return Err(EngineError::Io(io::ErrorKind::WriteZero.into())),
+                Ok(n) => n,
+                Err(err) if err.kind() == io::ErrorKind::WouldBlock => return Ok(progressed),
+                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+                Err(err) => return Err(EngineError::Io(err)),
+            };
+            let in_first = written.min(first.len());
+            let mut ended = walker.walk(&first[..in_first], WalkUntil::End).1;
+            if written > in_first {
+                ended += walker.walk(&second[..written - in_first], WalkUntil::End).1;
+            }
+            reader.release(written, ended);
+            self.log.mid_message = !walker.at_message_boundary();
+            progressed = true;
+        }
+    }
+
+    /// Encodes messages from the socket's pipe while output is not backed up.
+    fn pull_pipe(
+        &mut self,
+        encoder: Encoder,
+        reader: &mut Reader<Message>,
+        subscriptions: &mut Topics,
+        cx: &mut Context<'_>,
+    ) -> Result<bool, EngineError> {
         let mut progressed = false;
         while self.out.len() - self.out_pos < MAX_PENDING_OUTPUT {
-            match pipes.outbound.poll_recv(cx) {
+            match reader.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
                     if let Some(subscription) = self.outgoing_subscription(&message) {
-                        remember(pipes.subscriptions, &subscription);
+                        remember(subscriptions, &subscription);
                         self.encode_subscription(encoder, &subscription)?;
                     } else if let Some(change) = self.outgoing_membership(&message) {
-                        remember_membership(pipes.subscriptions, &change);
+                        remember_membership(subscriptions, &change);
                         self.encode_membership(encoder, &change)?;
                     } else {
                         self.write_message(encoder, &message)?;

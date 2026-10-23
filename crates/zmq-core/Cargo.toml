@@ -15,6 +15,7 @@ draft = []
 [dependencies]
 mio.workspace = true
 zmtp.workspace = true
+zmq-log.workspace = true
 zmq-pipe.workspace = true
 
 [dev-dependencies]

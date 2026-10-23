@@ -10,6 +10,7 @@ mod context;
 mod engine;
 mod io_thread;
 mod monitor;
+mod outbound;
 mod pair;
 mod pubsub;
 #[cfg(feature = "draft")]
@@ -31,6 +32,7 @@ pub use context::{
     ShutdownTimedOut,
 };
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
+pub use outbound::{Outbound, Streaming};
 pub use pair::Pair;
 pub use pubsub::{Publisher, Subscriber, Topics, Verbosity, XPubEvent};
 #[cfg(feature = "draft")]

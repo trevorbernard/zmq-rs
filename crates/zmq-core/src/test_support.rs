@@ -56,7 +56,7 @@ pub(crate) fn connection(hwm: usize) -> (Connection, FakeSession) {
     let peer = PeerSlot::default();
     (
         Connection {
-            tx,
+            tx: crate::Outbound::Pipe(tx),
             rx,
             peer: peer.clone(),
         },
