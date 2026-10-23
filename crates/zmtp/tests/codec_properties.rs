@@ -278,3 +278,83 @@ proptest! {
         }
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(256))]
+
+    /// The inbound walker sees what the decoder sees: the same number of
+    /// messages, the same command bodies, a boundary after each, and the
+    /// same size error at the same place.
+    #[test]
+    fn inbound_walker_agrees_with_the_decoder(
+        (version, items) in traffic().prop_filter("1.0 is not walked", |(v, _)| *v != Version::V1),
+        arrival in arrival(),
+        limit in prop::option::of(1u64..200_000),
+    ) {
+        let config = DecoderConfig { max_message_size: limit };
+        let input = encode(version, &items);
+        let (decoded, error) = decode(version, config, &input, &arrival);
+        let mut walker = zmtp::InboundWalker::new(version, config);
+        let mut commands = Vec::new();
+        let mut messages = 0;
+        let mut walk_error = None;
+        let mut pos = 0;
+        let mut reads = arrival.reads.iter().cycle();
+        while pos < input.len() {
+            let end = (pos + reads.next().unwrap()).min(input.len());
+            let walked = walker.walk(&input[pos..end], |body| commands.push(body.to_vec()));
+            messages += walked.messages;
+            if let Some(boundary) = walked.last_boundary {
+                prop_assert!(boundary <= end - pos);
+            }
+            if walked.error.is_some() {
+                walk_error = walked.error;
+                break;
+            }
+            pos = end;
+        }
+        let decoded_messages = decoded
+            .iter()
+            .filter(|item| matches!(item, Incoming::Message(_)))
+            .count() as u64;
+        let decoded_commands: Vec<Vec<u8>> = decoded
+            .iter()
+            .filter_map(|item| match item {
+                Incoming::Command(body) => Some(body.to_vec()),
+                Incoming::Message(_) => None,
+            })
+            .collect();
+        prop_assert_eq!(messages, decoded_messages);
+        prop_assert_eq!(commands, decoded_commands);
+        prop_assert_eq!(walk_error, error.clone());
+        if error.is_none() {
+            prop_assert!(walker.at_boundary());
+        }
+    }
+}
+
+#[test]
+fn a_decoder_between_messages_hands_over_what_it_has_not_decoded() {
+    let encoder = Encoder::new(Version::V3_1);
+    let mut input = Vec::new();
+    encoder.encode(&Message::from("one"), &mut input);
+    let second_starts = input.len();
+    encoder.encode(&Message::from("two"), &mut input);
+    let mut decoder = Decoder::new(Version::V3_1, DecoderConfig::default());
+    decoder.extend_from_slice(&input[..second_starts + 1]);
+    assert_eq!(
+        decoder.decode().unwrap(),
+        Some(Incoming::Message(Message::from("one")))
+    );
+    let buffered = decoder.take_buffered().expect("between messages");
+    assert_eq!(&buffered[..], &input[second_starts..second_starts + 1]);
+    assert_eq!(decoder.decode().unwrap(), None);
+
+    let mut decoder = Decoder::new(Version::V3_1, DecoderConfig::default());
+    decoder.extend_from_slice(&input[..3]);
+    assert_eq!(decoder.decode().unwrap(), None);
+    assert!(
+        decoder.take_buffered().is_none(),
+        "part way through a frame"
+    );
+}

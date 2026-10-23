@@ -24,8 +24,8 @@ pub mod z85;
 mod zap;
 
 pub use codec::{
-    CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, FrameWalker, Incoming,
-    MAX_FRAME_HEADER, WalkUntil, frame_header,
+    CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, FrameWalker, InboundWalker,
+    Incoming, MAX_FRAME_HEADER, WalkUntil, Walked, frame_header,
 };
 pub use command::{
     Command, CommandError, CommandName, ErrorReason, Group, InvalidGroup, InvalidName, Metadata,

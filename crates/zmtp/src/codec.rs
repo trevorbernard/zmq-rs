@@ -220,6 +220,18 @@ impl Decoder {
         self.filled = end;
     }
 
+    /// The octets read but not yet decoded, if the decoder is between
+    /// messages; it is left empty. `None`, taking nothing, if a message or
+    /// frame is part way through.
+    pub fn take_buffered(&mut self) -> Option<BytesMut> {
+        if !matches!(self.state, State::Header) || self.partial.is_some() {
+            return None;
+        }
+        let buffered = self.buf.split_to(self.filled);
+        self.filled = 0;
+        Some(buffered)
+    }
+
     /// Decodes the next message or command, or `None` if more input is needed.
     pub fn decode(&mut self) -> Result<Option<Incoming>, DecodeError> {
         if let Some(err) = &self.failed {
@@ -455,6 +467,164 @@ impl FrameWalker {
                         if until == WalkUntil::MessageEnd {
                             return (pos, ended);
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Follows ZMTP 2.0/3.x frames as they arrive from a peer, in pieces,
+/// without decoding them: where messages end, the body of each command, and
+/// whether a message grows past the size limit. A receiving engine uses it
+/// to pass octets on as they are.
+#[derive(Debug, Clone)]
+pub struct InboundWalker {
+    commands: bool,
+    max_message_size: Option<u64>,
+    header: [u8; MAX_FRAME_HEADER],
+    have: usize,
+    /// Body octets still to come, once a header is complete.
+    body: Option<u64>,
+    more: bool,
+    command: Option<Vec<u8>>,
+    /// A frame with MORE has ended and its message has not.
+    in_message: bool,
+    /// The message so far, as [`DecoderConfig::max_message_size`] counts.
+    message_size: u64,
+}
+
+/// What [`InboundWalker::walk`] found.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct Walked {
+    /// Messages that ended.
+    pub messages: u64,
+    /// How far into the octets walked the last message or command ended,
+    /// if one did.
+    pub last_boundary: Option<usize>,
+    /// Why walking stopped early: the connection must close, after passing
+    /// on what ended before `last_boundary`.
+    pub error: Option<DecodeError>,
+}
+
+impl InboundWalker {
+    /// A walker for octets from a peer speaking `version`, which must be
+    /// 2.0 or later.
+    ///
+    /// # Panics
+    ///
+    /// For ZMTP 1.0, whose framing differs.
+    pub fn new(version: Version, config: DecoderConfig) -> Self {
+        assert!(version != Version::V1, "ZMTP 1.0 framing is not walked");
+        Self {
+            commands: version != Version::V2,
+            max_message_size: config.max_message_size,
+            header: [0; MAX_FRAME_HEADER],
+            have: 0,
+            body: None,
+            more: false,
+            command: None,
+            in_message: false,
+            message_size: 0,
+        }
+    }
+
+    /// Whether the octets walked so far end between messages.
+    pub fn at_boundary(&self) -> bool {
+        self.have == 0 && self.body.is_none() && !self.in_message
+    }
+
+    /// Walks `data`, handing each complete command body to `on_command`.
+    /// After an error, the walker is unusable.
+    pub fn walk(&mut self, data: &[u8], on_command: impl FnMut(&[u8])) -> Walked {
+        let mut walked = Walked::default();
+        if let Err(err) = self.walk_into(data, on_command, &mut walked) {
+            walked.error = Some(err);
+        }
+        walked
+    }
+
+    fn walk_into(
+        &mut self,
+        data: &[u8],
+        mut on_command: impl FnMut(&[u8]),
+        walked: &mut Walked,
+    ) -> Result<(), DecodeError> {
+        let mut pos = 0;
+        loop {
+            match self.body {
+                None => {
+                    if pos == data.len() {
+                        return Ok(());
+                    }
+                    let needed = |header: &[u8; MAX_FRAME_HEADER], have: usize| {
+                        if have > 0 && header[0] & LONG != 0 {
+                            MAX_FRAME_HEADER
+                        } else {
+                            2
+                        }
+                    };
+                    let take = (needed(&self.header, self.have) - self.have).min(data.len() - pos);
+                    self.header[self.have..self.have + take]
+                        .copy_from_slice(&data[pos..pos + take]);
+                    self.have += take;
+                    pos += take;
+                    if self.have < needed(&self.header, self.have) {
+                        continue;
+                    }
+                    let flags = self.header[0];
+                    let size = if flags & LONG == 0 {
+                        u64::from(self.header[1])
+                    } else {
+                        let size = read_u64(&self.header[1..]).expect("eight size octets");
+                        if size > i64::MAX as u64 {
+                            return Err(DecodeError::SizeOverflow);
+                        }
+                        size
+                    };
+                    self.have = 0;
+                    let command = self.commands && flags & COMMAND != 0;
+                    let counted = if command {
+                        counted_size(size)
+                    } else {
+                        self.message_size.saturating_add(counted_size(size))
+                    };
+                    if self.max_message_size.is_some_and(|max| counted > max) {
+                        return Err(DecodeError::MessageTooLarge { size: counted });
+                    }
+                    if command {
+                        let size = usize::try_from(size)
+                            .map_err(|_| DecodeError::MessageTooLarge { size })?;
+                        self.command = Some(Vec::with_capacity(size));
+                    } else {
+                        self.message_size = counted;
+                        self.more = flags & MORE != 0;
+                    }
+                    self.body = Some(size);
+                }
+                Some(remaining) => {
+                    let take = remaining.min((data.len() - pos) as u64) as usize;
+                    if let Some(body) = &mut self.command {
+                        body.extend_from_slice(&data[pos..pos + take]);
+                    }
+                    pos += take;
+                    if (take as u64) < remaining {
+                        self.body = Some(remaining - take as u64);
+                        return Ok(());
+                    }
+                    self.body = None;
+                    if let Some(body) = self.command.take() {
+                        on_command(&body);
+                        if !self.in_message {
+                            walked.last_boundary = Some(pos);
+                        }
+                    } else if self.more {
+                        self.in_message = true;
+                    } else {
+                        self.in_message = false;
+                        self.message_size = 0;
+                        walked.messages += 1;
+                        walked.last_boundary = Some(pos);
                     }
                 }
             }
