@@ -18,8 +18,8 @@ use zmtp::{
     Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
     Membership, Message, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
     PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
-    PlainServer, PlainServerConfig, Role, ServerStep, SocketType, Subscription, Ttl, Version,
-    ZapFailure, ZapReply,
+    PlainServer, PlainServerConfig, ReadInto, Role, ServerStep, SocketType, Subscription, Ttl,
+    Version, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -900,7 +900,11 @@ impl Engine {
 
     /// Reads from the stream into `decoder`. Returns whether anything arrived.
     fn fill(&mut self, decoder: &mut Decoder) -> Result<bool, EngineError> {
-        match decoder.fill(|buf| self.stream.read(buf)) {
+        let stream = &mut self.stream;
+        match decoder.fill_into(|into| match into {
+            ReadInto::Slice(buf) => stream.read(buf),
+            ReadInto::Append(body, limit) => stream.read_appending(body, limit),
+        }) {
             Ok(0) => Err(EngineError::PeerClosed),
             Ok(_) => Ok(true),
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => Ok(false),

@@ -23,7 +23,9 @@ mod subscription;
 pub mod z85;
 mod zap;
 
-pub use codec::{CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming};
+pub use codec::{
+    CommandsUnsupported, DecodeError, Decoder, DecoderConfig, Encoder, Incoming, ReadInto,
+};
 pub use command::{
     Command, CommandError, CommandName, ErrorReason, Group, InvalidGroup, InvalidName, Metadata,
     Ping, PingContext, PropertyName, TooLong, Ttl,

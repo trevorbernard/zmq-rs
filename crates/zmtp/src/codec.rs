@@ -32,6 +32,9 @@ pub struct Decoder {
     buf: BytesMut,
     filled: usize,
     state: State,
+    /// A large frame's body, read into a buffer of its own that becomes
+    /// the frame (see [`Decoder::fill_into`]); `None` for other frames.
+    body: Option<Vec<u8>>,
     partial: Option<Message>,
     /// The size `partial` counts towards the limit.
     partial_size: u64,
@@ -100,6 +103,19 @@ const MAX_RESERVE: usize = 1024 * 1024;
 /// Most new space zeroed for one `fill`, so that a small read never pays for
 /// zeroing the whole reservation.
 const MAX_READ: usize = 64 * 1024;
+/// Bodies at least this large are read into a buffer of their own.
+const BODY_APART: usize = 16 * 1024;
+
+/// Where [`Decoder::fill_into`] wants input read.
+#[derive(Debug)]
+pub enum ReadInto<'a> {
+    /// Into this initialized space, as [`std::io::Read::read`] reads.
+    Slice(&'a mut [u8]),
+    /// Appended to this vector, at most this many octets: a large frame's
+    /// body, read where it will stay. A reader that can read into a
+    /// vector's spare capacity without initializing it should.
+    Append(&'a mut Vec<u8>, usize),
+}
 
 impl Encoder {
     /// An encoder for `version`.
@@ -211,6 +227,7 @@ impl Decoder {
             buf: BytesMut::new(),
             filled: 0,
             state: State::Header,
+            body: None,
             partial: None,
             partial_size: 0,
             failed: None,
@@ -224,11 +241,39 @@ impl Decoder {
     /// `decoder.fill(|buf| stream.read(buf))`.
     ///
     /// Each region of the buffer is zeroed once, when first offered, rather
-    /// than before every read.
+    /// than before every read. A large frame's body is zeroed here before
+    /// being read: [`fill_into`](Self::fill_into) lets a reader avoid that.
     pub fn fill<E>(
         &mut self,
         read: impl FnOnce(&mut [u8]) -> Result<usize, E>,
     ) -> Result<usize, E> {
+        self.fill_into(|into| match into {
+            ReadInto::Slice(buf) => read(buf),
+            ReadInto::Append(vec, limit) => {
+                let start = vec.len();
+                vec.resize(start + limit.min(MAX_READ), 0);
+                let result = read(&mut vec[start..]);
+                let n = result.as_ref().map_or(0, |&n| n.min(vec.len() - start));
+                vec.truncate(start + n);
+                result.map(|_| n)
+            }
+        })
+    }
+
+    /// As [`fill`](Self::fill), except that `read` is offered a large
+    /// frame's body as a vector to append to, which becomes the frame
+    /// without a copy, so a reader can fill it without zeroing it first.
+    pub fn fill_into<E>(
+        &mut self,
+        read: impl FnOnce(ReadInto<'_>) -> Result<usize, E>,
+    ) -> Result<usize, E> {
+        if let (Some(body), State::Body { size, .. }) = (&mut self.body, self.state) {
+            let limit = size - body.len();
+            let before = body.len();
+            let result = read(ReadInto::Append(body, limit));
+            debug_assert!(body.len() - before <= limit, "read past the frame");
+            return result;
+        }
         let wanted = match self.state {
             State::Header => READ_SIZE,
             State::Body { size, .. } => size
@@ -244,7 +289,7 @@ impl Decoder {
             self.buf.resize(self.filled + target, 0);
         }
         let offered = self.buf.len() - self.filled;
-        let result = read(&mut self.buf[self.filled..]);
+        let result = read(ReadInto::Slice(&mut self.buf[self.filled..]));
         let n = result.as_ref().map_or(0, |&n| n.min(offered));
         self.filled += n;
         result.map(|_| n)
@@ -282,17 +327,36 @@ impl Decoder {
                     self.buf.advance(header_len);
                     self.filled -= header_len;
                     self.state = body;
+                    if let State::Body { size, .. } = body
+                        && size >= BODY_APART
+                        && self.filled < size
+                    {
+                        // Capped as `fill` caps its reservation, against a
+                        // peer that declares a size it never sends.
+                        let mut apart = Vec::with_capacity(size.min(MAX_RESERVE));
+                        apart.extend_from_slice(&self.buf[..self.filled]);
+                        self.buf.advance(self.filled);
+                        self.filled = 0;
+                        self.body = Some(apart);
+                    }
                 }
                 State::Body {
                     size,
                     more,
                     command,
                 } => {
-                    if self.filled < size {
-                        return Ok(None);
-                    }
-                    let frame = Frame::from_shared(self.buf.split_to(size).freeze());
-                    self.filled -= size;
+                    let frame = match self.body.take() {
+                        Some(body) if body.len() < size => {
+                            self.body = Some(body);
+                            return Ok(None);
+                        }
+                        Some(body) => Frame::from_shared(Bytes::from(body)),
+                        None if self.filled < size => return Ok(None),
+                        None => {
+                            self.filled -= size;
+                            Frame::from_shared(self.buf.split_to(size).freeze())
+                        }
+                    };
                     self.state = State::Header;
                     if command {
                         return Ok(Some(Incoming::Command(frame)));
@@ -843,6 +907,112 @@ mod tests {
             d.decode().unwrap(),
             Some(Incoming::Message(message(&[b"m"])))
         );
+    }
+
+    /// Feeds `wire` to `d` at most `chunk` octets per fill, appending to
+    /// large bodies when `append`, otherwise through the slice fallback,
+    /// and returns what was decoded.
+    fn decode_chunked(d: &mut Decoder, wire: &[u8], chunk: usize, append: bool) -> Vec<Incoming> {
+        let mut pos = 0;
+        let mut out = Vec::new();
+        loop {
+            while let Some(item) = d.decode().unwrap() {
+                out.push(item);
+            }
+            if pos == wire.len() {
+                return out;
+            }
+            let take = |n: usize, pos: &mut usize| {
+                let n = n.min(chunk).min(wire.len() - *pos);
+                *pos += n;
+                &wire[*pos - n..*pos]
+            };
+            if append {
+                d.fill_into(|into| match into {
+                    ReadInto::Slice(buf) => {
+                        let src = take(buf.len(), &mut pos);
+                        buf[..src.len()].copy_from_slice(src);
+                        Ok::<_, ()>(src.len())
+                    }
+                    ReadInto::Append(body, limit) => {
+                        let src = take(limit, &mut pos);
+                        body.extend_from_slice(src);
+                        Ok(src.len())
+                    }
+                })
+                .unwrap();
+            } else {
+                d.fill(|buf| {
+                    let src = take(buf.len(), &mut pos);
+                    buf[..src.len()].copy_from_slice(src);
+                    Ok::<_, ()>(src.len())
+                })
+                .unwrap();
+            }
+        }
+    }
+
+    #[test]
+    fn large_bodies_are_read_apart_in_any_chunks() {
+        let big: Vec<u8> = (0..BODY_APART * 3 + 5).map(|i| i as u8).collect();
+        let edge = vec![7; BODY_APART];
+        let messages = [
+            message(&[b"small"]),
+            message(&[&big]),
+            message(&[b"id", &edge, &big, b"tail"]),
+            message(&[&big[..BODY_APART - 1]]),
+        ];
+        let mut wire = Vec::new();
+        for msg in &messages {
+            Encoder::new(Version::V3_1).encode(msg, &mut wire);
+        }
+        let expected: Vec<Incoming> = messages.iter().cloned().map(Incoming::Message).collect();
+        for chunk in [1, 7, 1000, BODY_APART - 3, BODY_APART * 4, usize::MAX] {
+            for append in [true, false] {
+                let mut d = decoder(Version::V3_1);
+                assert_eq!(
+                    decode_chunked(&mut d, &wire, chunk, append),
+                    expected,
+                    "chunk {chunk}, append {append}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_large_body_is_offered_as_a_vector_with_its_remaining_size() {
+        let mut d = decoder(Version::V3_1);
+        let mut wire = Vec::new();
+        Encoder::new(Version::V3_1).encode(&message(&[&vec![1; BODY_APART]]), &mut wire);
+        d.extend_from_slice(&wire[..9 + 100]);
+        assert_eq!(d.decode().unwrap(), None);
+        let mut offered = None;
+        d.fill_into(|into| {
+            if let ReadInto::Append(body, limit) = into {
+                offered = Some((body.len(), limit));
+            }
+            Ok::<_, ()>(0)
+        })
+        .unwrap();
+        assert_eq!(offered, Some((100, BODY_APART - 100)));
+    }
+
+    #[test]
+    fn a_declared_size_is_not_reserved_beyond_the_cap() {
+        let mut d = decoder(Version::V3_1);
+        let mut header = vec![0x02];
+        header.extend_from_slice(&(1u64 << 40).to_be_bytes());
+        d.extend_from_slice(&header);
+        assert_eq!(d.decode().unwrap(), None);
+        let mut capacity = 0;
+        d.fill_into(|into| {
+            if let ReadInto::Append(body, _) = into {
+                capacity = body.capacity();
+            }
+            Ok::<_, ()>(0)
+        })
+        .unwrap();
+        assert!(capacity <= MAX_RESERVE, "reserved {capacity}");
     }
 
     #[test]
