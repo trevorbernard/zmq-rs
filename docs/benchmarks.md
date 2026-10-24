@@ -237,9 +237,13 @@ libraries). Our latency is lower everywhere.
   from their own buffers with vectored writes, as libzmq's encoder sends
   what will not fit its batch, and memmove is down to 4%: 36.1k msg/s
   against libzmq's 36.0k over tcp (1.00), 59.2k against 47.8k over ipc
-  (1.24). The decoder still zeroes its read buffer before each read,
-  about 31% of the receiving I/O thread, since safe Rust cannot read
-  into uninitialized memory on stable.
+  (1.24). The decoder also zeroed its read buffer before each read,
+  about 31% of the receiving I/O thread, since `Read::read` needs
+  initialized memory and `Read::read_buf` is unstable. Bodies of 16 KiB
+  and up are now read with `read_to_end`, which reads into a vector's
+  spare capacity through the standard streams' own `read_buf`; that
+  memset is gone, but throughput is unchanged, as this loopback case is
+  bound elsewhere.
 - **Noise:** inproc 64 KiB throughput spreads widely for both libraries
   in every run, and so does latency at small sizes. The machine ran the
   `schedutil` governor; rerun a subset before acting on a difference
