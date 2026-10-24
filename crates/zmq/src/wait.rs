@@ -43,25 +43,30 @@ pub(crate) fn block_on_until<R>(
     thread_local! {
         static WAKER: Waker = Waker::from(Arc::new(Unpark(thread::current())));
     }
-    let waker = WAKER
-        .try_with(Waker::clone)
-        .unwrap_or_else(|_| Waker::from(Arc::new(Unpark(thread::current()))));
-    let mut cx = Context::from_waker(&waker);
-    loop {
-        if let Poll::Ready(output) = poll(&mut cx) {
-            return Some(output);
-        }
-        // Spurious wakeups are harmless: the loop polls again.
-        match deadline {
-            None => thread::park(),
-            Some(deadline) => {
-                let now = Instant::now();
-                if now >= deadline {
-                    return None;
+    // Borrowed, not cloned: a clone and its drop are two atomic operations
+    // on every call.
+    let mut run = |waker: &Waker| {
+        let mut cx = Context::from_waker(waker);
+        loop {
+            if let Poll::Ready(output) = poll(&mut cx) {
+                return Some(output);
+            }
+            // Spurious wakeups are harmless: the loop polls again.
+            match deadline {
+                None => thread::park(),
+                Some(deadline) => {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return None;
+                    }
+                    thread::park_timeout(deadline - now);
                 }
-                thread::park_timeout(deadline - now);
             }
         }
+    };
+    match WAKER.try_with(|waker| run(waker)) {
+        Ok(output) => output,
+        Err(_) => run(&Waker::from(Arc::new(Unpark(thread::current())))),
     }
 }
 
