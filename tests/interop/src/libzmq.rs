@@ -12,6 +12,8 @@ use std::time::Duration;
 
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SUBSCRIBE: c_int = 6;
+const ZMQ_SNDHWM: c_int = 23;
+const ZMQ_RCVHWM: c_int = 24;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RCVTIMEO: c_int = 27;
@@ -226,6 +228,12 @@ impl Socket {
     pub fn set_receive_timeout(&self, timeout: Duration) {
         let millis = c_int::try_from(timeout.as_millis()).unwrap_or(c_int::MAX);
         self.set_int(ZMQ_RCVTIMEO, millis);
+    }
+
+    /// The send and receive high-water marks; 0 is unlimited.
+    pub fn set_hwm(&self, send: i32, recv: i32) {
+        self.set_int(ZMQ_SNDHWM, send);
+        self.set_int(ZMQ_RCVHWM, recv);
     }
 
     /// The identity announced to peers.
@@ -523,6 +531,16 @@ impl Socket {
         check(unsafe { zmq_msg_send(&mut msg.0, self.raw.as_ptr(), 0) }).map(drop)
     }
 
+    /// Sends one frame of `size` zero octets, with more to follow if `more`.
+    pub fn send_sized_part(&self, size: usize, more: bool) -> io::Result<()> {
+        let mut msg = Msg::with_size(size)?;
+        // SAFETY: the message owns `size` writable octets.
+        unsafe { std::ptr::write_bytes(zmq_msg_data(&mut msg.0).cast::<u8>(), 0, size) };
+        let flags = if more { ZMQ_SNDMORE } else { 0 };
+        // SAFETY: `msg` is an initialized message and the socket is open.
+        check(unsafe { zmq_msg_send(&mut msg.0, self.raw.as_ptr(), flags) }).map(drop)
+    }
+
     /// Receives one frame into `msg`, replacing what it held, and returns
     /// its size. No copy is made, as in libzmq's `local_thr`.
     pub fn recv_msg(&self, msg: &mut Msg) -> io::Result<usize> {
@@ -560,6 +578,12 @@ impl Msg {
     pub fn size(&self) -> usize {
         // SAFETY: `self.0` is an initialized message.
         unsafe { zmq_msg_size(&self.0) }
+    }
+
+    /// Whether more frames of the message follow this one.
+    pub fn more(&self) -> bool {
+        // SAFETY: `self.0` is an initialized message.
+        unsafe { zmq_msg_more(&self.0) != 0 }
     }
 }
 

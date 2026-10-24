@@ -27,3 +27,7 @@ workspace = true
 [[bench]]
 name = "perf"
 harness = false
+
+[[bench]]
+name = "scenarios"
+harness = false
