@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Wake, Waker};
 use std::thread::{self, JoinHandle};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use mio::{Events, Interest, Token};
 use zmq_pipe::{Reader, Writer};
@@ -90,6 +90,7 @@ impl IoThread {
             sessions: HashMap::new(),
             listeners: HashMap::new(),
             timers: BinaryHeap::new(),
+            busy: Vec::new(),
             shutdown: None,
             next_id: WAKER.0 + 1,
         };
@@ -143,6 +144,9 @@ struct EventLoop {
     /// Deadlines, such as reconnection attempts. A timer for something that
     /// has since changed state is harmless: driving it finds nothing to do.
     timers: BinaryHeap<Reverse<(Instant, usize)>>,
+    /// Sessions whose last round got work done, to drive again after the
+    /// others, without waiting for an event.
+    busy: Vec<usize>,
     /// Set once shutdown starts: when it must end, and where to report.
     shutdown: Option<(Option<Instant>, mpsc::Sender<usize>)>,
     /// Ids are never reused, so a late wakeup for something closed cannot
@@ -155,16 +159,20 @@ impl EventLoop {
         let mut events = Events::with_capacity(256);
         let mut due = Vec::new();
         loop {
-            let timeout = self
-                .timers
-                .peek()
-                .map(|Reverse((at, _))| at.saturating_duration_since(Instant::now()));
+            let timeout = if self.busy.is_empty() {
+                self.timers
+                    .peek()
+                    .map(|Reverse((at, _))| at.saturating_duration_since(Instant::now()))
+            } else {
+                Some(Duration::ZERO)
+            };
             if let Err(err) = self.poll.poll(&mut events, timeout) {
                 if err.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
                 return;
             }
+            due.append(&mut self.busy);
             due.extend(
                 events
                     .iter()
@@ -475,7 +483,11 @@ impl EventLoop {
         let result = session.drive();
         session.report_progress();
         match result {
-            Ok(()) => {}
+            Ok(busy) => {
+                if busy {
+                    self.busy.push(id);
+                }
+            }
             Err(err) => {
                 session.report_failure(&err);
                 if let Some(mut engine) = session.engine.take() {
@@ -500,9 +512,16 @@ impl EventLoop {
         }
         session.schedule_deadline(id, &mut self.timers);
         // A closing session is finished once everything queued is written.
-        // Shutdown also finishes sessions whose socket is still open.
-        let caught_up = session.engine.as_ref().is_some_and(Engine::caught_up);
-        if caught_up && (session.outbound.is_closed() || self.shutdown.is_some()) {
+        // Shutdown also finishes sessions whose socket is still open. Once
+        // the socket is gone, whether its pipe is drained is final; the
+        // engine's last look at the pipe may predate its final messages.
+        let engine = session.engine.as_ref();
+        let finished = if session.outbound.is_closed() {
+            session.outbound.is_drained() && engine.is_some_and(Engine::flushed)
+        } else {
+            self.shutdown.is_some() && engine.is_some_and(Engine::caught_up)
+        };
+        if finished {
             self.close_session(id);
             return;
         }
@@ -784,9 +803,10 @@ impl Session {
         monitor.emit(&self.endpoint, EventKind::Disconnected);
     }
 
-    fn drive(&mut self) -> Result<(), EngineError> {
+    /// One round of the engine's work. Returns whether there may be more.
+    fn drive(&mut self) -> Result<bool, EngineError> {
         let Some(engine) = &mut self.engine else {
-            return Ok(());
+            return Ok(false);
         };
         let mut cx = Context::from_waker(&self.task_waker);
         let mut pipes = Pipes {

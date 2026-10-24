@@ -311,32 +311,42 @@ impl Engine {
     /// Whether everything the socket queued has been written to the stream:
     /// the pipe was empty at the last look and no output is pending.
     pub(crate) fn caught_up(&self) -> bool {
-        self.is_established() && self.outbound_empty && self.out.is_empty()
+        self.outbound_empty && self.flushed()
     }
 
-    /// Does all the work currently possible: writing, taking messages from
-    /// the socket, reading, and handing messages to the socket.
+    /// Whether everything taken from the socket has been written to the
+    /// stream.
+    pub(crate) fn flushed(&self) -> bool {
+        self.is_established() && self.out.is_empty()
+    }
+
+    /// Does one round of work: writing, taking messages from the socket,
+    /// reading, and handing messages to the socket. Returns whether it got
+    /// anything done, in which case there may be more: the caller drives it
+    /// again after its other sessions, as libzmq's engines return to the
+    /// poller after each batch. Draining one connection at a time held the
+    /// I/O thread on one socket's messages while that socket's thread made
+    /// more, so their allocator contended for the same arena lock.
     pub(crate) fn drive(
         &mut self,
         pipes: &mut Pipes<'_>,
         cx: &mut Context<'_>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<bool, EngineError> {
         if !self.connected && !self.finish_connect()? {
-            return Ok(());
+            return Ok(false);
         }
         let now = Instant::now();
         if self.deadlines.expired(now) {
             return Err(EngineError::Timeout);
         }
         self.maybe_ping(now)?;
-        loop {
-            let wrote = self.flush()?;
-            let pulled = self.pull_outbound(pipes, cx)?;
-            let received = self.receive(pipes, cx)?;
-            if !(wrote || pulled || received) {
-                return Ok(());
-            }
+        let mut wrote = self.flush()?;
+        let pulled = self.pull_outbound(pipes, cx)?;
+        if pulled {
+            wrote |= self.flush()?;
         }
+        let received = self.receive(pipes, cx)?;
+        Ok(wrote || pulled || received)
     }
 
     /// Whether the non-blocking connect has completed.

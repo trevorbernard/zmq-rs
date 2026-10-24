@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Hwm, Linger, Pull, Push, SocketOptions};
+use zmq::{Context, Hwm, Linger, Pull, Push, Rep, Req, SocketOptions};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -56,6 +56,25 @@ fn dropping_the_context_delivers_what_was_queued() {
     });
     let received = within(FIVE * 6, move || receiver.join().unwrap());
     assert_eq!(received, COUNT);
+}
+
+#[test]
+fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
+    // The session may look at its pipe, then the socket sends and drops,
+    // then the session checks whether the socket is gone: it must not
+    // take the earlier empty look for the last word. Racy by nature, so
+    // tried many times.
+    for _ in 0..1000 {
+        let context = Context::new().unwrap();
+        let mut rep = context.socket::<Rep>();
+        let endpoint = rep.bind("tcp://127.0.0.1:*").unwrap().to_string();
+        let replier = thread::spawn(move || rep.recv().reply("answer"));
+        let mut req = context.socket::<Req>();
+        req.connect(&endpoint).unwrap();
+        let answer = within(FIVE, move || req.request("question"));
+        assert_eq!(answer, Ok("answer".into()));
+        replier.join().unwrap();
+    }
 }
 
 #[test]
