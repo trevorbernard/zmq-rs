@@ -418,11 +418,35 @@ impl Publisher {
         self.sync(peers);
         self.match_peers(&message);
         let mut sent = 0;
-        self.for_each_wanted(peers, |peer| {
-            if peer.connection.tx.try_send(message.clone()).is_ok() {
+        if self.invert {
+            self.for_each_wanted(peers, |peer| {
+                if peer.connection.tx.try_send(message.clone()).is_ok() {
+                    sent += 1;
+                }
+            });
+            return sent;
+        }
+        // The last matched peer takes the message itself: a clone of a
+        // frame made from a `Vec` allocates its reference count, so a lone
+        // subscriber cost an allocation, freed on the I/O thread.
+        let mut left = self.matched.len();
+        for &key in &self.matched {
+            left -= 1;
+            let peer = peers.get_mut(key);
+            if left == 0 {
+                if let Some(peer) = peer
+                    && peer.connection.tx.try_send(message).is_ok()
+                {
+                    sent += 1;
+                }
+                break;
+            }
+            if let Some(peer) = peer
+                && peer.connection.tx.try_send(message.clone()).is_ok()
+            {
                 sent += 1;
             }
-        });
+        }
         sent
     }
 

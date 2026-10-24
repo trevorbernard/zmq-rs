@@ -292,9 +292,12 @@ On the Xeon above:
   inlined without `-C target-cpu=native`, which takes `curve/256` to
   0.70. Each frame also costs three allocations and about four copies
   on sending.
-- **`fanout/1` clones the message for its one subscriber,** and cloning
-  a `Vec`-backed frame allocates a shared header, freed on the I/O
-  thread: an extra allocation and cross-thread free per message.
+- **`fanout/1` was 0.77 while the publisher cloned the message for every
+  subscriber,** its only one included: cloning a `Vec`-backed frame
+  allocates a shared header, freed on the I/O thread. The last
+  subscriber now takes the message itself, which gives 4.29M msg/s
+  against libzmq's 3.73M (1.15) with 4 and 16 subscribers unchanged.
+  A message for several subscribers still pays that one allocation.
 - **`multipart/2`:** a message of more than one frame allocates its
   frame vector, on both ends.
 
