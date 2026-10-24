@@ -1023,6 +1023,7 @@ dependencies = [
 name = "zmq-core"
 version = "0.1.0-dev"
 dependencies = [
+ "atomic-waker",
  "criterion",
  "mio",
  "proptest",

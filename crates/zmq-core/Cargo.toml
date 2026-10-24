@@ -13,6 +13,7 @@ publish.workspace = true
 draft = []
 
 [dependencies]
+atomic-waker.workspace = true
 mio.workspace = true
 zmtp.workspace = true
 zmq-pipe.workspace = true
@@ -26,4 +27,8 @@ workspace = true
 
 [[bench]]
 name = "fanout"
+harness = false
+
+[[bench]]
+name = "fairqueue"
 harness = false

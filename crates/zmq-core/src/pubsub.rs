@@ -5,7 +5,7 @@
 //! subscribed to a prefix of its first frame. Subscribers filter too, so
 //! publishers that do not (ZMTP 1.0) are harmless.
 
-use std::collections::{BTreeMap, HashMap, HashSet, VecDeque, btree_map};
+use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
 use std::task::{Context as TaskContext, Poll};
 
@@ -13,7 +13,7 @@ use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
-use crate::socket::{Peer, PeerKey, PeerList};
+use crate::socket::{Peer, PeerKey, PeerList, PeerMap, PeerSet};
 
 /// Topics and how many times each was subscribed, matched by prefix.
 #[derive(Debug, Clone, Default)]
@@ -85,31 +85,6 @@ struct PrefixMap<V> {
 
 /// The topics sharing a hash, with their values.
 type Bucket<V> = Vec<(Box<[u8]>, V)>;
-
-/// Maps and sets keyed by peer. We assign peer keys from a counter, so no
-/// peer can choose one, and they need no protection from flooding.
-type PeerMap<V> = HashMap<PeerKey, V, BuildHasherDefault<PeerKeyHasher>>;
-type PeerSet = HashSet<PeerKey, BuildHasherDefault<PeerKeyHasher>>;
-
-/// Spreads a peer key's bits with one multiplication (Fibonacci hashing).
-#[derive(Debug, Clone, Copy, Default)]
-struct PeerKeyHasher(u64);
-
-impl Hasher for PeerKeyHasher {
-    fn finish(&self) -> u64 {
-        self.0
-    }
-
-    fn write(&mut self, bytes: &[u8]) {
-        for &octet in bytes {
-            self.write_u64(self.0.rotate_left(8) ^ u64::from(octet));
-        }
-    }
-
-    fn write_u64(&mut self, key: u64) {
-        self.0 = key.wrapping_mul(0x9E37_79B9_7F4A_7C15);
-    }
-}
 
 /// Hashes `buckets`' keys, which are already keyed hashes, as themselves.
 #[derive(Debug, Clone, Copy, Default)]

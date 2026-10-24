@@ -4,12 +4,16 @@
 //! Waiting on many pipes at once works by polling each with the same waker:
 //! any pipe that becomes ready wakes the task, which polls again.
 
-use std::collections::{HashMap, HashSet};
-use std::hash::{BuildHasher, RandomState};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
 use std::io;
+use std::mem;
 use std::net::SocketAddr;
-use std::task::{Context as TaskContext, Poll};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
+use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
+use atomic_waker::AtomicWaker;
 use zmq_pipe::{Reader, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
@@ -20,6 +24,31 @@ use crate::{Connection, ConnectionConfig, Context};
 /// stay sorted by key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerKey(u64);
+
+/// Maps and sets keyed by peer. We assign peer keys from a counter, so no
+/// peer can choose one, and they need no protection from flooding.
+pub(crate) type PeerMap<V> = HashMap<PeerKey, V, BuildHasherDefault<PeerKeyHasher>>;
+pub(crate) type PeerSet = HashSet<PeerKey, BuildHasherDefault<PeerKeyHasher>>;
+
+/// Spreads a peer key's bits with one multiplication (Fibonacci hashing).
+#[derive(Debug, Clone, Copy, Default)]
+pub(crate) struct PeerKeyHasher(u64);
+
+impl Hasher for PeerKeyHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        for &octet in bytes {
+            self.write_u64(self.0.rotate_left(8) ^ u64::from(octet));
+        }
+    }
+
+    fn write_u64(&mut self, key: u64) {
+        self.0 = key.wrapping_mul(0x9E37_79B9_7F4A_7C15);
+    }
+}
 
 /// One peer of a socket.
 #[derive(Debug)]
@@ -327,41 +356,189 @@ impl LoadBalancer {
 
 /// Round robin over the peers that have a message waiting, like libzmq's
 /// `fq_t`. Drops peers whose sessions are gone once drained.
+///
+/// Like `fq_t`, it reads only peers that may have input. A peer found
+/// empty leaves the turn until its pipe wakes it, through a waker of its
+/// own that marks it ready, as a pipe's `activate_read` does in libzmq.
+/// Polling every peer instead cost a pipe check, a waker registration and a
+/// later wakeup per empty peer per message.
 #[derive(Debug, Default)]
 pub struct FairQueue {
-    next: usize,
+    /// Positions in the peer list of peers that may have input, in turn
+    /// order.
+    turn: VecDeque<usize>,
+    /// Each peer's waker, in the peer list's order: entry `i` is for the
+    /// list's peer `i`, and peers past the end are new.
+    waiting: Vec<Waiting>,
+    ready: Arc<Ready>,
+    /// Keys taken from `ready`, kept for its allocation.
+    woken: Vec<PeerKey>,
+    /// `PeerList::removals` when last synced.
+    removals: u64,
+}
+
+/// A peer's waker, and whether the peer is in the turn.
+#[derive(Debug)]
+struct Waiting {
+    key: PeerKey,
+    wake: Arc<PeerWake>,
+    waker: Waker,
+    in_turn: bool,
+}
+
+/// Peers whose pipes woke them, and the task waiting on any of them.
+#[derive(Debug, Default)]
+struct Ready {
+    keys: Mutex<Vec<PeerKey>>,
+    /// Raised after a key is added, so finding none costs one load.
+    any: AtomicBool,
+    task: AtomicWaker,
+}
+
+/// Wakes the task on behalf of one peer, noting which.
+#[derive(Debug)]
+struct PeerWake {
+    key: PeerKey,
+    /// Set while the key waits in `Ready::keys`, so it is added once.
+    queued: AtomicBool,
+    ready: Arc<Ready>,
+}
+
+impl Wake for PeerWake {
+    fn wake(self: Arc<Self>) {
+        self.wake_by_ref();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        if self.queued.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let ready = &self.ready;
+        ready
+            .keys
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push(self.key);
+        ready.any.store(true, Ordering::Release);
+        ready.task.wake();
+    }
 }
 
 impl FairQueue {
     /// The next message and the peer it came from, or `Pending` with `cx`
-    /// registered on every peer.
+    /// woken once any peer has another.
     pub fn poll_recv(
         &mut self,
         peers: &mut PeerList,
         cx: &mut TaskContext<'_>,
     ) -> Poll<(PeerKey, Message)> {
-        let mut tried = 0;
-        while tried < peers.len() {
-            let index = self.next % peers.len();
-            let peer = &mut peers.peers[index];
-            match peer.connection.rx.poll_recv(cx) {
-                Poll::Ready(Some(message)) => {
-                    self.next = index + 1;
-                    return Poll::Ready((peer.key, message));
-                }
-                // Session gone and everything it delivered has been read.
-                // The next peer slides into `index`.
-                Poll::Ready(None) => {
-                    peers.remove(index);
-                    self.next = index;
-                }
-                Poll::Pending => {
-                    self.next = index + 1;
-                    tried += 1;
+        self.sync(peers);
+        loop {
+            self.take_woken();
+            while let Some(index) = self.turn.pop_front() {
+                let waiting = &mut self.waiting[index];
+                let peer = &mut peers.peers[index];
+                match peer
+                    .connection
+                    .rx
+                    .poll_recv(&mut TaskContext::from_waker(&waiting.waker))
+                {
+                    Poll::Ready(Some(message)) => {
+                        self.turn.push_back(index);
+                        return Poll::Ready((waiting.key, message));
+                    }
+                    // Session gone and everything it delivered has been read.
+                    Poll::Ready(None) => {
+                        peers.remove(index);
+                        self.removals = peers.removals;
+                        self.waiting.remove(index);
+                        for position in &mut self.turn {
+                            if *position > index {
+                                *position -= 1;
+                            }
+                        }
+                    }
+                    Poll::Pending => waiting.in_turn = false,
                 }
             }
+            // Registered before looking again: a peer woken after the look
+            // finds the task registered, and one woken before is seen.
+            self.ready.task.register(cx.waker());
+            if !self.ready.any.load(Ordering::Acquire) {
+                return Poll::Pending;
+            }
         }
-        Poll::Pending
+    }
+
+    /// Takes in peers added to the list since the last call, and forgets
+    /// those removed.
+    fn sync(&mut self, peers: &PeerList) {
+        if peers.removals != self.removals {
+            self.removals = peers.removals;
+            let turn: Vec<PeerKey> = self.turn.iter().map(|&i| self.waiting[i].key).collect();
+            // Both are in key order, so the survivors keep their order.
+            let mut list = peers.peers.iter().peekable();
+            self.waiting.retain(|waiting| {
+                while list.next_if(|peer| peer.key < waiting.key).is_some() {}
+                list.next_if(|peer| peer.key == waiting.key).is_some()
+            });
+            self.turn = turn
+                .into_iter()
+                .filter_map(|key| self.position(key))
+                .collect();
+        }
+        for (index, peer) in peers.peers.iter().enumerate().skip(self.waiting.len()) {
+            let wake = Arc::new(PeerWake {
+                key: peer.key,
+                queued: AtomicBool::new(false),
+                ready: self.ready.clone(),
+            });
+            let waker = Waker::from(wake.clone());
+            self.waiting.push(Waiting {
+                key: peer.key,
+                wake,
+                waker,
+                in_turn: true,
+            });
+            self.turn.push_back(index);
+        }
+    }
+
+    /// Where the peer with `key` is in the list.
+    fn position(&self, key: PeerKey) -> Option<usize> {
+        self.waiting
+            .binary_search_by_key(&key, |waiting| waiting.key)
+            .ok()
+    }
+
+    /// Returns woken peers to the turn.
+    fn take_woken(&mut self) {
+        if !self.ready.any.load(Ordering::Relaxed) || !self.ready.any.swap(false, Ordering::Acquire)
+        {
+            return;
+        }
+        mem::swap(
+            &mut self.woken,
+            &mut self
+                .ready
+                .keys
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner),
+        );
+        let mut woken = mem::take(&mut self.woken);
+        for key in woken.drain(..) {
+            let Some(index) = self.position(key) else {
+                continue;
+            };
+            let waiting = &mut self.waiting[index];
+            // Cleared first, so a wake from here on queues the key again.
+            waiting.wake.queued.store(false, Ordering::Release);
+            if !waiting.in_turn {
+                waiting.in_turn = true;
+                self.turn.push_back(index);
+            }
+        }
+        self.woken = woken;
     }
 }
 
@@ -838,6 +1015,110 @@ mod tests {
         assert_eq!(next(), Some(msg("bye")));
         assert_eq!(next(), None);
         assert_eq!(peers.len(), 1, "the closed peer is dropped once drained");
+    }
+
+    #[test]
+    fn fair_queue_skips_empty_peers_until_their_pipes_wake_them() {
+        let (a, mut sa) = connection(10);
+        let (b, _sb) = connection(10);
+        let (c, _sc) = connection(10);
+        let mut peers = list(vec![a, b, c]);
+        let keys: Vec<PeerKey> = peers.iter().map(Peer::key).collect();
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut fq = FairQueue::default();
+        assert_eq!(fq.poll_recv(&mut peers, &mut cx), Poll::Pending);
+        assert!(fq.turn.is_empty(), "every empty peer leaves the turn");
+        sa.to_socket.try_send(msg("a1")).unwrap();
+        assert_eq!(count.0.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            fq.poll_recv(&mut peers, &mut cx),
+            Poll::Ready((keys[0], msg("a1")))
+        );
+        assert_eq!(fq.turn, [0], "only the woken peer is back");
+        sa.to_socket.try_send(msg("a2")).unwrap();
+        assert_eq!(
+            fq.poll_recv(&mut peers, &mut cx),
+            Poll::Ready((keys[0], msg("a2")))
+        );
+    }
+
+    #[test]
+    fn fair_queue_drops_a_waiting_peer_whose_session_ends() {
+        let (a, sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut fq = FairQueue::default();
+        assert_eq!(fq.poll_recv(&mut peers, &mut cx), Poll::Pending);
+        drop(sa);
+        assert_eq!(count.0.load(Ordering::SeqCst), 1);
+        assert_eq!(fq.poll_recv(&mut peers, &mut cx), Poll::Pending);
+        assert_eq!(peers.len(), 1);
+        sb.to_socket.try_send(msg("b1")).unwrap();
+        assert!(matches!(fq.poll_recv(&mut peers, &mut cx), Poll::Ready((_, m)) if m == msg("b1")));
+    }
+
+    #[test]
+    fn fair_queue_follows_peers_its_owner_removes() {
+        let (a, mut sa) = connection(10);
+        let (b, sb) = connection(10);
+        let (c, mut sc) = connection(10);
+        for text in ["a1", "a2"] {
+            sa.to_socket.try_send(msg(text)).unwrap();
+        }
+        for text in ["c1", "c2"] {
+            sc.to_socket.try_send(msg(text)).unwrap();
+        }
+        let mut peers = list(vec![a, b, c]);
+        let keys: Vec<PeerKey> = peers.iter().map(Peer::key).collect();
+        let (_, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut fq = FairQueue::default();
+        assert_eq!(
+            fq.poll_recv(&mut peers, &mut cx),
+            Poll::Ready((keys[0], msg("a1")))
+        );
+        drop(sb);
+        peers.retain_mut(|peer| !peer.connection.tx.is_closed());
+        let rest: Vec<_> = std::iter::from_fn(|| match fq.poll_recv(&mut peers, &mut cx) {
+            Poll::Ready(received) => Some(received),
+            Poll::Pending => None,
+        })
+        .collect();
+        assert_eq!(
+            rest,
+            [
+                (keys[2], msg("c1")),
+                (keys[0], msg("a2")),
+                (keys[2], msg("c2"))
+            ]
+        );
+        let (d, mut sd) = connection(10);
+        sd.to_socket.try_send(msg("d1")).unwrap();
+        let key = peers.push(d);
+        assert_eq!(
+            fq.poll_recv(&mut peers, &mut cx),
+            Poll::Ready((key, msg("d1")))
+        );
+    }
+
+    #[test]
+    fn fair_queue_takes_in_peers_added_between_polls() {
+        let (a, _sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let (_, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut fq = FairQueue::default();
+        assert_eq!(fq.poll_recv(&mut peers, &mut cx), Poll::Pending);
+        let (b, mut sb) = connection(10);
+        sb.to_socket.try_send(msg("b1")).unwrap();
+        let key = peers.push(b);
+        assert_eq!(
+            fq.poll_recv(&mut peers, &mut cx),
+            Poll::Ready((key, msg("b1")))
+        );
     }
 
     #[test]
