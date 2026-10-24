@@ -6,10 +6,11 @@ use std::collections::VecDeque;
 use std::io::{self, IoSlice, Write};
 
 use bytes::{Buf, Bytes};
+use zmtp::{Encoder, Message};
 
 /// Payloads at least this large are sent from their own buffers rather
 /// than copied, as libzmq's 8 KiB batch.
-pub(crate) const SHARED_MIN: usize = 8 * 1024;
+const SHARED_MIN: usize = 8 * 1024;
 
 /// Slices handed to one vectored write.
 const MAX_SLICES: usize = 64;
@@ -30,8 +31,24 @@ pub(crate) struct Output {
 }
 
 impl Output {
+    /// Encodes `message`, sending its large frames from their own buffers.
+    #[inline]
+    pub(crate) fn encode(&mut self, encoder: Encoder, message: Message) {
+        let Self {
+            buf,
+            shared,
+            shared_len,
+            ..
+        } = self;
+        encoder.encode_parts(message, SHARED_MIN, buf, |at, payload| {
+            *shared_len += payload.len();
+            shared.push_back((at, payload));
+        });
+    }
+
     /// Queues `payload` after everything added so far.
-    pub(crate) fn push_shared(&mut self, payload: Bytes) {
+    #[cfg(test)]
+    fn push_shared(&mut self, payload: Bytes) {
         self.shared_len += payload.len();
         self.shared.push_back((self.buf.len(), payload));
     }
@@ -49,8 +66,13 @@ impl Output {
     /// anything was written.
     pub(crate) fn write_to(&mut self, stream: &mut impl Write) -> io::Result<bool> {
         let mut progressed = false;
-        while !self.is_empty() {
-            let written = if self.shared.is_empty() {
+        loop {
+            // Without shared payloads, the common case, a plain write.
+            let plain = self.shared.is_empty();
+            let written = if plain {
+                if self.pos == self.buf.len() {
+                    break;
+                }
                 stream.write(&self.buf[self.pos..])
             } else {
                 stream.write_vectored(&self.slices())
@@ -58,7 +80,11 @@ impl Output {
             match written {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
                 Ok(n) => {
-                    self.advance(n);
+                    if plain {
+                        self.pos += n;
+                    } else {
+                        self.advance(n);
+                    }
                     progressed = true;
                 }
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,

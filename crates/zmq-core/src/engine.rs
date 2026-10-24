@@ -23,7 +23,7 @@ use zmtp::{
 };
 
 use crate::context::PeerSlot;
-use crate::output::{Output, SHARED_MIN};
+use crate::output::Output;
 use crate::transport::Stream;
 use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
 
@@ -279,21 +279,14 @@ impl Engine {
 
     /// Writes `message`, boxed if CURVE is in use. Without CURVE, a large
     /// frame is sent from its own buffer, not copied.
+    #[inline]
     fn write_message(&mut self, encoder: Encoder, message: Message) -> Result<(), EngineError> {
         if let Some(codec) = &mut self.curve {
             return codec
                 .encode_message(&message, encoder, &mut self.out.buf)
                 .map_err(EngineError::Curve);
         }
-        let last = message.len().get() - 1;
-        for (i, frame) in message.into_iter().enumerate() {
-            encoder.encode_frame_header(i < last, frame.len(), &mut self.out.buf);
-            if frame.len() >= SHARED_MIN {
-                self.out.push_shared(frame.into_bytes());
-            } else {
-                self.out.buf.extend_from_slice(&frame);
-            }
-        }
+        self.out.encode(encoder, message);
         Ok(())
     }
 

@@ -11,7 +11,7 @@
 
 use std::fmt;
 
-use bytes::{Buf, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 
 use crate::{Frame, Message, Version};
 
@@ -118,6 +118,37 @@ impl Encoder {
         for (i, frame) in message.iter().enumerate() {
             let flags = if i < last { MORE } else { 0 };
             self.encode_frame(flags, frame, out);
+        }
+    }
+
+    /// Encodes `message` as [`encode`](Self::encode) does, except that a
+    /// frame of at least `apart` octets is not copied: its header goes to
+    /// `out` and its payload to `shared`, with the length `out` has at that
+    /// point, for the caller to send from its own buffer there.
+    #[inline]
+    pub fn encode_parts(
+        &self,
+        message: Message,
+        apart: usize,
+        out: &mut Vec<u8>,
+        mut shared: impl FnMut(usize, Bytes),
+    ) {
+        // Looked at by reference first: taking the frames apart costs more
+        // than copying small ones, the common case.
+        let (first, rest) = message.split_first();
+        if first.len() < apart && rest.iter().all(|frame| frame.len() < apart) {
+            self.encode(&message, out);
+            return;
+        }
+        let last = message.len().get() - 1;
+        for (i, frame) in message.into_iter().enumerate() {
+            let flags = if i < last { MORE } else { 0 };
+            if frame.len() < apart {
+                self.encode_frame(flags, &frame, out);
+            } else {
+                self.encode_header(flags, frame.len() as u64, out);
+                shared(out.len(), frame.into_bytes());
+            }
         }
     }
 
