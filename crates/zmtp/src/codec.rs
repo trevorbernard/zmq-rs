@@ -136,8 +136,18 @@ impl Encoder {
         }
     }
 
+    /// Writes the header of a last (not MORE) data frame of `size` octets,
+    /// for a caller that writes the body into `out` itself.
+    pub fn encode_frame_header(&self, size: usize, out: &mut Vec<u8>) {
+        self.encode_header(0, size as u64, out);
+    }
+
     fn encode_frame(&self, flags: u8, body: &[u8], out: &mut Vec<u8>) {
-        let size = body.len() as u64;
+        self.encode_header(flags, body.len() as u64, out);
+        out.extend_from_slice(body);
+    }
+
+    fn encode_header(&self, flags: u8, size: u64, out: &mut Vec<u8>) {
         match self.version {
             Version::V1 => {
                 let length = size + 1;
@@ -158,7 +168,6 @@ impl Encoder {
                 }
             },
         }
-        out.extend_from_slice(body);
     }
 }
 

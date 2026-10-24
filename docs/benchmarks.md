@@ -286,12 +286,15 @@ On the Xeon above:
   socket thread's messages while it allocated more under the same glibc
   arena lock: 60% of the sending I/O thread went to `free`, 83% of that
   to the lock. libzmq's engines return to the poller after each batch.
-- **CURVE is behind on the cipher.** RustCrypto's `salsa20` has no SIMD
-  code: at 64 KiB it takes 61% of our cycles and runs about 3.7 times
-  slower than libsodium's. At 256 B, Poly1305's AVX2 helpers are not
-  inlined without `-C target-cpu=native`, which takes `curve/256` to
-  0.70. Each frame also costs three allocations and about four copies
-  on sending.
+- **CURVE was 0.41 at 256 B and 0.39 at 64 KiB on the cipher.**
+  RustCrypto's `salsa20` has no SIMD code: at 64 KiB it took 61% of our
+  cycles, about 3.7 times libsodium's, and Poly1305's AVX2 helpers are
+  not inlined without `-C target-cpu=native`. Messages now go through
+  `dryoc`'s libsodium-compatible box, whose Salsa20 runs on AVX2 or
+  AVX-512 when the CPU has them, sealed and opened in place: one copy
+  each way where sending took three allocations and four copies. With
+  that, 675.3k msg/s against libzmq's 646.5k at 256 B (1.04) and 13.8k
+  against 11.6k at 64 KiB (1.18). The handshake still uses RustCrypto.
 - **`fanout/1` was 0.77 while the publisher cloned the message for every
   subscriber,** its only one included: cloning a `Vec`-backed frame
   allocates a shared header, freed on the I/O thread. The last

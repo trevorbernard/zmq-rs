@@ -16,9 +16,15 @@
 //!
 //! NaCl's boxes put the 16-octet authenticator before the ciphertext, so
 //! the detached AEAD APIs are used and the layout is `tag || ciphertext`.
+//!
+//! The handshake uses RustCrypto's `crypto_box`. Messages, where the time
+//! goes, use `dryoc`'s libsodium-compatible box with the same precomputed
+//! key: its Salsa20 runs on AVX2 or AVX-512 where the CPU has them, where
+//! RustCrypto's `salsa20` is scalar only.
 
 use std::fmt;
 
+use bytes::Bytes;
 use crypto_box::SalsaBox;
 use crypto_box::aead::generic_array::GenericArray;
 use crypto_box::aead::rand_core::RngCore;
@@ -64,7 +70,23 @@ pub struct CurveClient {
 
 enum ClientState {
     WaitingForWelcome,
-    WaitingForReady { cipher: SalsaBox },
+    WaitingForReady { cipher: SalsaBox, key: MessageKey },
+}
+
+/// The precomputed box key for MESSAGEs: libsodium's `crypto_box_beforenm`
+/// of the peer's transient public key and ours, as in `SalsaBox`.
+struct MessageKey(Zeroizing<[u8; KEY]>);
+
+impl MessageKey {
+    fn new(
+        public: &crypto_box::PublicKey,
+        secret: &crypto_box::SecretKey,
+    ) -> Result<Self, HandshakeError> {
+        let secret = Zeroizing::new(secret.to_bytes());
+        dryoc::classic::crypto_box::crypto_box_beforenm(public.as_bytes(), &secret)
+            .map(|key| Self(Zeroizing::new(key)))
+            .map_err(|_| HandshakeError::Cryptographic)
+    }
 }
 
 /// Where a client handshake goes next.
@@ -124,6 +146,7 @@ pub struct PendingCurveAuthentication {
     version: Version,
     metadata: Metadata,
     cipher: SalsaBox,
+    key: MessageKey,
     peer_nonce: u64,
 }
 
@@ -136,15 +159,15 @@ pub struct PendingCurveAuthentication {
 /// framing. We send it the same way, and accept either form, since libzmq
 /// would take a COMMAND-flagged MESSAGE's contents for a command.
 pub struct CurveCodec {
-    cipher: SalsaBox,
+    key: MessageKey,
     send_prefix: &'static [u8; 16],
     receive_prefix: &'static [u8; 16],
     /// The short nonce of the next frame we send.
     next_nonce: u64,
     /// The peer's last short nonce: its next must be greater.
     peer_nonce: u64,
-    /// Frames of a multipart message still arriving.
-    partial: Vec<Frame>,
+    /// A multipart message whose last frame has yet to arrive.
+    partial: Option<Message>,
 }
 
 /// Why a frame could not be boxed or unboxed. The connection must close.
@@ -209,8 +232,8 @@ impl CurveClient {
         match (&self.state, name) {
             (_, b"ERROR") => Err(peer_error(&body)),
             (ClientState::WaitingForWelcome, b"WELCOME") => {
-                let cipher = self.welcome(data, out)?;
-                self.state = ClientState::WaitingForReady { cipher };
+                let (cipher, key) = self.welcome(data, out)?;
+                self.state = ClientState::WaitingForReady { cipher, key };
                 Ok(CurveClientStep::Continue(self))
             }
             (ClientState::WaitingForReady { .. }, b"READY") => self.ready(data, out),
@@ -221,8 +244,12 @@ impl CurveClient {
     }
 
     /// Opens WELCOME and answers with INITIATE. Returns the box for the
-    /// rest of the connection.
-    fn welcome(&self, data: &[u8], out: &mut Vec<u8>) -> Result<SalsaBox, HandshakeError> {
+    /// rest of the connection, and its key for MESSAGEs.
+    fn welcome(
+        &self,
+        data: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<(SalsaBox, MessageKey), HandshakeError> {
         if data.len() != 16 + 144 {
             return Err(malformed("WELCOME"));
         }
@@ -235,6 +262,7 @@ impl CurveClient {
         let (server_transient, cookie) = opened.split_at(KEY);
         let server_transient = public_key(server_transient);
         let cipher = SalsaBox::new(&server_transient, &self.transient);
+        let key = MessageKey::new(&server_transient, &self.transient)?;
 
         // The vouch proves C and C' belong together: Box[C',S](C->S').
         let vouch_nonce = random::<16>();
@@ -260,11 +288,11 @@ impl CurveClient {
         initiate.extend_from_slice(&2u64.to_be_bytes());
         initiate.extend_from_slice(&sealed);
         write_raw_command(self.version, "INITIATE", &initiate, out);
-        Ok(cipher)
+        Ok((cipher, key))
     }
 
     fn ready(self, data: &[u8], out: &mut Vec<u8>) -> Result<CurveClientStep, HandshakeError> {
-        let ClientState::WaitingForReady { cipher } = self.state else {
+        let ClientState::WaitingForReady { cipher, key } = self.state else {
             unreachable!("READY is only handled while waiting for it");
         };
         if data.len() < 8 + TAG {
@@ -284,12 +312,12 @@ impl CurveClient {
             out,
         )?;
         let codec = CurveCodec {
-            cipher,
+            key,
             send_prefix: CLIENT_MESSAGE_PREFIX,
             receive_prefix: SERVER_MESSAGE_PREFIX,
             next_nonce: 3,
             peer_nonce: nonce,
-            partial: Vec::new(),
+            partial: None,
         };
         Ok(CurveClientStep::Established(established, codec))
     }
@@ -412,6 +440,7 @@ impl CurveServer {
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         let cipher = SalsaBox::new(&client_transient, &transient);
         let opened = open(&cipher, &short_nonce(INITIATE_PREFIX, nonce), sealed)?;
+        let key = MessageKey::new(&client_transient, &transient)?;
         if opened.len() < KEY + 16 + 80 {
             return Err(malformed("INITIATE"));
         }
@@ -443,6 +472,7 @@ impl CurveServer {
             version: self.version,
             metadata,
             cipher,
+            key,
             peer_nonce: nonce,
         };
         Ok(CurveServerStep::Authenticate(pending, request))
@@ -478,12 +508,12 @@ impl PendingCurveAuthentication {
         write_raw_command(self.version, "READY", &ready, out);
         established.authenticated = Some(authenticated);
         let codec = CurveCodec {
-            cipher: self.cipher,
+            key: self.key,
             send_prefix: SERVER_MESSAGE_PREFIX,
             receive_prefix: CLIENT_MESSAGE_PREFIX,
             next_nonce: 2,
             peer_nonce: self.peer_nonce,
-            partial: Vec::new(),
+            partial: None,
         };
         Ok((established, codec))
     }
@@ -527,19 +557,25 @@ impl CurveCodec {
             return Err(CurveError::NonceExhausted);
         }
         self.next_nonce += 1;
-        let mut plaintext = Zeroizing::new(Vec::with_capacity(1 + payload.len()));
-        plaintext.push(flags);
-        plaintext.extend_from_slice(payload);
-        let sealed = seal(
-            &self.cipher,
+        // Framed and sealed in place in `out`: MESSAGE, the short nonce,
+        // the authenticator, then flags and payload, encrypted where they
+        // were copied.
+        let boxed = 1 + payload.len();
+        encoder.encode_frame_header(MESSAGE.len() + 8 + TAG + boxed, out);
+        out.extend_from_slice(MESSAGE);
+        out.extend_from_slice(&nonce.to_be_bytes());
+        let tag = out.len();
+        out.extend_from_slice(&[0; TAG]);
+        out.push(flags);
+        out.extend_from_slice(payload);
+        let mut mac = [0; TAG];
+        dryoc::classic::crypto_box::crypto_box_detached_afternm_inplace(
+            &mut out[tag + TAG..],
+            &mut mac,
             &short_nonce(self.send_prefix, nonce),
-            &plaintext,
+            &self.key.0,
         );
-        let mut body = Vec::with_capacity(MESSAGE.len() + 8 + sealed.len());
-        body.extend_from_slice(MESSAGE);
-        body.extend_from_slice(&nonce.to_be_bytes());
-        body.extend_from_slice(&sealed);
-        encoder.encode(&Message::new(Frame::from(body)), out);
+        out[tag..tag + TAG].copy_from_slice(&mac);
         Ok(())
     }
 
@@ -563,29 +599,37 @@ impl CurveCodec {
         if nonce <= self.peer_nonce {
             return Err(CurveError::StaleNonce);
         }
-        let opened = open(
-            &self.cipher,
+        let (mac, ciphertext) = sealed.split_at(TAG);
+        // Opened in place in the one copy that becomes the frame.
+        let mut opened = ciphertext.to_vec();
+        dryoc::classic::crypto_box::crypto_box_open_detached_afternm_inplace(
+            &mut opened,
+            mac.try_into().expect("16 octets"),
             &short_nonce(self.receive_prefix, nonce),
-            sealed,
+            &self.key.0,
         )
         .map_err(|_| CurveError::Cryptographic)?;
         self.peer_nonce = nonce;
-        let (&flags, payload) = opened.split_first().ok_or(CurveError::Malformed)?;
-        let payload = Frame::copy_from_slice(payload);
+        let flags = opened[0];
+        let payload = Frame::from_shared(Bytes::from(opened).slice(1..));
         if flags & COMMAND != 0 {
-            if !self.partial.is_empty() {
+            if self.partial.is_some() {
                 return Err(CurveError::Malformed);
             }
             return Ok(Some(Incoming::Command(payload)));
         }
-        self.partial.push(payload);
+        let message = match self.partial.take() {
+            Some(mut message) => {
+                message.push(payload);
+                message
+            }
+            None => Message::new(payload),
+        };
         if flags & MORE != 0 {
+            self.partial = Some(message);
             return Ok(None);
         }
-        let frames = std::mem::take(&mut self.partial);
-        Ok(Some(Incoming::Message(
-            Message::try_from(frames).expect("at least the frame just pushed"),
-        )))
+        Ok(Some(Incoming::Message(message)))
     }
 }
 

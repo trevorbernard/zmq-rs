@@ -17,6 +17,9 @@ bytes = "1"
 criterion = "0.8"
 crypto_box = "0.9"
 crypto_secretbox = "0.1"
+# `std` for detecting AVX2 and AVX-512 at run time; without it only the
+# features the build targets are used.
+dryoc = { version = "2", default-features = false, features = ["std"] }
 mio = { version = "1", features = ["net", "os-poll"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 zeroize = "1"
