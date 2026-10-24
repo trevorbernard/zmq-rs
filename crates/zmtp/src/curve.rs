@@ -17,19 +17,17 @@
 //! NaCl's boxes put the 16-octet authenticator before the ciphertext, so
 //! the detached AEAD APIs are used and the layout is `tag || ciphertext`.
 //!
-//! The handshake uses RustCrypto's `crypto_box`. Messages, where the time
-//! goes, use `dryoc`'s libsodium-compatible box with the same precomputed
-//! key: its Salsa20 runs on AVX2 or AVX-512 where the CPU has them, where
-//! RustCrypto's `salsa20` is scalar only.
+//! Boxes are `dryoc`'s, libsodium-compatible: its Salsa20 runs on AVX2 or
+//! AVX-512 where the CPU has them, where RustCrypto's `salsa20` is scalar
+//! only.
 
 use std::fmt;
 
 use bytes::Bytes;
-use crypto_box::SalsaBox;
-use crypto_box::aead::generic_array::GenericArray;
-use crypto_box::aead::rand_core::RngCore;
-use crypto_box::aead::{AeadInPlace, OsRng};
-use crypto_secretbox::{KeyInit, XSalsa20Poly1305};
+use dryoc::classic::crypto_box::{
+    crypto_box_beforenm, crypto_box_detached_afternm_inplace, crypto_box_keypair,
+    crypto_box_open_detached_afternm_inplace,
+};
 use zeroize::Zeroizing;
 
 use crate::command::{encode_metadata, parse_metadata};
@@ -63,29 +61,54 @@ pub struct CurveClient {
     version: Version,
     server_key: PublicKey,
     public: PublicKey,
-    secret: crypto_box::SecretKey,
-    transient: crypto_box::SecretKey,
+    secret: Zeroizing<Key>,
+    transient: Transient,
     state: ClientState,
 }
 
 enum ClientState {
     WaitingForWelcome,
-    WaitingForReady { cipher: SalsaBox, key: MessageKey },
+    /// `key` boxes between the transient keys, READY and MESSAGEs alike.
+    WaitingForReady {
+        key: BoxKey,
+    },
 }
 
-/// The precomputed box key for MESSAGEs: libsodium's `crypto_box_beforenm`
-/// of the peer's transient public key and ours, as in `SalsaBox`.
-struct MessageKey(Zeroizing<[u8; KEY]>);
+type Key = [u8; KEY];
 
-impl MessageKey {
-    fn new(
-        public: &crypto_box::PublicKey,
-        secret: &crypto_box::SecretKey,
-    ) -> Result<Self, HandshakeError> {
-        let secret = Zeroizing::new(secret.to_bytes());
-        dryoc::classic::crypto_box::crypto_box_beforenm(public.as_bytes(), &secret)
+/// A key pair made for one connection.
+struct Transient {
+    public: Key,
+    secret: Zeroizing<Key>,
+}
+
+impl Transient {
+    fn generate() -> Self {
+        let (public, secret) = crypto_box_keypair();
+        Self {
+            public,
+            secret: Zeroizing::new(secret),
+        }
+    }
+}
+
+/// A box's precomputed key. Boxing with it is libsodium's
+/// `crypto_secretbox`, so it serves public-key boxes and the server's
+/// cookie alike.
+struct BoxKey(Zeroizing<Key>);
+
+impl BoxKey {
+    /// For boxes between `public` and the holder of `secret`: libsodium's
+    /// `crypto_box_beforenm`, which refuses a low-order `public`.
+    fn between(public: &Key, secret: &Key) -> Result<Self, HandshakeError> {
+        crypto_box_beforenm(public, secret)
             .map(|key| Self(Zeroizing::new(key)))
             .map_err(|_| HandshakeError::Cryptographic)
+    }
+
+    /// Secret boxes under `key` itself.
+    fn secret(key: Key) -> Self {
+        Self(Zeroizing::new(key))
     }
 }
 
@@ -115,16 +138,16 @@ pub struct CurveServer {
     config: CurveServerConfig,
     version: Version,
     public: PublicKey,
-    secret: crypto_box::SecretKey,
+    secret: Zeroizing<Key>,
     state: ServerState,
 }
 
 enum ServerState {
     WaitingForHello,
     WaitingForInitiate {
-        client_transient: crypto_box::PublicKey,
-        transient: crypto_box::SecretKey,
-        cookie_key: Zeroizing<[u8; KEY]>,
+        client_transient: Key,
+        transient: Transient,
+        cookie_key: BoxKey,
     },
 }
 
@@ -145,8 +168,8 @@ pub struct PendingCurveAuthentication {
     config: CurveServerConfig,
     version: Version,
     metadata: Metadata,
-    cipher: SalsaBox,
-    key: MessageKey,
+    /// Boxes between the transient keys, READY and MESSAGEs alike.
+    key: BoxKey,
     peer_nonce: u64,
 }
 
@@ -159,7 +182,7 @@ pub struct PendingCurveAuthentication {
 /// framing. We send it the same way, and accept either form, since libzmq
 /// would take a COMMAND-flagged MESSAGE's contents for a command.
 pub struct CurveCodec {
-    key: MessageKey,
+    key: BoxKey,
     send_prefix: &'static [u8; 16],
     receive_prefix: &'static [u8; 16],
     /// The short nonce of the next frame we send.
@@ -198,14 +221,14 @@ impl CurveClient {
         out: &mut Vec<u8>,
     ) -> Result<Self, HandshakeError> {
         let version = require_zmtp_3(peer)?;
-        let transient = crypto_box::SecretKey::generate(&mut OsRng);
-        let cipher = SalsaBox::new(&box_key(&server_key), &transient);
-        let signature = seal(&cipher, &short_nonce(HELLO_PREFIX, 1), &[0; 64]);
+        let transient = Transient::generate();
+        let key = BoxKey::between(server_key.as_bytes(), &transient.secret)?;
+        let signature = seal(&key, &short_nonce(HELLO_PREFIX, 1), &[0; 64]);
         let mut hello = Vec::with_capacity(194);
         // Version 1.0, then anti-amplification padding.
         hello.extend_from_slice(&[1, 0]);
         hello.extend_from_slice(&[0; 72]);
-        hello.extend_from_slice(transient.public_key().as_bytes());
+        hello.extend_from_slice(&transient.public);
         hello.extend_from_slice(&1u64.to_be_bytes());
         hello.extend_from_slice(&signature);
         write_raw_command(version, "HELLO", &hello, out);
@@ -215,7 +238,7 @@ impl CurveClient {
             version,
             server_key,
             public: keypair.public(),
-            secret: crypto_box::SecretKey::from_bytes(*keypair.secret().expose()),
+            secret: Zeroizing::new(*keypair.secret().expose()),
             transient,
             state: ClientState::WaitingForWelcome,
         })
@@ -232,8 +255,8 @@ impl CurveClient {
         match (&self.state, name) {
             (_, b"ERROR") => Err(peer_error(&body)),
             (ClientState::WaitingForWelcome, b"WELCOME") => {
-                let (cipher, key) = self.welcome(data, out)?;
-                self.state = ClientState::WaitingForReady { cipher, key };
+                let key = self.welcome(data, out)?;
+                self.state = ClientState::WaitingForReady { key };
                 Ok(CurveClientStep::Continue(self))
             }
             (ClientState::WaitingForReady { .. }, b"READY") => self.ready(data, out),
@@ -243,34 +266,29 @@ impl CurveClient {
         }
     }
 
-    /// Opens WELCOME and answers with INITIATE. Returns the box for the
-    /// rest of the connection, and its key for MESSAGEs.
-    fn welcome(
-        &self,
-        data: &[u8],
-        out: &mut Vec<u8>,
-    ) -> Result<(SalsaBox, MessageKey), HandshakeError> {
+    /// Opens WELCOME and answers with INITIATE. Returns the box key for
+    /// the rest of the connection.
+    fn welcome(&self, data: &[u8], out: &mut Vec<u8>) -> Result<BoxKey, HandshakeError> {
         if data.len() != 16 + 144 {
             return Err(malformed("WELCOME"));
         }
         let (nonce, sealed) = data.split_at(16);
         let opened = open(
-            &SalsaBox::new(&box_key(&self.server_key), &self.transient),
+            &BoxKey::between(self.server_key.as_bytes(), &self.transient.secret)?,
             &long_nonce(b"WELCOME-", nonce),
             sealed,
         )?;
         let (server_transient, cookie) = opened.split_at(KEY);
-        let server_transient = public_key(server_transient);
-        let cipher = SalsaBox::new(&server_transient, &self.transient);
-        let key = MessageKey::new(&server_transient, &self.transient)?;
+        let server_transient: Key = server_transient.try_into().expect("32 octets");
+        let key = BoxKey::between(&server_transient, &self.transient.secret)?;
 
         // The vouch proves C and C' belong together: Box[C',S](C->S').
         let vouch_nonce = random::<16>();
         let mut vouched = Vec::with_capacity(2 * KEY);
-        vouched.extend_from_slice(self.transient.public_key().as_bytes());
+        vouched.extend_from_slice(&self.transient.public);
         vouched.extend_from_slice(self.server_key.as_bytes());
         let vouch = seal(
-            &SalsaBox::new(&server_transient, &self.secret),
+            &BoxKey::between(&server_transient, &self.secret)?,
             &long_nonce(b"VOUCH---", &vouch_nonce),
             &vouched,
         );
@@ -282,17 +300,17 @@ impl CurveClient {
             &local_metadata(self.socket_type, &self.identity),
             &mut plaintext,
         );
-        let sealed = seal(&cipher, &short_nonce(INITIATE_PREFIX, 2), &plaintext);
+        let sealed = seal(&key, &short_nonce(INITIATE_PREFIX, 2), &plaintext);
         let mut initiate = Vec::with_capacity(cookie.len() + 8 + sealed.len());
         initiate.extend_from_slice(cookie);
         initiate.extend_from_slice(&2u64.to_be_bytes());
         initiate.extend_from_slice(&sealed);
         write_raw_command(self.version, "INITIATE", &initiate, out);
-        Ok((cipher, key))
+        Ok(key)
     }
 
     fn ready(self, data: &[u8], out: &mut Vec<u8>) -> Result<CurveClientStep, HandshakeError> {
-        let ClientState::WaitingForReady { cipher, key } = self.state else {
+        let ClientState::WaitingForReady { key } = self.state else {
             unreachable!("READY is only handled while waiting for it");
         };
         if data.len() < 8 + TAG {
@@ -300,7 +318,7 @@ impl CurveClient {
         }
         let (nonce, sealed) = data.split_at(8);
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
-        let opened = open(&cipher, &short_nonce(READY_PREFIX, nonce), sealed)?;
+        let opened = open(&key, &short_nonce(READY_PREFIX, nonce), sealed)?;
         let metadata =
             parse_metadata(&opened, "READY").map_err(HandshakeError::MalformedCommand)?;
         // In CURVE only the server sends ERROR.
@@ -336,7 +354,7 @@ impl CurveServer {
             config,
             version,
             public: keypair.public(),
-            secret: crypto_box::SecretKey::from_bytes(*keypair.secret().expose()),
+            secret: Zeroizing::new(*keypair.secret().expose()),
             state: ServerState::WaitingForHello,
         })
     }
@@ -367,37 +385,34 @@ impl CurveServer {
         if data.len() != 194 || data[..2] != [1, 0] {
             return Err(malformed("HELLO"));
         }
-        let client_transient = public_key(&data[74..106]);
+        let client_transient: Key = data[74..106].try_into().expect("32 octets");
         let nonce = u64::from_be_bytes(data[106..114].try_into().expect("8 octets"));
         // The signature box only proves the client knows our key; its 64
         // zero octets are not checked, as libzmq does not.
-        open(
-            &SalsaBox::new(&client_transient, &self.secret),
-            &short_nonce(HELLO_PREFIX, nonce),
-            &data[114..],
-        )?;
+        let long_term = BoxKey::between(&client_transient, &self.secret)?;
+        open(&long_term, &short_nonce(HELLO_PREFIX, nonce), &data[114..])?;
 
         // The cookie holds C' and s' under a key only we know, so the
         // client must send them back in INITIATE.
-        let transient = crypto_box::SecretKey::generate(&mut OsRng);
-        let cookie_key = Zeroizing::new(random::<KEY>());
+        let transient = Transient::generate();
+        let cookie_key = BoxKey::secret(random::<KEY>());
         let cookie_nonce = random::<16>();
         let mut cookie_plaintext = Zeroizing::new(Vec::with_capacity(2 * KEY));
-        cookie_plaintext.extend_from_slice(client_transient.as_bytes());
-        cookie_plaintext.extend_from_slice(&transient.to_bytes());
+        cookie_plaintext.extend_from_slice(&client_transient);
+        cookie_plaintext.extend_from_slice(&*transient.secret);
         let cookie = seal(
-            &XSalsa20Poly1305::new(GenericArray::from_slice(&*cookie_key)),
+            &cookie_key,
             &long_nonce(b"COOKIE--", &cookie_nonce),
             &cookie_plaintext,
         );
 
         let mut plaintext = Zeroizing::new(Vec::with_capacity(KEY + COOKIE));
-        plaintext.extend_from_slice(transient.public_key().as_bytes());
+        plaintext.extend_from_slice(&transient.public);
         plaintext.extend_from_slice(&cookie_nonce);
         plaintext.extend_from_slice(&cookie);
         let welcome_nonce = random::<16>();
         let sealed = seal(
-            &SalsaBox::new(&client_transient, &self.secret),
+            &long_term,
             &long_nonce(b"WELCOME-", &welcome_nonce),
             &plaintext,
         );
@@ -428,19 +443,18 @@ impl CurveServer {
         let (cookie, rest) = data.split_at(COOKIE);
         let (cookie_nonce, cookie_box) = cookie.split_at(16);
         let cookie = open(
-            &XSalsa20Poly1305::new(GenericArray::from_slice(&*cookie_key)),
+            &cookie_key,
             &long_nonce(b"COOKIE--", cookie_nonce),
             cookie_box,
         )?;
-        if cookie[..KEY] != *client_transient.as_bytes() || cookie[KEY..] != transient.to_bytes() {
+        if cookie[..KEY] != client_transient || cookie[KEY..] != *transient.secret {
             return Err(HandshakeError::Cryptographic);
         }
 
         let (nonce, sealed) = rest.split_at(8);
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
-        let cipher = SalsaBox::new(&client_transient, &transient);
-        let opened = open(&cipher, &short_nonce(INITIATE_PREFIX, nonce), sealed)?;
-        let key = MessageKey::new(&client_transient, &transient)?;
+        let key = BoxKey::between(&client_transient, &transient.secret)?;
+        let opened = open(&key, &short_nonce(INITIATE_PREFIX, nonce), sealed)?;
         if opened.len() < KEY + 16 + 80 {
             return Err(malformed("INITIATE"));
         }
@@ -448,14 +462,12 @@ impl CurveServer {
         let vouch_nonce = &opened[KEY..KEY + 16];
         let vouch = &opened[KEY + 16..KEY + 16 + 80];
         let vouched = open(
-            &SalsaBox::new(&box_key(&client_key), &transient),
+            &BoxKey::between(client_key.as_bytes(), &transient.secret)?,
             &long_nonce(b"VOUCH---", vouch_nonce),
             vouch,
         )?;
         // libzmq checks only C'; RFC 26 asks for S too.
-        if vouched[..KEY] != *client_transient.as_bytes()
-            || vouched[KEY..] != *self.public.as_bytes()
-        {
+        if vouched[..KEY] != client_transient || vouched[KEY..] != *self.public.as_bytes() {
             return Err(HandshakeError::Cryptographic);
         }
         let metadata = parse_metadata(&opened[KEY + 16 + 80..], "INITIATE")
@@ -471,7 +483,6 @@ impl CurveServer {
             config: self.config,
             version: self.version,
             metadata,
-            cipher,
             key,
             peer_nonce: nonce,
         };
@@ -501,7 +512,7 @@ impl PendingCurveAuthentication {
             &local_metadata(socket_type, &self.config.identity),
             &mut metadata,
         );
-        let sealed = seal(&self.cipher, &short_nonce(READY_PREFIX, 1), &metadata);
+        let sealed = seal(&self.key, &short_nonce(READY_PREFIX, 1), &metadata);
         let mut ready = Vec::with_capacity(8 + sealed.len());
         ready.extend_from_slice(&1u64.to_be_bytes());
         ready.extend_from_slice(&sealed);
@@ -569,7 +580,7 @@ impl CurveCodec {
         out.push(flags);
         out.extend_from_slice(payload);
         let mut mac = [0; TAG];
-        dryoc::classic::crypto_box::crypto_box_detached_afternm_inplace(
+        crypto_box_detached_afternm_inplace(
             &mut out[tag + TAG..],
             &mut mac,
             &short_nonce(self.send_prefix, nonce),
@@ -602,7 +613,7 @@ impl CurveCodec {
         let (mac, ciphertext) = sealed.split_at(TAG);
         // Opened in place in the one copy that becomes the frame.
         let mut opened = ciphertext.to_vec();
-        dryoc::classic::crypto_box::crypto_box_open_detached_afternm_inplace(
+        crypto_box_open_detached_afternm_inplace(
             &mut opened,
             mac.try_into().expect("16 octets"),
             &short_nonce(self.receive_prefix, nonce),
@@ -634,20 +645,19 @@ impl CurveCodec {
 }
 
 /// Seals `plaintext` as NaCl does: authenticator, then ciphertext.
-fn seal(cipher: &impl AeadInPlace, nonce: &[u8; 24], plaintext: &[u8]) -> Vec<u8> {
-    let mut sealed = Vec::with_capacity(TAG + plaintext.len());
-    sealed.extend_from_slice(&[0; TAG]);
-    sealed.extend_from_slice(plaintext);
-    let tag = cipher
-        .encrypt_in_place_detached(GenericArray::from_slice(nonce), b"", &mut sealed[TAG..])
-        .expect("XSalsa20Poly1305 seals any length we send");
-    sealed[..TAG].copy_from_slice(&tag);
+fn seal(key: &BoxKey, nonce: &[u8; 24], plaintext: &[u8]) -> Vec<u8> {
+    let mut sealed = vec![0; TAG + plaintext.len()];
+    let (tag, ciphertext) = sealed.split_at_mut(TAG);
+    ciphertext.copy_from_slice(plaintext);
+    let mut mac = [0; TAG];
+    crypto_box_detached_afternm_inplace(ciphertext, &mut mac, nonce, &key.0);
+    tag.copy_from_slice(&mac);
     sealed
 }
 
 /// Opens a box sealed by [`seal`].
 fn open(
-    cipher: &impl AeadInPlace,
+    key: &BoxKey,
     nonce: &[u8; 24],
     sealed: &[u8],
 ) -> Result<Zeroizing<Vec<u8>>, HandshakeError> {
@@ -655,14 +665,13 @@ fn open(
         .split_at_checked(TAG)
         .ok_or(HandshakeError::Cryptographic)?;
     let mut plaintext = Zeroizing::new(ciphertext.to_vec());
-    cipher
-        .decrypt_in_place_detached(
-            GenericArray::from_slice(nonce),
-            b"",
-            &mut plaintext,
-            GenericArray::from_slice(tag),
-        )
-        .map_err(|_| HandshakeError::Cryptographic)?;
+    crypto_box_open_detached_afternm_inplace(
+        &mut plaintext,
+        tag.try_into().expect("16 octets"),
+        nonce,
+        &key.0,
+    )
+    .map_err(|_| HandshakeError::Cryptographic)?;
     Ok(plaintext)
 }
 
@@ -684,17 +693,8 @@ fn long_nonce(prefix: &[u8; 8], rest: &[u8]) -> [u8; 24] {
 
 fn random<const N: usize>() -> [u8; N] {
     let mut bytes = [0; N];
-    OsRng.fill_bytes(&mut bytes);
+    dryoc::rng::copy_randombytes(&mut bytes);
     bytes
-}
-
-fn box_key(key: &PublicKey) -> crypto_box::PublicKey {
-    crypto_box::PublicKey::from(*key.as_bytes())
-}
-
-fn public_key(bytes: &[u8]) -> crypto_box::PublicKey {
-    let bytes: [u8; KEY] = bytes.try_into().expect("32 octets");
-    crypto_box::PublicKey::from(bytes)
 }
 
 fn command_body(incoming: Incoming) -> Result<Frame, HandshakeError> {
@@ -1154,25 +1154,25 @@ mod tests {
     fn forged_initiate(
         client: &CurveClient,
         welcome: &[u8],
-        vouched_transient: &crypto_box::PublicKey,
+        vouched_transient: &Key,
         vouched_server: &PublicKey,
     ) -> Incoming {
         let body = commands(welcome).remove(0);
         let data = &body[8..];
         let opened = open(
-            &SalsaBox::new(&box_key(&client.server_key), &client.transient),
+            &BoxKey::between(client.server_key.as_bytes(), &client.transient.secret).unwrap(),
             &long_nonce(b"WELCOME-", &data[..16]),
             &data[16..],
         )
         .unwrap();
-        let server_transient = public_key(&opened[..KEY]);
+        let server_transient: Key = opened[..KEY].try_into().unwrap();
         let cookie = &opened[KEY..];
         let vouch_nonce = random::<16>();
         let mut vouched = Vec::new();
-        vouched.extend_from_slice(vouched_transient.as_bytes());
+        vouched.extend_from_slice(vouched_transient);
         vouched.extend_from_slice(vouched_server.as_bytes());
         let vouch = seal(
-            &SalsaBox::new(&server_transient, &client.secret),
+            &BoxKey::between(&server_transient, &client.secret).unwrap(),
             &long_nonce(b"VOUCH---", &vouch_nonce),
             &vouched,
         );
@@ -1181,7 +1181,7 @@ mod tests {
         plaintext.extend_from_slice(&vouch_nonce);
         plaintext.extend_from_slice(&vouch);
         let sealed = seal(
-            &SalsaBox::new(&server_transient, &client.transient),
+            &BoxKey::between(&server_transient, &client.transient.secret).unwrap(),
             &short_nonce(INITIATE_PREFIX, 2),
             &plaintext,
         );
@@ -1194,7 +1194,7 @@ mod tests {
 
     #[test]
     fn a_vouch_must_name_this_connection_and_this_server() {
-        let other_transient = crypto_box::SecretKey::generate(&mut OsRng).public_key();
+        let other_transient = Transient::generate().public;
         let other_server = Keypair::generate().public();
         for wrong_transient in [true, false] {
             let server_keys = Keypair::generate();
@@ -1217,9 +1217,9 @@ mod tests {
                 panic!()
             };
             let (transient, server_key) = if wrong_transient {
-                (other_transient.clone(), server_keys.public())
+                (other_transient, server_keys.public())
             } else {
-                (client.transient.public_key(), other_server)
+                (client.transient.public, other_server)
             };
             let initiate = forged_initiate(&client, &welcome, &transient, &server_key);
             assert!(
@@ -1257,7 +1257,7 @@ mod tests {
         let initiate = forged_initiate(
             &client,
             &welcome,
-            &client.transient.public_key(),
+            &client.transient.public,
             &server_keys.public(),
         );
         assert!(matches!(

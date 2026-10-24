@@ -73,15 +73,19 @@ impl SecretKey {
 impl Keypair {
     /// A fresh key pair from the operating system's random source.
     pub fn generate() -> Self {
-        let secret = crypto_box::SecretKey::generate(&mut crypto_box::aead::OsRng);
-        Self::from_secret(SecretKey::from_bytes(secret.to_bytes()))
+        let (public, secret) = dryoc::classic::crypto_box::crypto_box_keypair();
+        Self {
+            public: PublicKey(public),
+            secret: SecretKey::from_bytes(secret),
+        }
     }
 
     /// The key pair whose secret key is `secret`.
     pub fn from_secret(secret: SecretKey) -> Self {
-        let public = crypto_box::SecretKey::from_bytes(*secret.expose()).public_key();
+        let mut public = [0; 32];
+        dryoc::classic::crypto_core::crypto_scalarmult_base(&mut public, secret.expose());
         Self {
-            public: PublicKey(*public.as_bytes()),
+            public: PublicKey(public),
             secret,
         }
     }

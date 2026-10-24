@@ -294,7 +294,7 @@ On the Xeon above:
   AVX-512 when the CPU has them, sealed and opened in place: one copy
   each way where sending took three allocations and four copies. With
   that, 675.3k msg/s against libzmq's 646.5k at 256 B (1.04) and 13.8k
-  against 11.6k at 64 KiB (1.18). The handshake still uses RustCrypto.
+  against 11.6k at 64 KiB (1.18). The handshake uses dryoc too.
 - **`fanout/1` was 0.77 while the publisher cloned the message for every
   subscriber,** its only one included: cloning a `Vec`-backed frame
   allocates a shared header, freed on the I/O thread. The last
