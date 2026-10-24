@@ -10,6 +10,7 @@ mod context;
 mod engine;
 mod io_thread;
 mod monitor;
+mod output;
 mod pair;
 mod pubsub;
 #[cfg(feature = "draft")]

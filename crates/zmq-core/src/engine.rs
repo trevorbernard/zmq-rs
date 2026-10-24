@@ -5,7 +5,7 @@
 //! write continues until the OS reports `WouldBlock`; when a full receive
 //! pipe stops reading early, the pipe's waker brings the engine back.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Read};
 use std::mem;
 use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
@@ -23,6 +23,7 @@ use zmtp::{
 };
 
 use crate::context::PeerSlot;
+use crate::output::{Output, SHARED_MIN};
 use crate::transport::Stream;
 use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
 
@@ -37,8 +38,7 @@ pub(crate) struct Engine {
     config: ConnectionConfig,
     connected: bool,
     state: State,
-    out: Vec<u8>,
-    out_pos: usize,
+    out: Output,
     /// The last look at the socket's pipe found it empty or closed.
     outbound_empty: bool,
     deadlines: Deadlines,
@@ -220,15 +220,14 @@ impl Engine {
             identity: config.identity.clone(),
             mechanism,
         });
-        let mut out = Vec::new();
-        greeting.write_output(&mut out);
+        let mut out = Output::default();
+        greeting.write_output(&mut out.buf);
         Self {
             stream,
             config,
             connected: false,
             state: State::Greeting(greeting),
             out,
-            out_pos: 0,
             outbound_empty: false,
             deadlines: Deadlines::default(),
             curve: None,
@@ -278,17 +277,24 @@ impl Engine {
         Ok(())
     }
 
-    /// Writes `message`, boxed if CURVE is in use.
-    fn write_message(&mut self, encoder: Encoder, message: &Message) -> Result<(), EngineError> {
-        match &mut self.curve {
-            Some(codec) => codec
-                .encode_message(message, encoder, &mut self.out)
-                .map_err(EngineError::Curve),
-            None => {
-                encoder.encode(message, &mut self.out);
-                Ok(())
+    /// Writes `message`, boxed if CURVE is in use. Without CURVE, a large
+    /// frame is sent from its own buffer, not copied.
+    fn write_message(&mut self, encoder: Encoder, message: Message) -> Result<(), EngineError> {
+        if let Some(codec) = &mut self.curve {
+            return codec
+                .encode_message(&message, encoder, &mut self.out.buf)
+                .map_err(EngineError::Curve);
+        }
+        let last = message.len().get() - 1;
+        for (i, frame) in message.into_iter().enumerate() {
+            encoder.encode_frame_header(i < last, frame.len(), &mut self.out.buf);
+            if frame.len() >= SHARED_MIN {
+                self.out.push_shared(frame.into_bytes());
+            } else {
+                self.out.buf.extend_from_slice(&frame);
             }
         }
+        Ok(())
     }
 
     /// Writes a command, boxed if CURVE is in use. Returns false for ZMTP
@@ -296,10 +302,10 @@ impl Engine {
     fn write_command(&mut self, encoder: Encoder, body: &[u8]) -> Result<bool, EngineError> {
         match &mut self.curve {
             Some(codec) => codec
-                .encode_command(body, encoder, &mut self.out)
+                .encode_command(body, encoder, &mut self.out.buf)
                 .map(|()| true)
                 .map_err(EngineError::Curve),
-            None => Ok(encoder.encode_command(body, &mut self.out).is_ok()),
+            None => Ok(encoder.encode_command(body, &mut self.out.buf).is_ok()),
         }
     }
 
@@ -368,24 +374,7 @@ impl Engine {
 
     /// Writes pending output until done or the OS would block.
     fn flush(&mut self) -> Result<bool, EngineError> {
-        let mut progressed = false;
-        while self.out_pos < self.out.len() {
-            match self.stream.write(&self.out[self.out_pos..]) {
-                Ok(0) => return Err(EngineError::Io(io::ErrorKind::WriteZero.into())),
-                Ok(n) => {
-                    self.out_pos += n;
-                    progressed = true;
-                }
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
-                Err(err) => return Err(EngineError::Io(err)),
-            }
-        }
-        if self.out_pos == self.out.len() {
-            self.out.clear();
-            self.out_pos = 0;
-        }
-        Ok(progressed)
+        self.out.write_to(&mut self.stream).map_err(EngineError::Io)
     }
 
     /// Encodes messages from the socket while output is not backed up.
@@ -399,7 +388,7 @@ impl Engine {
         };
         let encoder = *encoder;
         let mut progressed = false;
-        while self.out.len() - self.out_pos < MAX_PENDING_OUTPUT {
+        while self.out.len() < MAX_PENDING_OUTPUT {
             match pipes.outbound.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
                     if let Some(subscription) = self.outgoing_subscription(&message) {
@@ -409,7 +398,7 @@ impl Engine {
                         remember_membership(pipes.subscriptions, &change);
                         self.encode_membership(encoder, &change)?;
                     } else {
-                        self.write_message(encoder, &message)?;
+                        self.write_message(encoder, message)?;
                     }
                     self.outbound_empty = false;
                     progressed = true;
@@ -473,7 +462,7 @@ impl Engine {
             Err(err) => return Err(EngineError::Io(err)),
         };
         let feed = greeting.feed(&buf[..n]).map_err(EngineError::Greeting)?;
-        greeting.write_output(&mut self.out);
+        greeting.write_output(&mut self.out.buf);
         let Some(peer) = feed.peer else {
             self.state = State::Greeting(greeting);
             return Ok(true);
@@ -528,16 +517,19 @@ impl Engine {
                     }
                 })
             }
-            Security::Null => {
-                NullHandshake::start(config.socket_type, &config.identity, peer, &mut self.out)
-                    .map(Mechanism::Null)
-            }
+            Security::Null => NullHandshake::start(
+                config.socket_type,
+                &config.identity,
+                peer,
+                &mut self.out.buf,
+            )
+            .map(Mechanism::Null),
             Security::PlainClient(credentials) => PlainClient::start(
                 config.socket_type,
                 config.identity.clone(),
                 credentials,
                 peer,
-                &mut self.out,
+                &mut self.out.buf,
             )
             .map(Mechanism::PlainClient),
             Security::PlainServer { domain, .. } => {
@@ -562,7 +554,7 @@ impl Engine {
                 keypair,
                 *server_key,
                 peer,
-                &mut self.out,
+                &mut self.out.buf,
             )
             .map(|client| Mechanism::CurveClient(Box::new(client))),
             Security::CurveServer {
@@ -608,15 +600,15 @@ impl Engine {
                 };
                 match pending {
                     Pending::Null(pending) => {
-                        let handshake = pending.reply(answer, &mut self.out);
+                        let handshake = pending.reply(answer, &mut self.out.buf);
                         Step::Continue(Mechanism::Null(self.handshake_result(handshake)?))
                     }
                     Pending::Plain(pending) => {
-                        let server = pending.reply(answer, &mut self.out);
+                        let server = pending.reply(answer, &mut self.out.buf);
                         Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))
                     }
                     Pending::Curve(pending) => {
-                        let result = pending.reply(answer, &mut self.out);
+                        let result = pending.reply(answer, &mut self.out.buf);
                         let (established, codec) = self.handshake_result(result)?;
                         Step::Established(established, Some(codec))
                     }
@@ -680,18 +672,18 @@ impl Engine {
     ) -> Result<Step, EngineError> {
         Ok(match mechanism {
             Mechanism::Null(handshake) => {
-                let result = handshake.receive(item, &mut self.out);
+                let result = handshake.receive(item, &mut self.out.buf);
                 Step::Established(self.handshake_result(result)?, None)
             }
             Mechanism::PlainClient(client) => {
-                let result = client.receive(item, &mut self.out);
+                let result = client.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     ClientStep::Continue(client) => Step::Continue(Mechanism::PlainClient(client)),
                     ClientStep::Established(established) => Step::Established(established, None),
                 }
             }
             Mechanism::PlainServer(server) => {
-                let result = server.receive(item, &mut self.out);
+                let result = server.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     ServerStep::Authenticate(pending, request) => {
                         let (answer, reply) = mpsc::channel();
@@ -710,7 +702,7 @@ impl Engine {
                 }
             }
             Mechanism::CurveClient(client) => {
-                let result = client.receive(item, &mut self.out);
+                let result = client.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     CurveClientStep::Continue(client) => {
                         Step::Continue(Mechanism::CurveClient(Box::new(client)))
@@ -721,7 +713,7 @@ impl Engine {
                 }
             }
             Mechanism::CurveServer(server) => {
-                let result = server.receive(item, &mut self.out);
+                let result = server.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     CurveServerStep::Continue(server) => {
                         Step::Continue(Mechanism::CurveServer(Box::new(server)))
@@ -748,7 +740,7 @@ impl Engine {
                                     user_id: zmtp::Frame::new(),
                                     metadata: zmtp::Metadata::new(),
                                 };
-                                let result = pending.reply(accept, &mut self.out);
+                                let result = pending.reply(accept, &mut self.out.buf);
                                 let (mut established, codec) = self.handshake_result(result)?;
                                 established.authenticated = None;
                                 Step::Established(established, Some(codec))
@@ -909,7 +901,7 @@ impl Engine {
             subscription.to_command().encode(&mut body);
             self.write_command(encoder, &body).map(drop)
         } else {
-            self.write_message(encoder, &subscription.to_message())
+            self.write_message(encoder, subscription.to_message())
         }
     }
 

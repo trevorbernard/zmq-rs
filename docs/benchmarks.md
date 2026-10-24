@@ -231,11 +231,15 @@ libraries). Our latency is lower everywhere.
 - **Release builds with fat LTO** and one codegen unit run 7–19% faster
   at 8 B and 256 B (measured at `51f314a`); the bench uses the default
   profile.
-- **tcp at 64 KiB is behind on copies.** Our I/O threads spend 41% of
-  their time in memmove and 10% in memset, against libzmq's 15%: the
-  encoder copies every payload into its output buffer, where libzmq
-  writes large ones from the message, and the decoder zeroes its read
-  buffer.
+- **tcp at 64 KiB was 0.93 on copies.** Our I/O threads spent 41% of
+  their time in memmove, against libzmq's 15%: the encoder copied every
+  payload into its output buffer. Frames of 8 KiB and up are now written
+  from their own buffers with vectored writes, as libzmq's encoder sends
+  what will not fit its batch, and memmove is down to 4%: 36.1k msg/s
+  against libzmq's 36.0k over tcp (1.00), 59.2k against 47.8k over ipc
+  (1.24). The decoder still zeroes its read buffer before each read,
+  about 31% of the receiving I/O thread, since safe Rust cannot read
+  into uninitialized memory on stable.
 - **Noise:** inproc 64 KiB throughput spreads widely for both libraries
   in every run, and so does latency at small sizes. The machine ran the
   `schedutil` governor; rerun a subset before acting on a difference

@@ -52,6 +52,15 @@ impl Frame {
         }
     }
 
+    /// The payload as `Bytes`: a larger payload's own buffer, not a copy;
+    /// an inline one copied.
+    pub fn into_bytes(self) -> Bytes {
+        match self.0 {
+            Repr::Inline { .. } => Bytes::copy_from_slice(self.as_slice()),
+            Repr::Shared(bytes) => bytes,
+        }
+    }
+
     /// Wraps `bytes` without copying, unless it is small enough to inline.
     pub(crate) fn from_shared(bytes: Bytes) -> Self {
         Self::inline(&bytes).unwrap_or(Self(Repr::Shared(bytes)))

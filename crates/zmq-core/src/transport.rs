@@ -146,6 +146,11 @@ impl Write for Stream {
         delegate!(self, stream => stream.write(buf))
     }
 
+    // Forwarded: the default writes only the first slice.
+    fn write_vectored(&mut self, bufs: &[io::IoSlice<'_>]) -> io::Result<usize> {
+        delegate!(self, stream => stream.write_vectored(bufs))
+    }
+
     fn flush(&mut self) -> io::Result<()> {
         delegate!(self, stream => stream.flush())
     }

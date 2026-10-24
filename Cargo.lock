@@ -1064,6 +1064,7 @@ name = "zmq-core"
 version = "0.1.0-dev"
 dependencies = [
  "atomic-waker",
+ "bytes",
  "criterion",
  "mio",
  "proptest",
