@@ -13,12 +13,14 @@ use std::future::poll_fn;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::atomic::{self, AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError, mpsc};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
 
 use atomic_waker::AtomicWaker;
+
+mod queue;
 
 /// How many messages a pipe holds before the writer must wait.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -32,21 +34,21 @@ pub enum Hwm {
 
 /// Creates a pipe.
 pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
-    let (sender, receiver) = mpsc::channel();
+    let (producer, consumer) = queue::queue();
     let shared = Arc::new(Shared::default());
     let hwm = match hwm {
         Hwm::Unlimited => None,
         Hwm::Messages(n) => Some(n.get() as u64),
     };
     let writer = Writer {
-        sender: Some(Sender::Queue(sender)),
+        sender: Some(Sender::Queue(producer)),
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
         hwm,
     };
     let reader = Reader {
-        receiver: Receiver::Queue(receiver),
+        receiver: Receiver::Queue(consumer),
         shared,
         read: 0,
         // libzmq's pipe_t::compute_lwm.
@@ -80,13 +82,13 @@ pub fn pipe_conflated<T>() -> (Writer<T>, Reader<T>) {
 /// Where a writer puts items: a queue, or a slot for the latest one.
 #[derive(Debug)]
 enum Sender<T> {
-    Queue(mpsc::Sender<T>),
+    Queue(queue::Producer<T>),
     Latest(Arc<Mutex<Option<T>>>),
 }
 
 #[derive(Debug)]
 enum Receiver<T> {
-    Queue(mpsc::Receiver<T>),
+    Queue(queue::Consumer<T>),
     Latest(Arc<Mutex<Option<T>>>),
 }
 
@@ -111,12 +113,12 @@ struct Shared {
     writer_waker: CachePadded<AtomicWaker>,
 }
 
-/// How a waiting reader is woken. One line: the writer reads `waiting` on
-/// every send, and touches `waker` only when that is set.
+/// How a waiting reader is woken. One line: a conflated pipe's writer reads
+/// `waiting` on every send, and touches `waker` only when that is set.
 #[derive(Debug, Default)]
 struct ReaderWait {
-    /// Raised by a reader about to wait, so the writer wakes it only then,
-    /// as libzmq's ypipe signals only a reader that found it empty.
+    /// Raised by a conflated pipe's reader about to wait, so the writer
+    /// wakes it only then. A queue keeps this state in its own counter.
     waiting: AtomicBool,
     waker: AtomicWaker,
 }
@@ -199,20 +201,21 @@ impl<T> Writer<T> {
         if self.is_full() {
             return Err(TrySendError::Full(item));
         }
-        match &self.sender {
-            Some(Sender::Queue(sender)) => sender
-                .send(item)
-                .map_err(|mpsc::SendError(item)| TrySendError::Closed(item))?,
-            Some(Sender::Latest(latest)) => *lock(latest) = Some(item),
+        let reader_waiting = match &mut self.sender {
+            Some(Sender::Queue(producer)) => producer.push(item),
+            Some(Sender::Latest(latest)) => {
+                *lock(latest) = Some(item);
+                // Pairs with the fence in `Reader::poll_recv`: either the
+                // reader's last check sees this item, or this load sees its
+                // flag.
+                atomic::fence(Ordering::SeqCst);
+                self.shared.reader.waiting.load(Ordering::Relaxed)
+                    && self.shared.reader.waiting.swap(false, Ordering::Acquire)
+            }
             None => return Err(TrySendError::Closed(item)),
-        }
+        };
         self.written += 1;
-        // Pairs with the fence in `Reader::poll_recv`: either the reader's
-        // last check sees this item, or this load sees its flag.
-        atomic::fence(Ordering::SeqCst);
-        if self.shared.reader.waiting.load(Ordering::Relaxed)
-            && self.shared.reader.waiting.swap(false, Ordering::Acquire)
-        {
+        if reader_waiting {
             self.shared.reader.waker.wake();
         }
         Ok(())
@@ -323,43 +326,53 @@ impl<T> Drop for Writer<T> {
 impl<T> Reader<T> {
     /// Takes the next item if one is queued.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        let received = match &self.receiver {
-            Receiver::Queue(receiver) => receiver.try_recv(),
+        self.take(false)
+    }
+
+    /// Takes the next item. With `sleep`, finding none tells the writer to
+    /// wake the registered waker on its next send.
+    fn take(&mut self, sleep: bool) -> Result<T, TryRecvError> {
+        let item = match &mut self.receiver {
+            Receiver::Queue(consumer) => match consumer.pop(sleep) {
+                Some(item) => item,
+                // Loaded after the miss: once closed, everything the writer
+                // sent is published, so a second look is final.
+                None if self.shared.writer_closed.load(Ordering::Acquire) => {
+                    consumer.pop(false).ok_or(TryRecvError::Closed)?
+                }
+                None => return Err(TryRecvError::Empty),
+            },
             Receiver::Latest(latest) => {
                 // Loaded first: once closed, the last item is already stored.
-                let closed = self.is_closed();
+                let closed = self.shared.writer_closed.load(Ordering::Acquire);
                 match lock(latest).take() {
-                    Some(item) => Ok(item),
-                    None if closed => Err(mpsc::TryRecvError::Disconnected),
-                    None => Err(mpsc::TryRecvError::Empty),
+                    Some(item) => item,
+                    None if closed => return Err(TryRecvError::Closed),
+                    None => return Err(TryRecvError::Empty),
                 }
             }
         };
-        match received {
-            Ok(item) => {
-                self.read += 1;
-                self.shared.read.store(self.read, Ordering::Release);
-                if self.lwm.is_some_and(|lwm| self.read.is_multiple_of(lwm)) {
-                    self.shared.writer_waker.wake();
-                }
-                Ok(item)
-            }
-            Err(mpsc::TryRecvError::Empty) => Err(TryRecvError::Empty),
-            Err(mpsc::TryRecvError::Disconnected) => Err(TryRecvError::Closed),
+        self.read += 1;
+        self.shared.read.store(self.read, Ordering::Release);
+        if self.lwm.is_some_and(|lwm| self.read.is_multiple_of(lwm)) {
+            self.shared.writer_waker.wake();
         }
+        Ok(item)
     }
 
     /// The next item, or `None` once the writer is gone and the pipe drained.
     pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        if let Poll::Ready(item) = self.ready() {
+        if let Poll::Ready(item) = self.ready(false) {
             return Poll::Ready(item);
         }
-        // Register and raise the flag, then check again so a send in
-        // between is not missed.
+        // Register and tell the writer we are waiting, then check again so
+        // a send in between is not missed.
         self.shared.reader.waker.register(cx.waker());
-        self.shared.reader.waiting.store(true, Ordering::Release);
-        atomic::fence(Ordering::SeqCst);
-        self.ready()
+        if let Receiver::Latest(_) = self.receiver {
+            self.shared.reader.waiting.store(true, Ordering::Release);
+            atomic::fence(Ordering::SeqCst);
+        }
+        self.ready(true)
     }
 
     /// Whether the writer is gone. Items it sent may still be queued.
@@ -414,8 +427,8 @@ impl<T> Reader<T> {
         }
     }
 
-    fn ready(&mut self) -> Poll<Option<T>> {
-        match self.try_recv() {
+    fn ready(&mut self, sleep: bool) -> Poll<Option<T>> {
+        match self.take(sleep) {
             Ok(item) => Poll::Ready(Some(item)),
             Err(TryRecvError::Closed) => Poll::Ready(None),
             Err(TryRecvError::Empty) => Poll::Pending,
@@ -460,25 +473,30 @@ fn block_on_poll_until<R>(
     thread_local! {
         static WAKER: Waker = Waker::from(Arc::new(Unpark(thread::current())));
     }
-    let waker = WAKER
-        .try_with(Waker::clone)
-        .unwrap_or_else(|_| Waker::from(Arc::new(Unpark(thread::current()))));
-    let mut cx = Context::from_waker(&waker);
-    loop {
-        if let Poll::Ready(output) = poll(&mut cx) {
-            return Some(output);
-        }
-        // Spurious wakeups are harmless: the loop polls again.
-        match deadline {
-            None => thread::park(),
-            Some(deadline) => {
-                let now = Instant::now();
-                if now >= deadline {
-                    return None;
+    // Borrowed, not cloned: a clone and its drop are two atomic operations
+    // on every call.
+    let mut run = |waker: &Waker| {
+        let mut cx = Context::from_waker(waker);
+        loop {
+            if let Poll::Ready(output) = poll(&mut cx) {
+                return Some(output);
+            }
+            // Spurious wakeups are harmless: the loop polls again.
+            match deadline {
+                None => thread::park(),
+                Some(deadline) => {
+                    let now = Instant::now();
+                    if now >= deadline {
+                        return None;
+                    }
+                    thread::park_timeout(deadline - now);
                 }
-                thread::park_timeout(deadline - now);
             }
         }
+    };
+    match WAKER.try_with(|waker| run(waker)) {
+        Ok(output) => output,
+        Err(_) => run(&Waker::from(Arc::new(Unpark(thread::current())))),
     }
 }
 
@@ -787,7 +805,7 @@ mod tests {
                 }
                 expected
             });
-            let total = 200_000u64;
+            let total = if cfg!(miri) { 2_000 } else { 200_000u64 };
             for i in 0..total {
                 writer.send_blocking(i).unwrap();
             }
