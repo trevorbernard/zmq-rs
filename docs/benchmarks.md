@@ -298,8 +298,14 @@ On the Xeon above:
   subscriber now takes the message itself, which gives 4.29M msg/s
   against libzmq's 3.73M (1.15) with 4 and 16 subscribers unchanged.
   A message for several subscribers still pays that one allocation.
-- **`multipart/2`:** a message of more than one frame allocates its
-  frame vector, on both ends.
+- **`multipart/2` was 0.88 while every message of more than one frame
+  allocated its frame vector,** on both ends. libzmq has no such list:
+  each frame is its own `zmq_msg_t` in the pipe, flushed with the last.
+  A message now holds its second frame inline, which gives 2.86M msg/s
+  against libzmq's 1.92M (1.49); a third frame still moves them to a
+  vector. `Message` grew from 56 to 72 octets, and with it each pipe
+  slot; 8 B over ipc may be 3–5% slower for it, within run-to-run
+  spread, and tcp and inproc are level.
 
 ## Publisher fan-out
 

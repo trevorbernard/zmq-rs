@@ -1,16 +1,57 @@
 //! A whole multipart message.
 
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
 use std::num::NonZeroUsize;
+use std::{mem, slice};
 
 use crate::Frame;
 
 /// A ZeroMQ message: one or more [`Frame`]s, sent and delivered atomically.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub struct Message {
     first: Frame,
-    rest: Vec<Frame>,
+    rest: Rest,
+}
+
+/// The frames after the first. A second frame is held inline, so the
+/// common two-frame message (a REQ's delimiter and body, a topic and its
+/// data) allocates no list; a third moves them all to a `Vec`.
+#[derive(Clone)]
+enum Rest {
+    /// None when empty, which allocates nothing either.
+    Many(Vec<Frame>),
+    One(Frame),
+}
+
+impl Rest {
+    fn as_slice(&self) -> &[Frame] {
+        match self {
+            Self::Many(frames) => frames,
+            Self::One(frame) => slice::from_ref(frame),
+        }
+    }
+
+    fn push(&mut self, frame: Frame) {
+        match self {
+            Self::Many(frames) if frames.is_empty() => *self = Self::One(frame),
+            Self::Many(frames) => frames.push(frame),
+            Self::One(_) => {
+                let Self::One(second) = mem::replace(self, Self::Many(Vec::new())) else {
+                    unreachable!("matched One");
+                };
+                *self = Self::Many(vec![second, frame]);
+            }
+        }
+    }
+
+    fn into_vec(self) -> Vec<Frame> {
+        match self {
+            Self::Many(frames) => frames,
+            Self::One(frame) => vec![frame],
+        }
+    }
 }
 
 /// Returned when building a [`Message`] from zero frames.
@@ -22,7 +63,7 @@ impl Message {
     pub fn new(frame: impl Into<Frame>) -> Self {
         Self {
             first: frame.into(),
-            rest: Vec::new(),
+            rest: Rest::Many(Vec::new()),
         }
     }
 
@@ -33,38 +74,54 @@ impl Message {
 
     /// The number of frames. Never zero.
     pub fn len(&self) -> NonZeroUsize {
-        NonZeroUsize::MIN.saturating_add(self.rest.len())
+        NonZeroUsize::MIN.saturating_add(self.rest.as_slice().len())
     }
 
     /// The frame at `index`.
     pub fn get(&self, index: usize) -> Option<&Frame> {
         match index {
             0 => Some(&self.first),
-            i => self.rest.get(i - 1),
+            i => self.rest.as_slice().get(i - 1),
         }
     }
 
     /// The first frame and the remaining frames.
     pub fn split_first(&self) -> (&Frame, &[Frame]) {
-        (&self.first, &self.rest)
+        (&self.first, self.rest.as_slice())
     }
 
     /// The last frame.
     pub fn last(&self) -> &Frame {
-        self.rest.last().unwrap_or(&self.first)
+        self.rest.as_slice().last().unwrap_or(&self.first)
     }
 
     /// Iterates over the frames in order.
     pub fn iter(&self) -> Iter<'_> {
         Iter {
             first: Some(&self.first),
-            rest: self.rest.iter(),
+            rest: self.rest.as_slice().iter(),
         }
     }
 
     /// Takes the message apart into its first frame and the remaining frames.
+    /// A two-frame message allocates the list here.
     pub fn into_parts(self) -> (Frame, Vec<Frame>) {
-        (self.first, self.rest)
+        (self.first, self.rest.into_vec())
+    }
+}
+
+impl PartialEq for Message {
+    fn eq(&self, other: &Self) -> bool {
+        self.first == other.first && self.rest.as_slice() == other.rest.as_slice()
+    }
+}
+
+impl Eq for Message {}
+
+impl Hash for Message {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.first.hash(state);
+        self.rest.as_slice().hash(state);
     }
 }
 
@@ -96,6 +153,8 @@ impl FusedIterator for Iter<'_> {}
 #[derive(Debug)]
 pub struct IntoIter {
     first: Option<Frame>,
+    /// A second frame held inline.
+    second: Option<Frame>,
     rest: std::vec::IntoIter<Frame>,
 }
 
@@ -103,11 +162,16 @@ impl Iterator for IntoIter {
     type Item = Frame;
 
     fn next(&mut self) -> Option<Frame> {
-        self.first.take().or_else(|| self.rest.next())
+        self.first
+            .take()
+            .or_else(|| self.second.take())
+            .or_else(|| self.rest.next())
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let len = usize::from(self.first.is_some()) + self.rest.len();
+        let len = usize::from(self.first.is_some())
+            + usize::from(self.second.is_some())
+            + self.rest.len();
         (len, Some(len))
     }
 }
@@ -121,9 +185,14 @@ impl IntoIterator for Message {
     type IntoIter = IntoIter;
 
     fn into_iter(self) -> IntoIter {
+        let (second, rest) = match self.rest {
+            Rest::Many(frames) => (None, frames),
+            Rest::One(frame) => (Some(frame), Vec::new()),
+        };
         IntoIter {
             first: Some(self.first),
-            rest: self.rest.into_iter(),
+            second,
+            rest: rest.into_iter(),
         }
     }
 }
@@ -149,18 +218,22 @@ impl TryFrom<Vec<Frame>> for Message {
     type Error = EmptyMessage;
 
     fn try_from(frames: Vec<Frame>) -> Result<Self, EmptyMessage> {
-        let mut rest = frames.into_iter();
-        let first = rest.next().ok_or(EmptyMessage)?;
-        Ok(Self {
-            first,
-            rest: rest.collect(),
-        })
+        let mut frames = frames.into_iter();
+        let first = frames.next().ok_or(EmptyMessage)?;
+        let rest = if frames.len() == 1 {
+            Rest::One(frames.next().expect("one left"))
+        } else {
+            Rest::Many(frames.collect())
+        };
+        Ok(Self { first, rest })
     }
 }
 
 impl Extend<Frame> for Message {
     fn extend<I: IntoIterator<Item = Frame>>(&mut self, frames: I) {
-        self.rest.extend(frames);
+        for frame in frames {
+            self.rest.push(frame);
+        }
     }
 }
 
@@ -189,16 +262,57 @@ mod tests {
 
     #[test]
     #[cfg(target_pointer_width = "64")]
-    fn message_is_56_bytes() {
-        assert_eq!(size_of::<Message>(), 56);
+    fn message_is_72_bytes() {
+        // A second frame held inline costs 16 octets over a bare `Vec`.
+        assert_eq!(size_of::<Message>(), 72);
     }
 
     #[test]
     fn single_part_message_does_not_allocate_a_frame_list() {
         let msg = Message::new("hello");
-        assert_eq!(msg.rest.capacity(), 0);
+        assert!(matches!(&msg.rest, Rest::Many(frames) if frames.capacity() == 0));
         assert_eq!(msg.len().get(), 1);
         assert_eq!(msg.split_first(), (&Frame::from("hello"), &[][..]));
+    }
+
+    #[test]
+    fn a_second_frame_is_held_inline_and_a_third_moves_to_a_list() {
+        let mut msg = Message::new("a");
+        msg.push("b");
+        assert!(matches!(msg.rest, Rest::One(_)));
+        assert_eq!(msg.split_first().1, &frames(&["b"])[..]);
+        msg.push("c");
+        assert!(matches!(&msg.rest, Rest::Many(frames) if frames.len() == 2));
+        assert_eq!(
+            msg.iter().cloned().collect::<Vec<_>>(),
+            frames(&["a", "b", "c"])
+        );
+        let two = Message::try_from(frames(&["a", "b"])).unwrap();
+        assert!(matches!(two.rest, Rest::One(_)));
+    }
+
+    #[test]
+    fn equality_and_hashing_ignore_how_frames_are_held() {
+        use std::hash::BuildHasher;
+        let inline = Message::try_from(frames(&["a", "b"])).unwrap();
+        let listed = Message {
+            first: Frame::from("a"),
+            rest: Rest::Many(frames(&["b"])),
+        };
+        assert_eq!(inline, listed);
+        let hasher = std::hash::RandomState::new();
+        assert_eq!(hasher.hash_one(&inline), hasher.hash_one(&listed));
+    }
+
+    #[test]
+    fn a_two_frame_message_iterates_owned() {
+        let msg = Message::try_from(frames(&["a", "b"])).unwrap();
+        let mut iter = msg.into_iter();
+        assert_eq!(iter.len(), 2);
+        assert_eq!(iter.next(), Some(Frame::from("a")));
+        assert_eq!(iter.len(), 1);
+        assert_eq!(iter.next(), Some(Frame::from("b")));
+        assert_eq!(iter.next(), None);
     }
 
     #[test]
