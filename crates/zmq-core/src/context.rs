@@ -429,7 +429,7 @@ fn introduce(config: &ConnectionConfig) -> Established {
         version: Version::V3_1,
         peer_socket_type: Some(config.socket_type),
         peer_identity: if config.socket_type.sends_identity() {
-            Frame::copy_from_slice(config.identity.as_slice())
+            Frame::copy_from_slice(config.identity.as_bytes())
         } else {
             Frame::new()
         },

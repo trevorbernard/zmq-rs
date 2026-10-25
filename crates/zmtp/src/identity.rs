@@ -34,8 +34,14 @@ impl Identity {
     }
 
     /// The identity octets.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
+    }
+
+    /// The identity octets.
+    #[deprecated(note = "renamed to `as_bytes`, as `RoutingId::as_bytes`")]
+    pub fn as_slice(&self) -> &[u8] {
+        self.as_bytes()
     }
 }
 
@@ -56,14 +62,14 @@ mod tests {
 
     #[test]
     fn empty_identity_is_valid() {
-        assert_eq!(Identity::default().as_slice(), b"");
-        assert_eq!(Identity::new(Frame::new()).unwrap().as_slice(), b"");
+        assert_eq!(Identity::default().as_bytes(), b"");
+        assert_eq!(Identity::new(Frame::new()).unwrap().as_bytes(), b"");
     }
 
     #[test]
     fn up_to_255_octets_is_valid() {
         let id = Identity::new(vec![b'a'; 255]).unwrap();
-        assert_eq!(id.as_slice().len(), 255);
+        assert_eq!(id.as_bytes().len(), 255);
     }
 
     #[test]

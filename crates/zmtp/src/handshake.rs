@@ -130,7 +130,7 @@ impl NullHandshake {
             // The greeting already sent our identity frame.
             PeerGreeting::Zmtp1Unversioned { .. } => {}
             PeerGreeting::Zmtp1 { .. } | PeerGreeting::Zmtp2 { .. } => {
-                let identity = Frame::copy_from_slice(identity.as_slice());
+                let identity = Frame::copy_from_slice(identity.as_bytes());
                 Encoder::new(version).encode(&Message::new(identity), out);
             }
         }
@@ -159,7 +159,7 @@ impl NullHandshake {
         let request = ZapRequest {
             domain: zap.domain,
             address: zap.peer_address,
-            identity: Frame::copy_from_slice(identity.as_slice()),
+            identity: Frame::copy_from_slice(identity.as_bytes()),
             credentials: ZapCredentials::Null,
         };
         let pending = PendingNullAuthentication {
@@ -254,7 +254,7 @@ pub(crate) fn local_metadata(socket_type: SocketType, identity: &Identity) -> Me
     if socket_type.sends_identity() {
         metadata.push(
             PropertyName::from_static("Identity"),
-            Frame::copy_from_slice(identity.as_slice()),
+            Frame::copy_from_slice(identity.as_bytes()),
         );
     }
     metadata

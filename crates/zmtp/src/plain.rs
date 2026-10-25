@@ -185,7 +185,7 @@ impl PlainServer {
                 let request = ZapRequest {
                     domain: self.config.domain.clone(),
                     address: self.config.peer_address.clone(),
-                    identity: Frame::copy_from_slice(self.config.identity.as_slice()),
+                    identity: Frame::copy_from_slice(self.config.identity.as_bytes()),
                     credentials: ZapCredentials::Plain(credentials),
                 };
                 let pending = PendingAuthentication {

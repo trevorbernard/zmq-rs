@@ -121,7 +121,7 @@ impl Greeting {
         // frame: length (identity plus flags octet), then flags.
         let mut output = Vec::with_capacity(GREETING_LEN);
         output.push(0xFF);
-        output.extend_from_slice(&(identity.as_slice().len() as u64 + 1).to_be_bytes());
+        output.extend_from_slice(&(identity.as_bytes().len() as u64 + 1).to_be_bytes());
         output.push(0x7F);
         Self {
             socket_type,
@@ -196,7 +196,7 @@ impl Greeting {
     fn unversioned(&mut self) -> Result<PeerGreeting, GreetingError> {
         self.legacy_socket_type()?;
         // The pseudo-signature already carried our identity frame header.
-        self.output.extend_from_slice(self.identity.as_slice());
+        self.output.extend_from_slice(self.identity.as_bytes());
         let mut replay = Replay {
             buf: [0; SIGNATURE_LEN],
             len: self.len,

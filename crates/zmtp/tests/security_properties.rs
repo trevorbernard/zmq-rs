@@ -472,7 +472,7 @@ fn check_peer(
     prop_assert_eq!(established.version, version);
     prop_assert_eq!(established.peer_socket_type, Some(peer_type));
     let expected_id = if peer_type.sends_identity() {
-        peer_id.as_slice()
+        peer_id.as_bytes()
     } else {
         &[]
     };
@@ -523,7 +523,7 @@ proptest! {
         let expected_zap = ZapRequest {
             domain: Frame::from("domain"),
             address: "127.0.0.1".to_owned(),
-            identity: Frame::copy_from_slice(sides.server_id.as_slice()),
+            identity: Frame::copy_from_slice(sides.server_id.as_bytes()),
             credentials,
         };
         prop_assert_eq!(server.zap.as_ref(), Some(&expected_zap));

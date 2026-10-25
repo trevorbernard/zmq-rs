@@ -402,9 +402,9 @@ proptest! {
                 prop_assert_eq!(decoder.decode(), Ok(Some(Incoming::Message(message(std::slice::from_ref(identity))))));
                 prop_assert_eq!(decoder.decode(), Ok(Some(Incoming::Message(message(std::slice::from_ref(then))))));
                 let mut expected = vec![0xFF];
-                expected.extend_from_slice(&(our_id.as_slice().len() as u64 + 1).to_be_bytes());
+                expected.extend_from_slice(&(our_id.as_bytes().len() as u64 + 1).to_be_bytes());
                 expected.push(0x7F);
-                expected.extend_from_slice(our_id.as_slice());
+                expected.extend_from_slice(our_id.as_bytes());
                 prop_assert_eq!(ours, expected, "our identity frame follows the pseudo-signature");
             }
             Foreign::Legacy { revision, socket_type, .. } => {
@@ -459,7 +459,7 @@ proptest! {
                 let established = result.as_ref().expect("compatible peers are accepted");
                 prop_assert_eq!(established.version, Version::V3_1);
                 prop_assert_eq!(established.peer_socket_type, Some(peer_type));
-                let expected_id = if peer_type.sends_identity() { peer_id.as_slice() } else { &[] };
+                let expected_id = if peer_type.sends_identity() { peer_id.as_bytes() } else { &[] };
                 prop_assert_eq!(&established.peer_identity[..], expected_id);
             } else {
                 prop_assert_eq!(result, &Err(HandshakeError::IncompatiblePeer { peer: peer_type }));
