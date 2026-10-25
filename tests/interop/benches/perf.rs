@@ -29,7 +29,7 @@ use std::process::{self, Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use zmq::{Context, Endpoint, Message, Pull, Push, Rep, Req};
+use zmq::{Context, Endpoint, Frame, Message, Pull, Push, Rep, Req};
 use zmq_interop::libzmq::{self, Kind, Msg};
 
 const ROUNDS: usize = 5;
@@ -579,8 +579,11 @@ fn throughput(case: Case, count: usize) -> f64 {
     // off in the wrapper, so dropping it early would discard what it queued.
     let sending = thread::spawn(move || match sender {
         End::Ours(mut push) => {
+            // Copied into each message, which holds a small payload inline
+            // as libzmq does, where a vector would allocate and be freed.
+            let payload = vec![0; size];
             for _ in 0..count {
-                push.send(Message::from(vec![0; size]));
+                push.send(Message::from(Frame::copy_from_slice(&payload)));
             }
             End::Ours(push)
         }

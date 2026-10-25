@@ -141,8 +141,11 @@ fn run(scenario: Scenario, ours: bool) -> f64 {
 }
 
 fn ours_message(frames: usize, size: usize) -> Message {
-    let frames: Vec<Frame> = (0..frames).map(|_| Frame::from(vec![0; size])).collect();
-    Message::try_from(frames).expect("frames")
+    // Built frame by frame, as libzmq's sender sends them, without first
+    // collecting them into a list.
+    let mut message = Message::new(vec![0; size]);
+    message.extend((1..frames).map(|_| Frame::from(vec![0; size])));
+    message
 }
 
 fn multipart(ours: bool, frames: usize, count: usize) -> f64 {
