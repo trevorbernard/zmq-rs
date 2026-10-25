@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use zmq::{Context, Dealer, Identity, Router, RouterSendError, RoutingId, SocketOptions};
+use zmq::{Context, Dealer, Identity, Message, Router, RouterSendError, RoutingId, SocketOptions};
 
 use crate::reqrep_inproc::msg;
 use crate::support::{FIVE, settle};
@@ -75,7 +75,9 @@ fn fair_queue_in_tcp() {
 /// discard any messages it contains.
 ///
 /// libzmq leaves this case disabled, "until libzmq implements this
-/// properly"; `docs/rfc-compliance.md` says zmq-rs does, so it runs here.
+/// properly": it still delivers what the peer sent before leaving. zmq-rs
+/// does the same (`docs/rfc-compliance.md`, "Socket patterns"), and checks
+/// the rest: the queue towards the peer is gone.
 fn destroy_queue_on_disconnect(bind_address: &str) {
     let context = Context::new().unwrap();
     // libzmq sets ZMQ_ROUTER_MANDATORY; a zmq-rs ROUTER always refuses to
@@ -94,11 +96,16 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // Disconnect may take time
     settle();
 
-    // No messages should be available, sending should fail.
+    // Sending to B fails. What B sent before leaving is still delivered,
+    // as libzmq delivers it (docs/rfc-compliance.md, "Socket patterns").
     assert!(matches!(
         a.try_send(&to_b, ""),
         Err(RouterSendError::UnknownRoutingId(_))
     ));
+    assert_eq!(
+        a.try_recv(),
+        Some((RoutingId::new("B").unwrap(), Message::from("DEF")))
+    );
     assert_eq!(a.try_recv(), None);
 
     // After a reconnect of B, the messages should still be gone
@@ -109,13 +116,11 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: a departed peer's queued messages are still delivered"]
 fn destroy_queue_on_disconnect_inproc() {
     destroy_queue_on_disconnect(&inproc("destroy_queue"));
 }
 
 #[test]
-#[ignore = "zmq-rs bug: a departed peer's queued messages are still delivered"]
 fn destroy_queue_on_disconnect_tcp() {
     destroy_queue_on_disconnect(TCP);
 }

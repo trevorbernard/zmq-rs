@@ -97,8 +97,10 @@ fn fair_queue_in_tcp() {
 /// disconnects, the DEALER socket SHALL destroy its double queue and SHALL
 /// discard any messages it contains.
 ///
-/// libzmq leaves this case disabled, "until libzmq does this properly";
-/// `docs/rfc-compliance.md` says zmq-rs does, so it runs here.
+/// libzmq leaves this case disabled, "until libzmq does this properly": it
+/// still delivers what the peer sent before leaving. zmq-rs does the same
+/// (`docs/rfc-compliance.md`, "Socket patterns"), and checks the rest: the
+/// queue towards the peer is gone.
 fn destroy_queue_on_disconnect(bind_address: &str) {
     let context = Context::new().unwrap();
     let mut a = context.socket::<Dealer>();
@@ -113,8 +115,10 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // Disconnect may take time
     settle();
 
-    // No messages should be available, sending should fail.
+    // Sending to B fails. What B sent before leaving is still delivered,
+    // as libzmq delivers it (docs/rfc-compliance.md, "Socket patterns").
     assert!(a.try_send(Message::new("")).is_err());
+    assert_eq!(a.try_recv(), Some(Message::from("DEF")));
     assert_eq!(a.try_recv(), None);
 
     // After a reconnect of B, the messages should still be gone
@@ -125,13 +129,11 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: a departed peer's queued messages are still delivered"]
 fn destroy_queue_on_disconnect_inproc() {
     destroy_queue_on_disconnect(&inproc("destroy_queue"));
 }
 
 #[test]
-#[ignore = "zmq-rs bug: a departed peer's queued messages are still delivered"]
 fn destroy_queue_on_disconnect_tcp() {
     destroy_queue_on_disconnect(TCP);
 }

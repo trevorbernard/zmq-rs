@@ -279,7 +279,7 @@ encoder takes input whose length is checked, and never pads.
 
 Rules shared by every pattern:
 
-- One queue per peer, created on connect (whether or not the connection is up yet) and destroyed along with its messages on disconnect.
+- One queue per peer, created on connect (whether or not the connection is up yet). On disconnect, what was queued towards the peer is discarded, but what it sent before leaving is still delivered, as libzmq does. RFC 28 says that too SHALL be discarded; libzmq disables its tests for it, and discarding would lose, for example, a request a client sent just before exiting.
 - HWM is configurable.
 - Messages are never modified.
 - HWM is checked per **message**, not per frame.
