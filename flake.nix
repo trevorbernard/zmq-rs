@@ -100,10 +100,12 @@
             echo "Cargo $(cargo --version)"
           '';
         };
-        # cargo-fuzz needs nightly for -Zsanitizer.
+        # cargo-fuzz needs nightly for -Zsanitizer, and llvm-tools for
+        # `cargo fuzz coverage`.
         fuzz = pkgs.mkShell {
           nativeBuildInputs = [
-            (pkgs.rust-bin.selectLatestNightlyWith (toolchain: toolchain.minimal))
+            (pkgs.rust-bin.selectLatestNightlyWith (toolchain:
+              toolchain.minimal.override {extensions = ["llvm-tools-preview"];}))
             pkgs.cargo-fuzz
           ];
         };

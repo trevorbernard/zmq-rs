@@ -42,6 +42,11 @@ seed plain_server hello_initiate "$(greeting $PLAIN 00)" \
   041f 08494e495449415445 ${SOCKET_TYPE} 00000006 4445414c4552 \
   000568656c6c6f
 
+seed plain_client welcome_ready "$(greeting $PLAIN 01)" \
+  0408 0757454c434f4d45 \
+  041c 055245414459 ${SOCKET_TYPE} 00000006 524f55544552 \
+  000568656c6c6f
+
 seed command_parse ready $READY_SUB
 seed command_parse error 054552524f5203343030
 seed command_parse ping 0450494e47000a6869
@@ -59,6 +64,9 @@ if [[ ${1:-} == --fetch ]]; then
   git clone --quiet --depth 1 https://github.com/zeromq/libzmq-fuzz-corpora.git "$tmp/libzmq"
   cp "$tmp"/libzmq/test_bind_null_fuzzer_seed_corpus/* corpus/null_handshake/
   cp "$tmp"/libzmq/test_connect_null_fuzzer_seed_corpus/* corpus/null_handshake/
+  mkdir -p corpus/curve_server corpus/curve_client
+  cp "$tmp"/libzmq/test_bind_curve_fuzzer_seed_corpus/* corpus/curve_server/
+  cp "$tmp"/libzmq/test_connect_curve_fuzzer_seed_corpus/* corpus/curve_client/
   mkdir -p corpus/z85_decode
   cp "$tmp"/libzmq/test_z85_decode_fuzzer_seed_corpus/* corpus/z85_decode/
   curl -fsSL -o "$tmp/z85.zip" \

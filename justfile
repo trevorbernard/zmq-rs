@@ -56,3 +56,11 @@ fuzz-seed *args:
 # Fuzzes a zmtp target, e.g. `just fuzz null_handshake`.
 fuzz target *args:
     cd fuzz && nix develop ..#fuzz -c cargo fuzz run {{target}} -- -dict=zmtp.dict {{args}}
+
+# Fuzzes every target at once, for `seconds` each.
+fuzz-all seconds="60":
+    nix develop .#fuzz -c ./fuzz/run-all.sh {{seconds}}
+
+# Line coverage of zmtp over the fuzz corpora.
+fuzz-coverage *args:
+    nix develop .#fuzz -c ./fuzz/coverage.sh {{args}}

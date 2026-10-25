@@ -46,3 +46,36 @@ jobs:
       # nextest does not run doctests.
       - name: Doctests
         run: cargo test --workspace --all-features --doc
+
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-24.04
+    # Over the repository's rust-toolchain.toml, which rustup would
+    # otherwise pick inside fuzz/: cargo-fuzz needs nightly.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-fuzz
+        # v2.87.27
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: cargo-fuzz
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      - name: Seed
+        run: fuzz/seed.sh
+
+      - name: Fuzz every target for 30 seconds
+        run: fuzz/run-all.sh 30

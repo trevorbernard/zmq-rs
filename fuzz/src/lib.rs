@@ -38,3 +38,37 @@ pub fn drain(decoder: &mut Decoder) -> Vec<Incoming> {
     }
     items
 }
+
+/// The long-term keys of libzmq's `test_bind_curve_fuzzer` and
+/// `test_connect_curve_fuzzer`, so their seed corpora apply.
+pub mod curve {
+    use zmtp::{CurveCodec, Decoder, Incoming, Keypair, PublicKey, SecretKey};
+
+    pub const CLIENT_SECRET: &str = "N?Gmik8R[2ACw{b7*[-$S6[4}aO#?DB?#=<OQPc7";
+    pub const SERVER_PUBLIC: &str = "3.9-xXwy{g*w72TP*3iB9IJJRxlBH<ufTAvPd2>C";
+    pub const SERVER_SECRET: &str = "T}t5GLq%&Qm1)y3ywu-}pY3KEA//{^Ut!M1ut+B4";
+
+    pub fn client_keys() -> Keypair {
+        Keypair::from_secret(SecretKey::from_z85(CLIENT_SECRET).expect("a key"))
+    }
+
+    pub fn server_keys() -> Keypair {
+        Keypair::from_secret(SecretKey::from_z85(SERVER_SECRET).expect("a key"))
+    }
+
+    pub fn server_public() -> PublicKey {
+        PublicKey::from_z85(SERVER_PUBLIC).expect("a key")
+    }
+
+    /// Decodes and unboxes until the decoder needs more input, or either
+    /// fails.
+    pub fn drain(decoder: &mut Decoder, codec: &mut CurveCodec) -> Result<Vec<Incoming>, ()> {
+        let mut items = Vec::new();
+        while let Some(item) = decoder.decode().map_err(drop)? {
+            if let Some(item) = codec.decode(item).map_err(drop)? {
+                items.push(item);
+            }
+        }
+        Ok(items)
+    }
+}
