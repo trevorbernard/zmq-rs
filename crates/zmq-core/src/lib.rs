@@ -28,7 +28,7 @@ pub use context::IpcAbstractListener;
 #[cfg(unix)]
 pub use context::IpcListener;
 pub use context::{
-    Connection, ConnectionConfig, Context, Heartbeat, InprocListener, Linger, Listener,
+    Connection, ConnectionConfig, Context, Heartbeat, Inbound, InprocListener, Linger, Listener,
     ShutdownTimedOut, TcpKeepalive,
 };
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};

@@ -342,7 +342,8 @@ impl Publisher {
     /// Sends `message` to the peer with `key` alone, if it wants it and has
     /// room (libzmq's `ZMQ_XPUB_MANUAL_LAST_VALUE`). Returns whether it was
     /// queued.
-    pub fn send_to(&mut self, peers: &mut PeerList, key: PeerKey, message: Message) -> bool {
+    pub fn send_to(&mut self, peers: &mut PeerList, key: PeerKey, mut message: Message) -> bool {
+        message.set_metadata(None);
         self.wants(key, &message)
             && peers
                 .get_mut(key)
@@ -417,7 +418,8 @@ impl Publisher {
     /// Sends `message` to every peer subscribed to it that has room.
     /// Never blocks: a peer whose queue is full misses the message, as in
     /// libzmq. Returns how many peers it went to.
-    pub fn send(&mut self, peers: &mut PeerList, message: Message) -> usize {
+    pub fn send(&mut self, peers: &mut PeerList, mut message: Message) -> usize {
+        message.set_metadata(None);
         self.sync(peers);
         self.match_peers(&message);
         let mut sent = 0;
@@ -463,9 +465,10 @@ impl Publisher {
         cx: &mut TaskContext<'_>,
     ) -> Poll<usize> {
         self.drain(peers, Some(cx));
-        let Some(message) = slot.take() else {
+        let Some(mut message) = slot.take() else {
             return Poll::Ready(0);
         };
+        message.set_metadata(None);
         self.match_peers(&message);
         let mut full = false;
         self.for_each_wanted(peers, |peer| {
@@ -669,7 +672,8 @@ impl Subscriber {
     /// Sends `message` to every peer, as XSUB does. A subscription in the
     /// message form subscribes or unsubscribes instead, as in libzmq, so
     /// the topics stay counted.
-    pub fn send_upstream(&mut self, peers: &mut PeerList, message: Message) {
+    pub fn send_upstream(&mut self, peers: &mut PeerList, mut message: Message) {
+        message.set_metadata(None);
         match Subscription::from_message(&message) {
             Some(Subscription::Subscribe(topic)) => self.subscribe(peers, &topic),
             Some(Subscription::Cancel(topic)) => {

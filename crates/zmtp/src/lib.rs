@@ -43,7 +43,7 @@ pub use handshake::{
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use membership::Membership;
-pub use message::{EmptyMessage, IntoIter, Iter, Message};
+pub use message::{EmptyMessage, IntoIter, Iter, Message, MessageMetadata};
 pub use plain::{
     ClientStep, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, ServerStep,
 };

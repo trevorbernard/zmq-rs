@@ -59,6 +59,7 @@ impl Pair {
         cx: &mut TaskContext<'_>,
     ) -> Result<(), Message> {
         let mut message = message;
+        message.set_metadata(None);
         // A peer found closed is replaced, so look twice at most.
         for _ in 0..2 {
             self.sync(peers);

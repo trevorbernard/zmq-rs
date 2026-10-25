@@ -13,7 +13,7 @@ use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
-use zmtp::{Established, Frame, Identity, Message, Metadata, SocketType, Version};
+use zmtp::{Established, Frame, Identity, Message, MessageMetadata, Metadata, SocketType, Version};
 
 use mio::net::TcpListener;
 #[cfg(unix)]
@@ -188,8 +188,104 @@ pub struct Connection {
     /// Messages to the peer.
     pub tx: Writer<Message>,
     /// Messages from the peer.
-    pub rx: Reader<Message>,
+    pub rx: Inbound,
     pub(crate) peer: PeerSlot,
+}
+
+/// Messages from a peer, each given the metadata of the connection it
+/// arrived on as it is read. A session attaches the metadata to a
+/// connection's first message only, and this reader to every message after,
+/// so its shared count is changed on the reading socket's thread rather
+/// than on both threads for every message: that cost a quarter of the
+/// throughput at 8 octets.
+#[derive(Debug)]
+pub struct Inbound {
+    reader: Reader<Message>,
+    /// The metadata of the connection the latest message came from.
+    metadata: Option<MessageMetadata>,
+}
+
+impl Inbound {
+    pub(crate) fn new(reader: Reader<Message>) -> Self {
+        Self {
+            reader,
+            metadata: None,
+        }
+    }
+
+    /// The next message, if one is waiting.
+    #[inline(always)]
+    pub fn try_recv(&mut self) -> Result<Message, TryRecvError> {
+        let mut message = self.reader.try_recv()?;
+        self.attach(&mut message);
+        Ok(message)
+    }
+
+    /// The next message, or `None` once the session is gone and every
+    /// message it delivered has been read.
+    #[inline(always)]
+    pub fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Message>> {
+        match self.reader.poll_recv(cx) {
+            Poll::Ready(Some(mut message)) => {
+                self.attach(&mut message);
+                Poll::Ready(Some(message))
+            }
+            other => other,
+        }
+    }
+
+    /// The next message, blocking the thread until one arrives; `None`
+    /// once the session is gone and drained.
+    #[inline]
+    pub fn recv_blocking(&mut self) -> Option<Message> {
+        let mut message = self.reader.recv_blocking()?;
+        self.attach(&mut message);
+        Some(message)
+    }
+
+    /// The next message, blocking the thread for at most `timeout`.
+    pub fn recv_timeout(
+        &mut self,
+        timeout: std::time::Duration,
+    ) -> Result<Message, zmq_pipe::RecvTimeoutError> {
+        let mut message = self.reader.recv_timeout(timeout)?;
+        self.attach(&mut message);
+        Ok(message)
+    }
+
+    /// Whether the session is gone.
+    pub fn is_closed(&self) -> bool {
+        self.reader.is_closed()
+    }
+
+    /// Whether the session is gone and every message it delivered has been
+    /// read.
+    pub fn is_drained(&self) -> bool {
+        self.reader.is_drained()
+    }
+
+    pub(crate) fn raise_hwm(&mut self, hwm: Hwm) {
+        self.reader.raise_hwm(hwm);
+    }
+
+    #[inline(always)]
+    fn attach(&mut self, message: &mut Message) {
+        match message.metadata() {
+            // A connection's first message: what every one after it
+            // carries. An empty one says the connection has none.
+            Some(metadata) if metadata.is_empty() => {
+                self.metadata = None;
+                message.set_metadata(None);
+            }
+            Some(metadata) => self.metadata = Some(metadata.clone()),
+            // Untouched without metadata, as over inproc.
+            None => {
+                if let Some(metadata) = &self.metadata {
+                    message.set_metadata(Some(metadata.clone()));
+                }
+            }
+        }
+    }
 }
 
 /// What the most recent handshake established, shared by a session and its
@@ -683,12 +779,12 @@ impl Context {
         let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
         let client = Connection {
             tx,
-            rx,
+            rx: Inbound::new(rx),
             peer: PeerSlot::default(),
         };
         let server = Connection {
             tx: server_tx,
-            rx: server_rx,
+            rx: Inbound::new(server_rx),
             peer: PeerSlot::default(),
         };
         match binding {

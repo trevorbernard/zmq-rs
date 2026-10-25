@@ -32,6 +32,8 @@ const ZMQ_HEARTBEAT_IVL: c_int = 75;
 const ZMQ_HEARTBEAT_TTL: c_int = 76;
 const ZMQ_HEARTBEAT_TIMEOUT: c_int = 77;
 const ZMQ_XPUB_WELCOME_MSG: c_int = 72;
+/// Draft in libzmq 4.3, which the flake builds with drafts.
+const ZMQ_METADATA: c_int = 95;
 const ZMQ_SNDMORE: c_int = 2;
 
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
@@ -65,6 +67,7 @@ unsafe extern "C" {
     fn zmq_msg_size(msg: *const RawMsg) -> usize;
     fn zmq_msg_more(msg: *const RawMsg) -> c_int;
     fn zmq_msg_close(msg: *mut RawMsg) -> c_int;
+    fn zmq_msg_gets(msg: *const RawMsg, property: *const c_char) -> *const c_char;
     fn zmq_errno() -> c_int;
     fn zmq_has(capability: *const c_char) -> c_int;
     fn zmq_msg_init_size(msg: *mut RawMsg, size: usize) -> c_int;
@@ -240,6 +243,12 @@ impl Socket {
     /// The identity announced to peers.
     pub fn set_routing_id(&self, id: &[u8]) {
         self.set_bytes(ZMQ_ROUTING_ID, id);
+    }
+
+    /// Announces the application property `name` (which must start with
+    /// `X-`) with `value` in the handshake (`ZMQ_METADATA`).
+    pub fn set_metadata(&self, name: &str, value: &str) {
+        self.set_bytes(ZMQ_METADATA, format!("{name}:{value}").as_bytes());
     }
 
     /// Sends each new peer `welcome` first (`ZMQ_XPUB_WELCOME_MSG`).
@@ -579,6 +588,21 @@ impl Msg {
     pub fn size(&self) -> usize {
         // SAFETY: `self.0` is an initialized message.
         unsafe { zmq_msg_size(&self.0) }
+    }
+
+    /// The property `name` of the connection the message arrived on
+    /// (`zmq_msg_gets`), or `None` if it has none.
+    pub fn gets(&self, name: &str) -> Option<String> {
+        let name = CString::new(name).expect("no NUL in a property name");
+        // SAFETY: `self.0` is an initialized message and `name` a C string;
+        // the value, if any, lives as long as the message's metadata.
+        let value = unsafe { zmq_msg_gets(&self.0, name.as_ptr()) };
+        if value.is_null() {
+            return None;
+        }
+        // SAFETY: a non-null result is a NUL-terminated string.
+        let value = unsafe { CStr::from_ptr(value) };
+        Some(value.to_string_lossy().into_owned())
     }
 
     /// Whether more frames of the message follow this one.

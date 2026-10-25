@@ -18,7 +18,7 @@ use crate::context::{PeerSlot, message_pipe};
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
 use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
-use crate::{Connection, ConnectionConfig, EventKind, Linger, Topics};
+use crate::{Connection, ConnectionConfig, EventKind, Inbound, Linger, Topics};
 
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
@@ -699,7 +699,7 @@ impl SessionPipes {
         let peer = PeerSlot::default();
         let connection = Connection {
             tx,
-            rx,
+            rx: Inbound::new(rx),
             peer: peer.clone(),
         };
         let pipes = Self {

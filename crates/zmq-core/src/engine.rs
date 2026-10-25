@@ -15,11 +15,11 @@ use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
     CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
-    Membership, Message, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
-    PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
-    PlainServer, PlainServerConfig, ReadInto, Role, ServerStep, SocketType, Subscription, Ttl,
-    Version, ZapFailure, ZapReply,
+    Frame, Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
+    Membership, Message, MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting,
+    PendingAuthentication, PendingCurveAuthentication, PendingNullAuthentication, Ping,
+    PingContext, PlainClient, PlainServer, PlainServerConfig, ReadInto, Role, ServerStep,
+    SocketType, Subscription, Ttl, Version, ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -97,6 +97,12 @@ enum State {
         encoder: Encoder,
         /// A message the receive pipe refused because it was full.
         pending: Option<Message>,
+        /// What `zmq_msg_gets` reads on every message from this peer, until
+        /// attached to the first: the socket's [`Inbound`] gives it to the
+        /// rest. Empty if the connection has none, so that is known too.
+        ///
+        /// [`Inbound`]: crate::Inbound
+        metadata: Option<MessageMetadata>,
     },
     /// Only seen after an error, which ends the engine.
     Failed,
@@ -426,12 +432,21 @@ impl Engine {
                 mut decoder,
                 encoder,
                 mut pending,
+                mut metadata,
             } => {
-                let result = self.receive_active(&mut decoder, encoder, &mut pending, pipes, cx);
+                let result = self.receive_active(
+                    &mut decoder,
+                    encoder,
+                    &mut pending,
+                    &mut metadata,
+                    pipes,
+                    cx,
+                );
                 self.state = State::Active {
                     decoder,
                     encoder,
                     pending,
+                    metadata,
                 };
                 result
             }
@@ -626,6 +641,7 @@ impl Engine {
             }
             Step::Established(established, codec) => {
                 let version = established.version;
+                let metadata = Some(connection_metadata(&self.stream, &established));
                 self.curve = codec;
                 self.deadlines.handshake = None;
                 // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
@@ -655,6 +671,7 @@ impl Engine {
                     decoder,
                     encoder,
                     pending: None,
+                    metadata,
                 };
             }
         }
@@ -770,6 +787,7 @@ impl Engine {
         decoder: &mut Decoder,
         encoder: Encoder,
         pending: &mut Option<Message>,
+        metadata: &mut Option<MessageMetadata>,
         pipes: &mut Pipes<'_>,
         cx: &mut Context<'_>,
     ) -> Result<bool, EngineError> {
@@ -799,7 +817,8 @@ impl Engine {
                 }
             }
             match item {
-                Some(Incoming::Message(message)) => {
+                Some(Incoming::Message(mut message)) => {
+                    announce(&mut message, metadata, self.config.conflate_inbound);
                     if let Some(refused) = deliver(pipes.inbound, message, cx)? {
                         *pending = Some(refused);
                         return Ok(progressed);
@@ -807,11 +826,12 @@ impl Engine {
                     progressed = true;
                 }
                 Some(Incoming::Command(body)) => {
-                    if let Some(message) = self.handle_command(&body, encoder)?
-                        && let Some(refused) = deliver(pipes.inbound, message, cx)?
-                    {
-                        *pending = Some(refused);
-                        return Ok(true);
+                    if let Some(mut message) = self.handle_command(&body, encoder)? {
+                        announce(&mut message, metadata, self.config.conflate_inbound);
+                        if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+                            *pending = Some(refused);
+                            return Ok(true);
+                        }
                     }
                     progressed = true;
                 }
@@ -963,5 +983,42 @@ fn deliver(
         },
         Poll::Ready(Err(())) => Ok(None),
         Poll::Pending => Ok(Some(message)),
+    }
+}
+
+/// What `zmq_msg_gets` reads on every message from this connection, built
+/// once as libzmq's `stream_engine_base_t` builds it: the peer's IP address
+/// over TCP, then what ZAP returned, then the peer's READY properties, the
+/// first of two with the same name kept. Empty if there is nothing, as
+/// libzmq then attaches none.
+fn connection_metadata(stream: &Stream, established: &Established) -> MessageMetadata {
+    let mut properties = Vec::new();
+    let address = stream.zap_address();
+    if !address.is_empty() {
+        properties.push((Frame::from("Peer-Address"), Frame::from(address)));
+    }
+    if let Some(authenticated) = &established.authenticated {
+        properties.push((Frame::from("User-Id"), authenticated.user_id.clone()));
+        for (name, value) in authenticated.metadata.iter() {
+            properties.push((Frame::copy_from_slice(name.as_slice()), value.clone()));
+        }
+    }
+    for (name, value) in established.metadata.iter() {
+        properties.push((Frame::copy_from_slice(name.as_slice()), value.clone()));
+    }
+    MessageMetadata::new(properties)
+}
+
+/// Attaches the connection's metadata to its first message only, for the
+/// socket's [`Inbound`](crate::Inbound) to give to the rest, or to every
+/// message when conflating, as a conflated pipe may replace the first.
+fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, every: bool) {
+    let attached = if every {
+        metadata.clone()
+    } else {
+        metadata.take()
+    };
+    if attached.is_some() {
+        message.set_metadata(attached);
     }
 }

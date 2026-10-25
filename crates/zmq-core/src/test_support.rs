@@ -9,9 +9,9 @@ use std::task::{Wake, Waker};
 use zmq_pipe::{Hwm, Reader, Writer, pipe};
 use zmtp::{Established, Frame, Message, Metadata, SocketType, Version};
 
-use crate::Connection;
 use crate::context::PeerSlot;
 use crate::socket::PeerList;
+use crate::{Connection, Inbound};
 
 /// The session's ends of a hand-built connection.
 pub(crate) struct FakeSession {
@@ -57,7 +57,7 @@ pub(crate) fn connection(hwm: usize) -> (Connection, FakeSession) {
     (
         Connection {
             tx,
-            rx,
+            rx: Inbound::new(rx),
             peer: peer.clone(),
         },
         FakeSession {

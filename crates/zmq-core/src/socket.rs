@@ -195,7 +195,10 @@ impl Peers {
     /// Sends each peer added from now on `greeting` before anything else,
     /// such as libzmq's `ZMQ_PROBE_ROUTER` empty message or
     /// `ZMQ_XPUB_WELCOME_MSG`.
-    pub fn set_greeting(&mut self, greeting: Option<Message>) {
+    pub fn set_greeting(&mut self, mut greeting: Option<Message>) {
+        if let Some(greeting) = &mut greeting {
+            greeting.set_metadata(None);
+        }
         self.greeting = greeting;
     }
 
@@ -442,6 +445,7 @@ impl LoadBalancer {
         mut message: Message,
         cx: &mut TaskContext<'_>,
     ) -> Result<PeerKey, Message> {
+        message.set_metadata(None);
         let count = peers.peers.len();
         for offset in 0..count {
             let index = (self.next + offset) % count;
@@ -800,8 +804,9 @@ impl RouterTable {
         &mut self,
         peers: &mut PeerList,
         routing_id: &[u8],
-        message: Message,
+        mut message: Message,
     ) -> Result<(), RouterSendError> {
+        message.set_metadata(None);
         let Some(peer) = self
             .by_identity
             .get(routing_id)
@@ -828,6 +833,9 @@ impl RouterTable {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<Result<(), Message>> {
+        if let Some(message) = slot {
+            message.set_metadata(None);
+        }
         let Some(message) = slot.take() else {
             return Poll::Ready(Ok(()));
         };

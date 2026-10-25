@@ -238,6 +238,19 @@ everywhere except tcp at 256 B (0.90), whose runs overlap: ours spans
 
 ### Reading them
 
+- **Message metadata costs up to 8% at 8 B,** measured after these
+  results: each message received over a connection now carries its
+  properties, as libzmq's `zmq_msg_gets` reads them. Interleaved, three
+  rounds each, 8 B fell from 10.63M to 9.87M msg/s over tcp and from
+  13.16M to 12.14M over inproc, and ipc is level (9.26M and 9.43M); 256 B
+  and up are level. What is left is the 8 octets `Message` grew by,
+  copied as it moves, and over tcp and ipc a reference count changed
+  twice a message, as libzmq's is. The first version cost a quarter at
+  8 B: the session changed the count on its thread and the socket on
+  another, and two small wrappers that return a whole message were not
+  inlined, one of them on every PUSH send. Now the session attaches the
+  metadata to a connection's first message only and the socket's reader
+  to the rest, and the wrappers are `#[inline(always)]`.
 - **Against `f3e7a19`,** our 8 B throughput rose 19% over tcp (10.29M
   to 12.23M msg/s), 13% over ipc and 17% over inproc, as each sender
   stopped building its payload in a vector the frame then copied inline

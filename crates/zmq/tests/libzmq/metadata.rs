@@ -1,11 +1,7 @@
 //! libzmq's `tests/test_metadata.cpp`: metadata a ZAP handler attaches to
 //! a connection, read from each message with `zmq_msg_gets`.
 //!
-//! zmq-rs has no way to read a message's connection properties: libzmq's
-//! checks of `Hello`, `Socket-Type`, `User-Id` and `Peer-Address` cannot
-//! be written. What can is ported: the handler sees the request it should,
-//! its metadata is accepted, and messages flow on the connection, all
-//! frames of a ROUTER's message included.
+//! `zmq_msg_gets` is [`Message::property`].
 
 use std::sync::mpsc;
 use std::thread;
@@ -59,10 +55,16 @@ fn metadata() {
     client.connect(&endpoint).unwrap();
 
     client.send("This is a message");
+    let message = server.recv_timeout(FIVE).expect("the message");
+    assert_eq!(message, Message::from("This is a message"));
+    assert_eq!(message.property("Hello"), Some(b"World".as_slice()));
+    assert_eq!(message.property("Socket-Type"), Some(b"DEALER".as_slice()));
+    assert_eq!(message.property("User-Id"), Some(b"anonymous".as_slice()));
     assert_eq!(
-        server.recv_timeout(FIVE),
-        Some(Message::from("This is a message"))
+        message.property("Peer-Address"),
+        Some(b"127.0.0.1".as_slice())
     );
+    assert_eq!(message.property("No Such"), None);
 
     let request = requests.recv_timeout(FIVE).unwrap();
     assert_eq!(request.credentials, ZapCredentials::Null);
@@ -71,7 +73,7 @@ fn metadata() {
 }
 
 /// libzmq checks that every frame of a message a ROUTER prefetched carries
-/// the metadata; here, that all of them arrive.
+/// the metadata; a zmq-rs message carries it once, for all its frames.
 #[test]
 fn router_prefetch_metadata() {
     let context = Context::new().unwrap();
@@ -82,6 +84,7 @@ fn router_prefetch_metadata() {
     let asking = thread::spawn(move || client.request("This is a message"));
     settle();
     let (from, request) = server.recv_timeout(FIVE).expect("the request");
+    assert_eq!(request.property("Hello"), Some(b"World".as_slice()));
     let frames: Vec<Frame> = request.into_iter().collect();
     assert_eq!(frames, [Frame::new(), Frame::from("This is a message")]);
 

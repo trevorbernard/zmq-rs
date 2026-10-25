@@ -4,15 +4,86 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
 use std::num::NonZeroUsize;
+use std::sync::Arc;
 use std::{mem, slice};
 
 use crate::Frame;
 
 /// A ZeroMQ message: one or more [`Frame`]s, sent and delivered atomically.
+///
+/// A message received over a connection carries that connection's
+/// [`MessageMetadata`], as libzmq's do. Comparing and hashing messages
+/// looks only at their frames.
 #[derive(Clone)]
 pub struct Message {
     first: Frame,
     rest: Rest,
+    metadata: Option<MessageMetadata>,
+}
+
+/// The properties of the connection a message arrived on, as libzmq's
+/// `zmq_msg_gets` reads them: `Socket-Type` and `Identity` and any other
+/// property the peer announced, `User-Id` and any metadata ZAP returned,
+/// and the peer's IP address as `Peer-Address` over TCP. Shared by every
+/// message from that connection.
+#[derive(Clone)]
+pub struct MessageMetadata(Arc<Vec<(Frame, Frame)>>);
+
+impl MessageMetadata {
+    /// Metadata of `properties`, in order of precedence: of two with the
+    /// same name, the first is kept, as libzmq builds its map.
+    pub fn new(properties: impl IntoIterator<Item = (Frame, Frame)>) -> Self {
+        let mut kept: Vec<(Frame, Frame)> = Vec::new();
+        for (name, value) in properties {
+            if !kept.iter().any(|(kept, _)| *kept == name) {
+                kept.push((name, value));
+            }
+        }
+        Self(Arc::new(kept))
+    }
+
+    /// The value of the property `name`, matched exactly, case and all, as
+    /// libzmq does. `Identity`, the name ZMTP 3.0 peers announce, is looked
+    /// up as `Routing-Id` if absent, as libzmq does for its deprecated
+    /// name.
+    pub fn get(&self, name: &str) -> Option<&[u8]> {
+        let exact = |name: &str| {
+            self.0
+                .iter()
+                .find(|(property, _)| property.as_slice() == name.as_bytes())
+                .map(|(_, value)| value.as_slice())
+        };
+        exact(name).or_else(|| (name == "Identity").then(|| exact("Routing-Id")).flatten())
+    }
+
+    /// Whether there are no properties.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// Every property, as names and values.
+    pub fn iter(&self) -> impl ExactSizeIterator<Item = (&[u8], &[u8])> {
+        self.0
+            .iter()
+            .map(|(name, value)| (name.as_slice(), value.as_slice()))
+    }
+
+    /// Whether `self` and `other` are the same connection's metadata.
+    pub fn ptr_eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl fmt::Debug for MessageMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_map()
+            .entries(
+                self.iter()
+                    .map(|(name, value)| (name.escape_ascii(), value.escape_ascii())),
+            )
+            .finish()
+    }
 }
 
 /// The frames after the first. A second frame is held inline, so the
@@ -68,6 +139,7 @@ impl Message {
         Self {
             first: frame.into(),
             rest: Rest::Many(Vec::new()),
+            metadata: None,
         }
     }
 
@@ -105,6 +177,30 @@ impl Message {
             first: Some(&self.first),
             rest: self.rest.as_slice().iter(),
         }
+    }
+
+    /// The metadata of the connection this message arrived on, if it came
+    /// over one that has any: never for `inproc`, which has no connection,
+    /// as in libzmq.
+    #[inline]
+    pub fn metadata(&self) -> Option<&MessageMetadata> {
+        self.metadata.as_ref()
+    }
+
+    /// The value of the property `name` of the connection this message
+    /// arrived on, as libzmq's `zmq_msg_gets`: matched exactly, case and
+    /// all. See [`MessageMetadata::get`].
+    #[inline]
+    pub fn property(&self, name: &str) -> Option<&[u8]> {
+        self.metadata.as_ref()?.get(name)
+    }
+
+    /// Attaches the metadata of the connection the message arrived on, or
+    /// takes it off, as a socket does before sending, so a message passed
+    /// on does not carry its first connection's metadata.
+    #[inline]
+    pub fn set_metadata(&mut self, metadata: Option<MessageMetadata>) {
+        self.metadata = metadata;
     }
 
     /// Takes the message apart into its first frame and the remaining frames.
@@ -229,7 +325,11 @@ impl TryFrom<Vec<Frame>> for Message {
         } else {
             Rest::Many(frames.collect())
         };
-        Ok(Self { first, rest })
+        Ok(Self {
+            first,
+            rest,
+            metadata: None,
+        })
     }
 }
 
@@ -266,9 +366,10 @@ mod tests {
 
     #[test]
     #[cfg(target_pointer_width = "64")]
-    fn message_is_72_bytes() {
-        // A second frame held inline costs 16 octets over a bare `Vec`.
-        assert_eq!(size_of::<Message>(), 72);
+    fn message_is_80_bytes() {
+        // A second frame held inline costs 16 octets over a bare `Vec`, and
+        // the connection's metadata 8 more.
+        assert_eq!(size_of::<Message>(), 80);
     }
 
     #[test]
@@ -302,6 +403,7 @@ mod tests {
         let listed = Message {
             first: Frame::from("a"),
             rest: Rest::Many(frames(&["b"])),
+            metadata: None,
         };
         assert_eq!(inline, listed);
         let hasher = std::hash::RandomState::new();

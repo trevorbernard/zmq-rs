@@ -109,6 +109,12 @@ off.
 - On a mismatch we send ERROR and then close.
 - `Command` is a typed enum: `Ready`, `Error`, `Ping`, `Pong`, `Subscribe`, `Cancel`, `Join`, `Leave`, `Unknown`. Unknown commands are ignored after the handshake.
 
+**Message metadata** (`zmq_msg_gets`): each message received over a connection carries that connection's `MessageMetadata`, read with `Message::property`, as libzmq and JeroMQ attach theirs:
+- Built once when the handshake completes, in libzmq's order, the first of a name kept: `Peer-Address` (the peer's IP, over TCP only), then what ZAP returned (`User-Id` and its metadata), then the peer's READY properties (`Socket-Type`, `Identity`, `X-` properties). A connection with none of these attaches nothing, and `inproc` has no connection, so its messages carry none.
+- Names are matched case-sensitively, as libzmq's map matches them, though the RFC makes them case-insensitive. `Identity`, if absent, is looked up as `Routing-Id`, as libzmq does for its deprecated name; not the other way round.
+- Sending a message takes its metadata off, as libzmq's `zmq_send` does, so a message passed on, as by a proxy, does not carry its first connection's.
+- libzmq's private `__fd` property is not provided; zmq-rs has no `ZMQ_SRCFD`.
+
 ### Valid socket pairs (RFC 23/37, plus libzmq)
 
 | Socket type | Valid peers |
