@@ -84,7 +84,6 @@ fn subscriber_thread_main(context: Context) -> u64 {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: the proxy sends to an XPUB backend with `send`, which drops for a full subscriber; it has no ZMQ_XPUB_NODROP mode, so it never stops reading from its XSUB and the publisher is never held back"]
 fn proxy_hwm() {
     within(Duration::from_secs(60), || {
         let context = Context::new().unwrap();
@@ -102,7 +101,8 @@ fn proxy_hwm() {
             move || subscriber_thread_main(context)
         });
 
-        let mut proxy = Proxy::new(&mut frontend, &mut backend);
+        // libzmq sets ZMQ_XPUB_NODROP on the backend XPUB.
+        let mut proxy = Proxy::new(&mut frontend, &mut backend).no_drop();
         let control = proxy.control();
         let subscriber_done = Arc::new(AtomicBool::new(false));
         let asker = thread::spawn({
@@ -127,8 +127,12 @@ fn proxy_hwm() {
         let (sent, received) = stopping.join().unwrap();
 
         let hwm = HWM as u64;
+        // libzmq allows two to four HWMs. Here the two inproc pipes each
+        // hold both sides' HWMs, four in all, and two more are out of
+        // them: the one the proxy holds in flight and the one the
+        // subscriber takes before slowing down.
         assert!(
-            (2 * hwm..=4 * hwm).contains(&sent),
+            (2 * hwm..=4 * hwm + 2).contains(&sent),
             "the publisher sent {sent} before blocking"
         );
         assert_eq!(received, sent, "the subscriber received every message");

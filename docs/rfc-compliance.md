@@ -347,6 +347,7 @@ Rules shared by every pattern:
 - `ManualXPub` is `XPUB_MANUAL`. Each subscription or cancel arrives as a `SubscriptionRequest` tied to the peer that sent it. It has no effect until `accept`, or until `subscribe`/`unsubscribe` set something else for that peer. `SubscriptionRequest::send` is `XPUB_MANUAL_LAST_VALUE`: to that peer alone. Every request is reported, whatever the verbosity; a departed peer's requested topics come as cancels with nobody to act on.
 - `set_welcome` is `XPUB_WELCOME_MSG`, sent to each new peer.
 - `set_invert_matching` on PUB, XPUB and SUB is `INVERT_MATCHING`. On XSUB it is deprecated and does nothing, as XSUB filters nothing.
+- An XSUB to XPUB `Proxy` drops for a full subscriber, as libzmq's does by default; `Proxy::no_drop` is libzmq's proxy with `XPUB_NODROP` on its XPUB, holding back the publishers instead.
 - Over tcp and ipc an XPUB rarely refuses at its HWM: the I/O thread frees room in the pipe as soon as it writes, and the kernel's buffers take the rest. libzmq's writer learns of reads only in batches, so its queue reaches the HWM sooner.
 - Not yet: `ONLY_FIRST_SUBSCRIBE`, `TOPICS_COUNT`.
 

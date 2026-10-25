@@ -36,6 +36,14 @@ pub trait ProxyEnd: sealed::Sealed + Send {
     /// room. Sockets that cannot send drop it.
     #[doc(hidden)]
     fn poll_give(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()>;
+
+    /// As [`poll_give`](Self::poll_give), except that a PUB or XPUB waits
+    /// until every subscriber that wants the message has room, as libzmq's
+    /// `ZMQ_XPUB_NODROP`, rather than dropping it for those that have none.
+    #[doc(hidden)]
+    fn poll_give_all(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        self.poll_give(slot, cx)
+    }
 }
 
 /// A socket a [`Proxy`] can copy every message to: PUB, DEALER, PUSH or
@@ -72,6 +80,7 @@ pub struct Proxy<'a> {
     backend: &'a mut dyn ProxyEnd,
     capture: Option<&'a mut dyn Capture>,
     control: ProxyControl,
+    no_drop: bool,
     to_backend: Option<Message>,
     to_frontend: Option<Message>,
 }
@@ -135,6 +144,14 @@ enum Direction {
     ToFrontend,
 }
 
+/// How messages go one way: which counters they update, and whether a PUB
+/// or XPUB they go to may drop them.
+#[derive(Clone, Copy)]
+struct Route {
+    direction: Direction,
+    no_drop: bool,
+}
+
 impl<'a> Proxy<'a> {
     /// A proxy between `frontend` and `backend`, which should already be
     /// bound or connected.
@@ -143,6 +160,7 @@ impl<'a> Proxy<'a> {
             frontend,
             backend,
             capture: None,
+            no_drop: false,
             control: ProxyControl {
                 shared: Arc::default(),
             },
@@ -156,6 +174,16 @@ impl<'a> Proxy<'a> {
     /// so a slow capture never holds up the proxy.
     pub fn capture(mut self, capture: &'a mut impl Capture) -> Self {
         self.capture = Some(capture);
+        self
+    }
+
+    /// Forwarding into a PUB or XPUB waits until every subscriber that
+    /// wants a message has room, as libzmq's proxy does when its XPUB has
+    /// `ZMQ_XPUB_NODROP`, rather than dropping it for those that have none.
+    /// The proxy stops reading the other side meanwhile, so a slow
+    /// subscriber holds back its publishers. Off by default.
+    pub fn no_drop(mut self) -> Self {
+        self.no_drop = true;
         self
     }
 
@@ -190,7 +218,10 @@ impl<'a> Proxy<'a> {
             &mut self.to_backend,
             &mut self.capture,
             shared,
-            Direction::ToBackend,
+            Route {
+                direction: Direction::ToBackend,
+                no_drop: self.no_drop,
+            },
             cx,
         );
         let busy_forwards = pump(
@@ -199,7 +230,10 @@ impl<'a> Proxy<'a> {
             &mut self.to_frontend,
             &mut self.capture,
             shared,
-            Direction::ToFrontend,
+            Route {
+                direction: Direction::ToFrontend,
+                no_drop: self.no_drop,
+            },
             cx,
         );
         if busy_backwards || busy_forwards {
@@ -220,9 +254,10 @@ fn pump(
     in_flight: &mut Option<Message>,
     capture: &mut Option<&mut dyn Capture>,
     shared: &Shared,
-    direction: Direction,
+    route: Route,
     cx: &mut TaskContext<'_>,
 ) -> bool {
+    let Route { direction, no_drop } = route;
     for _ in 0..BATCH {
         if in_flight.is_none() {
             let Poll::Ready(message) = from.poll_take(cx) else {
@@ -235,7 +270,12 @@ fn pump(
             *in_flight = Some(message);
         }
         let (parts, bytes) = size(in_flight.as_ref().expect("filled above"));
-        if to.poll_give(in_flight, cx).is_pending() {
+        let given = if no_drop {
+            to.poll_give_all(in_flight, cx)
+        } else {
+            to.poll_give(in_flight, cx)
+        };
+        if given.is_pending() {
             return false;
         }
         shared.add(direction, true, parts, bytes);
@@ -427,6 +467,10 @@ impl ProxyEnd for Socket<Pub> {
         }
         Poll::Ready(())
     }
+
+    fn poll_give_all(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        self.poll_send_all(slot, cx).map(drop)
+    }
 }
 
 impl ProxyEnd for Socket<Sub> {
@@ -449,6 +493,10 @@ impl ProxyEnd for Socket<XPub> {
             self.send(message);
         }
         Poll::Ready(())
+    }
+
+    fn poll_give_all(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        self.poll_send_all(slot, cx).map(drop)
     }
 }
 

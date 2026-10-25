@@ -941,7 +941,7 @@ impl<T: Publishes> Socket<T> {
         future::poll_fn(|cx| self.poll_send_all(&mut slot, cx)).await
     }
 
-    fn poll_send_all(
+    pub(crate) fn poll_send_all(
         &mut self,
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
