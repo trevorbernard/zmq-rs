@@ -41,7 +41,11 @@ impl Rest {
                 let Self::One(second) = mem::replace(self, Self::Many(Vec::new())) else {
                     unreachable!("matched One");
                 };
-                *self = Self::Many(vec![second, frame]);
+                // Room for two more, so that a message of up to five frames
+                // allocates its list once.
+                let mut frames = Vec::with_capacity(4);
+                frames.extend([second, frame]);
+                *self = Self::Many(frames);
             }
         }
     }
