@@ -360,7 +360,7 @@ fn drop_it(slot: &mut Option<Message>) -> Poll<()> {
 impl ProxyEnd for Socket<Router> {
     fn poll_take(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
         self.poll_recv(cx).map(|(id, body)| {
-            let mut frames = vec![id.into_frame()];
+            let mut frames = vec![Frame::from(id)];
             frames.extend(body);
             Message::try_from(frames).expect("at least the routing id")
         })

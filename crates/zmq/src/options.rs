@@ -98,9 +98,14 @@ impl RoutingId {
     pub(crate) fn trusted(id: Frame) -> Self {
         Self(id)
     }
+}
 
-    pub(crate) fn into_frame(self) -> Frame {
-        self.0
+/// The routing id's octets as a frame, without a copy: to put it back in
+/// front of a message, as a broker does to remember where a request came
+/// from.
+impl From<RoutingId> for Frame {
+    fn from(id: RoutingId) -> Self {
+        id.0
     }
 }
 

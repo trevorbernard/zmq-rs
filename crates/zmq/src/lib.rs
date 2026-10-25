@@ -137,8 +137,8 @@ pub use zmq_core::{
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
-    Credential, Frame, Identity, KeyError, Keypair, Message, Metadata, PlainCredentials, PublicKey,
-    SecretKey, ZapCredentials, ZapReply, ZapRequest,
+    Credential, Frame, Identity, InvalidIdentity, KeyError, Keypair, Message, Metadata,
+    PlainCredentials, PublicKey, SecretKey, ZapCredentials, ZapReply, ZapRequest,
 };
 #[cfg(feature = "draft")]
 pub use zmtp::{Group, InvalidGroup};
