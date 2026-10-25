@@ -250,7 +250,13 @@ libraries). Our latency is lower everywhere.
   and up are now read with `read_to_end`, which reads into a vector's
   spare capacity through the standard streams' own `read_buf`; that
   memset is gone, but throughput is unchanged, as this loopback case is
-  bound elsewhere.
+  bound elsewhere: by the kernel and by memory, not by either library.
+  The same pipeline with no ZeroMQ at all, a producer thread writing a
+  fresh 64 KiB buffer per message to a writer thread, over a socket to a
+  reader thread reading each into a fresh vector for a consumer thread,
+  runs at 35k msg/s over tcp and 57k over a Unix socket. Reading each
+  body in one `read` rather than `read_to_end`'s growing reads, three
+  reads a message rather than six, changed nothing.
 - **Noise:** latency at small sizes spreads widely for both libraries.
   inproc 64 KiB throughput did too, until the bench turned glibc's heap
   trimming off. The machine ran the `schedutil` governor; rerun a
