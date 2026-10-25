@@ -75,7 +75,9 @@ impl Output {
                 }
                 stream.write(&self.buf[self.pos..])
             } else {
-                stream.write_vectored(&self.slices())
+                let mut slices = [IoSlice::new(&[]); MAX_SLICES];
+                let n = self.slices(&mut slices);
+                stream.write_vectored(&slices[..n])
             };
             match written {
                 Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
@@ -99,24 +101,28 @@ impl Output {
         Ok(progressed)
     }
 
-    /// The unwritten output in order, up to [`MAX_SLICES`] slices.
-    fn slices(&self) -> Vec<IoSlice<'_>> {
-        let mut slices = Vec::with_capacity(MAX_SLICES.min(2 * self.shared.len() + 1));
+    /// Fills `slices` with the unwritten output in order, on the stack
+    /// rather than in a vector allocated per write. Returns how many.
+    fn slices<'a>(&'a self, slices: &mut [IoSlice<'a>; MAX_SLICES]) -> usize {
+        let mut n = 0;
         let mut pos = self.pos;
         for (at, payload) in &self.shared {
-            if slices.len() + 2 > MAX_SLICES {
-                return slices;
+            if n + 2 > MAX_SLICES {
+                return n;
             }
             if *at > pos {
-                slices.push(IoSlice::new(&self.buf[pos..*at]));
+                slices[n] = IoSlice::new(&self.buf[pos..*at]);
+                n += 1;
             }
-            slices.push(IoSlice::new(payload));
+            slices[n] = IoSlice::new(payload);
+            n += 1;
             pos = *at;
         }
-        if pos < self.buf.len() && slices.len() < MAX_SLICES {
-            slices.push(IoSlice::new(&self.buf[pos..]));
+        if pos < self.buf.len() && n < MAX_SLICES {
+            slices[n] = IoSlice::new(&self.buf[pos..]);
+            n += 1;
         }
-        slices
+        n
     }
 
     /// Marks `n` more octets written.
