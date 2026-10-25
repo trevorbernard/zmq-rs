@@ -71,7 +71,13 @@ fn main() {
     for round in 0..=ROUNDS {
         for (i, name) in cases.iter().enumerate() {
             for (lib, out) in [("ours", 0), ("libzmq", 1)] {
-                let output = Command::new(&exe)
+                let mut command = Command::new(&exe);
+                // As `perf` runs its children: without glibc trimming its
+                // heap, which makes large-message cases follow page faults.
+                if env::var_os("GLIBC_TUNABLES").is_none() {
+                    command.env("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=1073741824");
+                }
+                let output = command
                     .args(["--child", name, lib])
                     .stderr(Stdio::inherit())
                     .output()
