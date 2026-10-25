@@ -9,7 +9,7 @@ bin=$(echo "$(rustc --print sysroot)"/lib/rustlib/*/bin)
 host=$(rustc -vV | sed -n 's/host: //p')
 objects=()
 for target in $(cargo fuzz list); do
-  cargo fuzz coverage "$target" >/dev/null 2>&1
+  cargo fuzz coverage --target "$host" "$target" >/dev/null 2>&1
   objects+=(-object "target/$host/coverage/$host/release/$target")
 done
 "$bin/llvm-profdata" merge -sparse coverage/*/coverage.profdata -o coverage/all.profdata

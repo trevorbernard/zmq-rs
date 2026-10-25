@@ -1,0 +1,84 @@
+name: Fuzz
+
+# A long run of every target, weekly or on demand. The corpora carry over
+# between runs in the Actions cache, so each run starts from everything
+# the previous ones found.
+on:
+  schedule:
+    - cron: '0 6 * * 0'
+  workflow_dispatch:
+    inputs:
+      seconds:
+        description: Seconds to fuzz each target
+        default: '3600'
+
+jobs:
+  fuzz:
+    name: Fuzz
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    # Over the repository's rust-toolchain.toml, which rustup would
+    # otherwise pick inside fuzz/: cargo-fuzz needs nightly.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: nightly
+
+      - name: Install cargo-fuzz
+        # v2.87.27
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: cargo-fuzz
+
+      - name: Cache build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+
+      # Cache entries cannot be overwritten, so each run saves under its
+      # own key and the next restores the newest by prefix.
+      - name: Restore corpus
+        uses: actions/cache/restore@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+
+      - name: Seed
+        run: fuzz/seed.sh --fetch
+
+      - name: Fuzz
+        run: fuzz/run-all.sh ${{ inputs.seconds || '3600' }}
+
+      # Keeps the inputs that reach distinct coverage, so the corpus stays
+      # small as it grows.
+      - name: Minimize corpus
+        if: always()
+        working-directory: fuzz
+        run: |
+          host=$(rustc -vV | sed -n 's/host: //p')
+          for target in $(cargo fuzz list); do
+            cargo fuzz cmin --target "$host" "$target" -- -dict=zmtp.dict
+          done
+
+      - name: Save corpus
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: fuzz/corpus
+          key: fuzz-corpus-${{ github.run_id }}
+
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes
+          path: |
+            fuzz/artifacts
+            fuzz/target/logs

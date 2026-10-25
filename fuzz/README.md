@@ -33,4 +33,7 @@ OSS-Fuzz security advisories to `corpus/`. `--fetch` adds libzmq's seed
 corpora and the public ClusterFuzz corpus for `z85_decode`. ClusterFuzz's
 ZMTP corpora are not public.
 
-CI runs every target for 30 seconds from the hand-built seeds.
+CI runs every target for 30 seconds from the hand-built seeds on each
+push, and for an hour each weekly (`.github/workflows/fuzz.yml`), from a
+corpus cached between weekly runs. Run that one on demand from the
+Actions tab, with a duration. A failed run uploads its crashes.
