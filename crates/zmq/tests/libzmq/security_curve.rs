@@ -13,16 +13,15 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use zmq::{
-    Context, Credential, Dealer, EventKind, Frame, HandshakeFailure, Identity, Keypair, Linger,
-    Message, Metadata, Monitor, PlainCredentials, ProtocolError, PublicKey, SecretKey, Security,
-    Socket, SocketOptions, ZapCredentials, ZapReply, ZapRequest,
+    Context, Credential, Dealer, EventKind, Frame, HandshakeFailure, Identity, Keypair, Metadata,
+    Monitor, PlainCredentials, ProtocolError, PublicKey, SecretKey, Security, Socket,
+    SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmtp::{CurveClient, CurveClientStep, GreetingError, HandshakeError, Incoming, PeerGreeting};
 
-use crate::support::{FIVE, SETTLE};
+use crate::support::{FIVE, SETTLE, bounce_content, zero_linger};
 
 const DOMAIN: &str = "ZAPTEST";
-const CONTENT: &str = "12345678ABCDEFGH12345678abcdefgh";
 const TIMEOUT: Duration = Duration::from_millis(250);
 const NULL_KEY: &str = "0000000000000000000000000000000000000000";
 
@@ -38,22 +37,6 @@ const ZMTP_GREETING_CURVE: [u8; 64] = {
     }
     greeting
 };
-
-fn content() -> Message {
-    let mut message = Message::new(CONTENT);
-    message.push(CONTENT);
-    message
-}
-
-/// Closed with zero linger, as libzmq's tests close them, so a message
-/// queued for a peer that never completes its handshake does not hold up
-/// the context's drop.
-fn zero_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Linger::For(Duration::ZERO),
-        ..SocketOptions::default()
-    }
-}
 
 /// libzmq's `setUp`: a CURVE server, named `identity`, asking a ZAP
 /// handler that lets in only the valid client's public key.
@@ -129,17 +112,17 @@ impl Fixture {
 
     /// A message from `client` to the server and back.
     fn bounce(&mut self, client: &mut Socket<Dealer>) {
-        client.send(content());
-        assert_eq!(self.server.recv_timeout(FIVE), Some(content()));
-        self.server.send(content());
-        assert_eq!(client.recv_timeout(FIVE), Some(content()));
+        client.send(bounce_content());
+        assert_eq!(self.server.recv_timeout(FIVE), Some(bounce_content()));
+        self.server.send(bounce_content());
+        assert_eq!(client.recv_timeout(FIVE), Some(bounce_content()));
     }
 
     /// Neither direction gets through.
     fn expect_bounce_fail(&mut self, client: &mut Socket<Dealer>) {
-        let _ = client.try_send(content());
+        let _ = client.try_send(bounce_content());
         assert_eq!(self.server.recv_timeout(SETTLE), None);
-        let _ = self.server.try_send(content());
+        let _ = self.server.try_send(bounce_content());
         assert_eq!(client.recv_timeout(SETTLE), None);
     }
 

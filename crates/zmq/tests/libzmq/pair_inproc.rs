@@ -1,20 +1,8 @@
 //! libzmq's `tests/test_pair_inproc.cpp`: a PAIR round trip over inproc.
-//! Also holds the PAIR `bounce` the other PAIR ports share.
 
 use zmq::{Context, Frame, Message, Pair, Socket};
 
-use crate::reqrep_inproc::{BOUNCE_CONTENT, msg};
-use crate::support::FIVE;
-
-/// libzmq's `bounce`: a two-part message from `client`, checked at
-/// `server`, and the same two parts back.
-pub(crate) fn bounce(server: &mut Socket<Pair>, client: &mut Socket<Pair>) {
-    let content = msg(&[BOUNCE_CONTENT, BOUNCE_CONTENT]);
-    client.send(content.clone());
-    assert_eq!(server.recv_timeout(FIVE), Some(content.clone()));
-    server.send(content.clone());
-    assert_eq!(client.recv_timeout(FIVE), Some(content));
-}
+use crate::support::{FIVE, bounce_pair, msg};
 
 fn pair(context: &Context, name: &str) -> (Socket<Pair>, Socket<Pair>) {
     let mut sb = context.socket::<Pair>();
@@ -28,7 +16,7 @@ fn pair(context: &Context, name: &str) -> (Socket<Pair>, Socket<Pair>) {
 fn roundtrip() {
     let context = Context::new().unwrap();
     let (mut sb, mut sc) = pair(&context, "pair_inproc_roundtrip");
-    bounce(&mut sb, &mut sc);
+    bounce_pair(&mut sb, &mut sc);
 }
 
 /// `zmq_send_const` sends from memory that outlives the message without

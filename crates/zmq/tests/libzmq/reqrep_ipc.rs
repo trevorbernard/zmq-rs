@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use zmq::{Context, Rep, Req};
 
-use crate::reqrep_inproc::{bounce, msg};
-use crate::support::{FIVE, settle};
+use crate::support::{FIVE, bounce_req_rep, msg, settle};
 
 #[test]
 fn simple() {
@@ -16,7 +15,7 @@ fn simple() {
     let endpoint = sb.bind("ipc://*").unwrap().to_string();
     let mut sc = context.socket::<Req>();
     sc.connect(&endpoint).unwrap();
-    bounce(&mut sb, sc);
+    bounce_req_rep(&mut sb, sc);
 }
 
 /// libzmq checks that replying after the requester closed leaks nothing;

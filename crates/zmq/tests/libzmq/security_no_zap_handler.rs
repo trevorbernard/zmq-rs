@@ -7,32 +7,11 @@
 //! `ZMQ_ZAP_ENFORCE_DOMAIN`, it refuses every peer, which is zmq-rs's
 //! authenticator that never answers.
 
-use std::time::Duration;
-
 use zmq::{
-    Authenticator, Context, Dealer, Linger, Message, Security, Socket, SocketOptions, ZapRequest,
-    ZapResponder,
+    Authenticator, Context, Dealer, Security, Socket, SocketOptions, ZapRequest, ZapResponder,
 };
 
-use crate::support::{FIVE, SETTLE};
-
-const CONTENT: &str = "12345678ABCDEFGH12345678abcdefgh";
-
-fn content() -> Message {
-    let mut message = Message::new(CONTENT);
-    message.push(CONTENT);
-    message
-}
-
-/// Closed with zero linger, as libzmq's tests close them, so a message
-/// queued for a peer that never completes its handshake does not hold up
-/// the context's drop.
-fn zero_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Linger::For(Duration::ZERO),
-        ..SocketOptions::default()
-    }
-}
+use crate::support::{FIVE, SETTLE, bounce_content, zero_linger};
 
 /// Client and server over TCP, the server with `security`.
 fn pair(context: &Context, security: Security) -> (Socket<Dealer>, Socket<Dealer>) {
@@ -57,18 +36,18 @@ impl Authenticator for NoHandler {
 fn no_zap_handler() {
     let context = Context::new().unwrap();
     let (mut server, mut client) = pair(&context, Security::Null);
-    client.send(content());
-    assert_eq!(server.recv_timeout(FIVE), Some(content()));
-    server.send(content());
-    assert_eq!(client.recv_timeout(FIVE), Some(content()));
+    client.send(bounce_content());
+    assert_eq!(server.recv_timeout(FIVE), Some(bounce_content()));
+    server.send(bounce_content());
+    assert_eq!(client.recv_timeout(FIVE), Some(bounce_content()));
 }
 
 #[test]
 fn no_zap_handler_enforce_domain() {
     let context = Context::new().unwrap();
     let (mut server, mut client) = pair(&context, Security::null_authenticated("TEST", NoHandler));
-    let _ = client.try_send(content());
+    let _ = client.try_send(bounce_content());
     assert_eq!(server.recv_timeout(SETTLE), None);
-    let _ = server.try_send(content());
+    let _ = server.try_send(bounce_content());
     assert_eq!(client.recv_timeout(SETTLE), None);
 }

@@ -3,8 +3,7 @@
 
 use zmq::{Context, Dealer, Frame, Message, Rep, Req, Router, RoutingId};
 
-use crate::reqrep_inproc::{Requesting, msg};
-use crate::support::FIVE;
+use crate::support::{FIVE, Requesting, msg};
 
 #[test]
 fn roundtrip() {

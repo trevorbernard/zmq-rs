@@ -4,8 +4,7 @@ use std::collections::HashSet;
 
 use zmq::{Context, Dealer, Rep, Req};
 
-use crate::reqrep_inproc::{Requesting, msg};
-use crate::support::{FIVE, settle};
+use crate::support::{FIVE, Requesting, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_rep_{name}")

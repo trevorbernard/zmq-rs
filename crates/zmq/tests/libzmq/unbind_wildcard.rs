@@ -10,31 +10,9 @@
 
 use std::net::TcpListener;
 
-use zmq::{Context, Message, Rep, Req};
+use zmq::{Context, Rep, Req};
 
-use crate::support::{FIVE, within};
-
-/// A request from `client` answered by `server` with what it received, as
-/// libzmq's `bounce` does over REQ and REP.
-fn bounce(server: &mut zmq::Socket<Rep>, client: zmq::Socket<Req>) -> zmq::Socket<Req> {
-    let mut request = Message::new("12345678ABCDEFGH12345678abcdefgh");
-    request.push("12345678ABCDEFGH12345678abcdefgh");
-    let asking = std::thread::spawn({
-        let request = request.clone();
-        move || {
-            let mut client = client;
-            let reply = client.request(request).unwrap();
-            (client, reply)
-        }
-    });
-    let received = server.recv_timeout(FIVE).expect("a request");
-    assert_eq!(received.body(), &request);
-    let body = received.body().clone();
-    received.reply(body);
-    let (client, reply) = within(FIVE, move || asking.join().unwrap());
-    assert_eq!(reply, request);
-    client
-}
+use crate::support::bounce_req_rep;
 
 /// Binds `bind`, connects to the endpoint it reports, bounces a request,
 /// then disconnects and unbinds by that endpoint.
@@ -44,7 +22,7 @@ fn round_trip_then_unbind(bind: &str) {
     let mut client = context.socket::<Req>();
     let endpoint = server.bind(bind).unwrap().to_string();
     client.connect(&endpoint).unwrap();
-    let mut client = bounce(&mut server, client);
+    let mut client = bounce_req_rep(&mut server, client);
     client.disconnect(&endpoint).unwrap();
     server.unbind(&endpoint).unwrap();
 }

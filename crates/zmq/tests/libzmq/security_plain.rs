@@ -7,44 +7,19 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use zmq::{
-    Context, Credential, Dealer, Frame, Identity, Linger, Message, Metadata, PlainCredentials,
-    Security, Socket, SocketOptions, ZapCredentials, ZapReply, ZapRequest,
+    Context, Credential, Dealer, Frame, Identity, Metadata, PlainCredentials, Security, Socket,
+    SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
 
-use crate::support::{FIVE, SETTLE};
+use crate::support::{FIVE, SETTLE, bounce_content, bounce_dealer, zero_linger};
 
-const CONTENT: &str = "12345678ABCDEFGH12345678abcdefgh";
 const DOMAIN: &str = "test";
-
-fn content() -> Message {
-    let mut message = Message::new(CONTENT);
-    message.push(CONTENT);
-    message
-}
-
-/// Closed with zero linger, as libzmq's tests close them, so a message
-/// queued for a peer that never completes its handshake does not hold up
-/// the context's drop.
-fn zero_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Linger::For(Duration::ZERO),
-        ..SocketOptions::default()
-    }
-}
-
-/// A message from client to server and back, as libzmq's `bounce`.
-fn bounce(server: &mut Socket<Dealer>, client: &mut Socket<Dealer>) {
-    client.send(content());
-    assert_eq!(server.recv_timeout(FIVE), Some(content()));
-    server.send(content());
-    assert_eq!(client.recv_timeout(FIVE), Some(content()));
-}
 
 /// Neither direction gets through, as libzmq's `expect_bounce_fail`.
 fn expect_bounce_fail(server: &mut Socket<Dealer>, client: &mut Socket<Dealer>) {
-    let _ = client.try_send(content());
+    let _ = client.try_send(bounce_content());
     assert_eq!(server.recv_timeout(SETTLE), None);
-    let _ = server.try_send(content());
+    let _ = server.try_send(bounce_content());
     assert_eq!(client.recv_timeout(SETTLE), None);
 }
 
@@ -95,7 +70,7 @@ fn plain_success() {
     let (mut server, endpoint, requests) = set_up(&context);
     let mut client = plain_client(&context, "admin", "password");
     client.connect(&endpoint).unwrap();
-    bounce(&mut server, &mut client);
+    bounce_dealer(&mut server, &mut client);
 
     let request = requests.recv_timeout(FIVE).unwrap();
     assert_eq!(request.domain, Frame::from(DOMAIN));

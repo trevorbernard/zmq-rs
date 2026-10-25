@@ -9,7 +9,7 @@
 
 use zmq::{Context, Rep, Req};
 
-use crate::reqrep_inproc::bounce;
+use crate::support::bounce_req_rep;
 
 fn loopback(ipv6: bool) -> &'static str {
     if ipv6 {
@@ -25,7 +25,7 @@ fn single_connect(ipv6: bool) {
     let my_endpoint = sb.bind(loopback(ipv6)).unwrap().to_string();
     let mut sc = context.socket::<Req>();
     sc.connect(&my_endpoint).unwrap();
-    let mut sc = bounce(&mut sb, sc);
+    let mut sc = bounce_req_rep(&mut sb, sc);
 
     // the sockets are disconnected and unbound explicitly in this test
     // case to check that this can be done successfully with the expected
@@ -47,7 +47,7 @@ fn multi_connect(ipv6: bool) {
     }
 
     for i in [0, 1, 2, 0, 1, 2, 0] {
-        sc = bounce(&mut sbs[i], sc);
+        sc = bounce_req_rep(&mut sbs[i], sc);
     }
 
     // see comment on disconnect and unbind in single_connect

@@ -5,8 +5,7 @@ use std::time::Duration;
 
 use zmq::{Context, Identity, Message, Rep, Req, RequestError, Router, RoutingId, SocketOptions};
 
-use crate::reqrep_inproc::{Requesting, msg};
-use crate::support::{FIVE, SETTLE, settle};
+use crate::support::{FIVE, Requesting, SETTLE, msg, settle};
 
 /// Endpoints to bind a case to: each case runs over inproc and tcp.
 fn inproc(name: &str) -> String {

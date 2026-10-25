@@ -16,12 +16,9 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
-use zmq::{
-    Context, Dealer, Event, EventKind, Linger, Message, Monitor, RecvTimeoutError, Socket,
-    SocketOptions,
-};
+use zmq::{Context, Dealer, Event, EventKind, Linger, Monitor, RecvTimeoutError, SocketOptions};
 
-use crate::support::{FIVE, within};
+use crate::support::{FIVE, bounce_dealer, within};
 
 /// The next event, or `None` once the monitor has stopped.
 fn next_event(monitor: &mut Monitor) -> Option<Event> {
@@ -36,17 +33,6 @@ fn expect_event(monitor: &mut Monitor, kind: EventKind, endpoint: &str) {
     let event = next_event(monitor).expect("the monitor is still running");
     assert_eq!(event.kind, kind);
     assert_eq!(event.endpoint, endpoint);
-}
-
-/// A message from `client` to `server` and back, as libzmq's `bounce`.
-fn bounce(server: &mut Socket<Dealer>, client: &mut Socket<Dealer>) {
-    let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");
-    message.push("12345678ABCDEFGH12345678abcdefgh");
-    client.send(message.clone());
-    let received = server.recv();
-    assert_eq!(received, message);
-    server.send(received);
-    assert_eq!(client.recv(), message);
 }
 
 /// As libzmq's `test_monitor_versioned_basic`: a client and a server,
@@ -67,7 +53,7 @@ fn monitor_basic(bind: &str) {
 
         let endpoint = server.bind(&bind).unwrap().to_string();
         client.connect(&endpoint).unwrap();
-        bounce(&mut server, &mut client);
+        bounce_dealer(&mut server, &mut client);
         drop(client);
         drop(server);
 

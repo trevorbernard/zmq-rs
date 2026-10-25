@@ -6,34 +6,19 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
-use zmq::{Context, Message, Pair, Reconnect, Socket, SocketOptions};
+use zmq::{Context, Pair, Reconnect, Socket, SocketOptions};
 
-use crate::support::{FIVE, within};
+use crate::support::{FIVE, bounce_content, bounce_pair, within};
 
 /// How long `expect_bounce_fail` waits, as libzmq's 250 ms timeouts.
 const BRIEFLY: Duration = Duration::from_millis(250);
 
-fn content() -> Message {
-    let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");
-    message.push("12345678ABCDEFGH12345678abcdefgh");
-    message
-}
-
-/// A message from `client` to `server` and back, as libzmq's `bounce`.
-fn bounce(server: &mut Socket<Pair>, client: &mut Socket<Pair>) {
-    client.send_timeout(content(), FIVE).expect("sent");
-    let received = server.recv_timeout(FIVE).expect("the request");
-    assert_eq!(received, content());
-    server.send_timeout(received, FIVE).expect("sent back");
-    assert_eq!(client.recv_timeout(FIVE), Some(content()));
-}
-
 /// As libzmq's `expect_bounce_fail`: whether or not the sends succeed,
 /// neither side receives anything.
 fn expect_bounce_fail(server: &mut Socket<Pair>, client: &mut Socket<Pair>) {
-    let _ = client.send_timeout(content(), BRIEFLY);
+    let _ = client.send_timeout(bounce_content(), BRIEFLY);
     assert_eq!(server.recv_timeout(BRIEFLY), None);
-    let _ = server.send_timeout(content(), BRIEFLY);
+    let _ = server.send_timeout(bounce_content(), BRIEFLY);
     assert_eq!(client.recv_timeout(BRIEFLY), None);
 }
 
@@ -43,7 +28,7 @@ fn reconnect_ivl_against_pair_socket(context: &Context, server: &mut Socket<Pair
         ..SocketOptions::default()
     });
     client.connect(endpoint).unwrap();
-    bounce(server, &mut client);
+    bounce_pair(server, &mut client);
 
     server.unbind(endpoint).unwrap();
     expect_bounce_fail(server, &mut client);
@@ -52,7 +37,7 @@ fn reconnect_ivl_against_pair_socket(context: &Context, server: &mut Socket<Pair
     expect_bounce_fail(server, &mut client);
 
     client.connect(endpoint).unwrap();
-    bounce(server, &mut client);
+    bounce_pair(server, &mut client);
 }
 
 fn reconnect_ivl(bind: &str) {

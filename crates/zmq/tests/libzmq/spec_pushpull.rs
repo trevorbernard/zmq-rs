@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use zmq::{Context, Frame, Hwm, Linger, Message, Pull, Push, SocketOptions};
 
-use crate::reqrep_inproc::msg;
-use crate::support::{FIVE, settle};
+use crate::support::{FIVE, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_pushpull_{name}")

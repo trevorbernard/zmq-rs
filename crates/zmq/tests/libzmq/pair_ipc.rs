@@ -4,7 +4,7 @@
 
 use zmq::{Context, Error, Pair};
 
-use crate::pair_inproc::bounce;
+use crate::support::bounce_pair;
 
 #[test]
 fn roundtrip() {
@@ -13,7 +13,7 @@ fn roundtrip() {
     let endpoint = sb.bind("ipc://*").unwrap().to_string();
     let mut sc = context.socket::<Pair>();
     sc.connect(&endpoint).unwrap();
-    bounce(&mut sb, &mut sc);
+    bounce_pair(&mut sb, &mut sc);
 }
 
 /// libzmq fails with `ENAMETOOLONG`; here the operating system's refusal

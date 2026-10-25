@@ -170,6 +170,11 @@ with both. Messages flow only after READY has been both sent and received.
 sets the interval, timeout and TTL we announce; an expired deadline is a
 connection error, so a connecting session reconnects.
 
+The announced TTL is rounded up to whole deciseconds and saturates at
+the field's maximum (6553.5 s). libzmq truncates `ZMQ_HEARTBEAT_TTL`
+instead, so a 99 ms TTL announces none there and 1 decisecond here, and
+refuses a value above the maximum with `EINVAL`.
+
 ### Subscriptions on the wire
 
 | Version | Wire form |

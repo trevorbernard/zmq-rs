@@ -5,24 +5,9 @@
 
 use std::process;
 
-use zmq::{Context, Dealer, Endpoint, Error, Message};
+use zmq::{Context, Dealer, Endpoint, Error};
 
-use crate::support::{FIVE, within};
-
-/// Sends a two-part message from `client` to `server` and back, as
-/// libzmq's `bounce`.
-fn bounce(server: zmq::Socket<Dealer>, client: zmq::Socket<Dealer>) {
-    within(FIVE, move || {
-        let (mut server, mut client) = (server, client);
-        let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");
-        message.push("12345678ABCDEFGH12345678abcdefgh");
-        client.send(message.clone());
-        let received = server.recv();
-        assert_eq!(received, message);
-        server.send(received);
-        assert_eq!(client.recv(), message);
-    });
-}
+use crate::support::bounce_dealer;
 
 #[test]
 fn roundtrip() {
@@ -36,7 +21,7 @@ fn roundtrip() {
     assert_eq!(bound.to_string(), endpoint);
     let mut client = context.socket::<Dealer>();
     client.connect(&endpoint).unwrap();
-    bounce(server, client);
+    bounce_dealer(&mut server, &mut client);
 }
 
 #[test]

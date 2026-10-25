@@ -5,7 +5,7 @@
 
 use zmq::{Context, Endpoint, Pair};
 
-use crate::pair_inproc::bounce;
+use crate::support::bounce_pair;
 
 #[test]
 fn pair_tcp_regular() {
@@ -14,7 +14,7 @@ fn pair_tcp_regular() {
     let endpoint = sb.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let mut sc = context.socket::<Pair>();
     sc.connect(&endpoint).unwrap();
-    bounce(&mut sb, &mut sc);
+    bounce_pair(&mut sb, &mut sc);
 }
 
 /// Connects to `localhost`, so that names are resolved, where the other
@@ -29,5 +29,5 @@ fn pair_tcp_connect_by_name() {
     let mut sc = context.socket::<Pair>();
     sc.connect(&format!("tcp://localhost:{}", bound.port()))
         .unwrap();
-    bounce(&mut sb, &mut sc);
+    bounce_pair(&mut sb, &mut sc);
 }

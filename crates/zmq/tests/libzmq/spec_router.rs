@@ -4,8 +4,7 @@ use std::collections::HashMap;
 
 use zmq::{Context, Dealer, Identity, Message, Router, RouterSendError, RoutingId, SocketOptions};
 
-use crate::reqrep_inproc::msg;
-use crate::support::{FIVE, settle};
+use crate::support::{FIVE, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_router_{name}")
