@@ -454,7 +454,7 @@ impl Socket<Server> {
 
     /// Closes the connection to the client `to`. Returns whether there was
     /// one.
-    pub fn disconnect(&mut self, to: ClientId) -> bool {
+    pub fn disconnect_client(&mut self, to: ClientId) -> bool {
         disconnect_routed(self, to.0)
     }
 }
@@ -587,9 +587,9 @@ impl Socket<Peer> {
             .map_err(NoSuchPeer)
     }
 
-    /// Closes the connection to the peer `to`. Returns whether there was
-    /// one.
-    pub fn disconnect(&mut self, to: PeerId) -> bool {
+    /// Closes the connection to the peer `to`, as libzmq's
+    /// `zmq_disconnect_peer`. Returns whether there was one.
+    pub fn disconnect_peer(&mut self, to: PeerId) -> bool {
         disconnect_routed(self, to.0)
     }
 }

@@ -135,8 +135,8 @@ fn a_disconnected_client_is_forgotten() {
     client.connect("inproc://disconnect").unwrap();
     client.send("hi");
     let (id, _) = server.try_recv().unwrap();
-    assert!(server.disconnect(id));
-    assert!(!server.disconnect(id), "already gone");
+    assert!(server.disconnect_client(id));
+    assert!(!server.disconnect_client(id), "already gone");
     assert_eq!(
         server.try_send(id, "after"),
         Err(ServerSendError::NoSuchClient(Frame::from("after")))

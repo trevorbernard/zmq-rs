@@ -17,6 +17,10 @@ pub enum Error {
     UnsupportedTransport(String),
     /// The operating system refused, e.g. the address is in use.
     Io(io::Error),
+    /// The socket is not bound or connected there, for
+    /// [`Socket::unbind`](crate::Socket::unbind) and
+    /// [`Socket::disconnect`](crate::Socket::disconnect).
+    UnknownEndpoint(String),
 }
 
 /// Where a socket is bound, as [`Socket::bind`](crate::Socket::bind)
@@ -64,6 +68,7 @@ impl fmt::Display for Endpoint {
 }
 
 /// What a bind or connect is aimed at.
+#[derive(Clone)]
 pub(crate) enum Target {
     Tcp(SocketAddr),
     Ipc(PathBuf),
@@ -73,6 +78,21 @@ pub(crate) enum Target {
     #[cfg(any(target_os = "linux", target_os = "android"))]
     IpcAbstract(String),
     Inproc(String),
+}
+
+impl Target {
+    /// The endpoint aimed at; `None` for `ipc://*`, which names no path
+    /// until bound.
+    pub(crate) fn into_endpoint(self) -> Option<Endpoint> {
+        match self {
+            Self::Tcp(addr) => Some(Endpoint::Tcp(addr)),
+            Self::Ipc(path) => Some(Endpoint::Ipc(path)),
+            Self::IpcAnywhere => None,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::IpcAbstract(name) => Some(Endpoint::IpcAbstract(name)),
+            Self::Inproc(name) => Some(Endpoint::Inproc(name)),
+        }
+    }
 }
 
 /// Parses `endpoint` for binding.
@@ -197,6 +217,9 @@ impl fmt::Display for Error {
                 write!(f, "unsupported transport \"{transport}\"")
             }
             Self::Io(err) => write!(f, "{err}"),
+            Self::UnknownEndpoint(endpoint) => {
+                write!(f, "not bound or connected at \"{endpoint}\"")
+            }
         }
     }
 }

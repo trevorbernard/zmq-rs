@@ -65,6 +65,9 @@ pub(crate) struct ListenRequest {
     pub(crate) cleanup: Option<IpcCleanup>,
     /// The bound endpoint, for monitor events.
     pub(crate) endpoint: String,
+    /// Dropped once the listener is closed, telling the socket its
+    /// address is free.
+    pub(crate) closed: mpsc::Sender<()>,
 }
 
 /// A running I/O thread. Dropping it stops and joins the thread.
@@ -323,6 +326,7 @@ impl EventLoop {
             connections,
             cleanup,
             endpoint,
+            closed,
         } = request;
         let id = self.take_id();
         self.poll
@@ -338,6 +342,7 @@ impl EventLoop {
             endpoint,
             task_waker: Waker::from(waker.clone()),
             waker,
+            _closed: closed,
         };
         self.listeners.insert(id, entry);
         Some(id)
@@ -830,6 +835,8 @@ struct ListenerEntry {
     endpoint: String,
     waker: Arc<TokenWaker>,
     task_waker: Waker,
+    /// Last, so that it drops once the listener and its file are gone.
+    _closed: mpsc::Sender<()>,
 }
 
 /// Wakes a session or listener when one of its pipes becomes ready: queues

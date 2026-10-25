@@ -82,8 +82,8 @@ fn a_disconnected_peer_is_forgotten() {
     far.bind("inproc://far").unwrap();
     let mut near = context.socket::<Peer>();
     let id = near.connect_peer("inproc://far").unwrap();
-    assert!(near.disconnect(id));
-    assert!(!near.disconnect(id));
+    assert!(near.disconnect_peer(id));
+    assert!(!near.disconnect_peer(id));
     assert_eq!(near.send(id, "gone"), Err(NoSuchPeer(Frame::from("gone"))));
 }
 

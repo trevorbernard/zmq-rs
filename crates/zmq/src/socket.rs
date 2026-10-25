@@ -7,9 +7,9 @@ use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
 
 use zmq_core::{
-    ConnectionConfig, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting, PeerGone,
-    PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterSendError,
-    RouterTable, Subscriber, Verbosity, XPubEvent,
+    ConnectionConfig, EndpointId, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting,
+    PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome,
+    RouterSendError, RouterTable, Subscriber, Verbosity, XPubEvent,
 };
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Message, Subscription};
@@ -300,6 +300,10 @@ impl SocketType for Router {
 pub struct Socket<T: SocketType> {
     peers: Peers,
     routing: T::Routing,
+    /// Where it is bound, as `bind` reported it, for `unbind`.
+    bound: Vec<(Endpoint, EndpointId)>,
+    /// What it connected to, as written and as resolved, for `disconnect`.
+    connected: Vec<(String, Endpoint, EndpointId)>,
     _type: PhantomData<T>,
 }
 
@@ -341,6 +345,8 @@ impl<T: SocketType> Socket<T> {
         Self {
             peers: Peers::new(context, config),
             routing: T::Routing::default(),
+            bound: Vec::new(),
+            connected: Vec::new(),
             _type: PhantomData,
         }
     }
@@ -381,27 +387,67 @@ impl<T: SocketType> Socket<T> {
     /// leftover socket file nobody listens on is replaced, but a live socket
     /// or any other file is `AddrInUse`. An abstract `ipc://@name` has no
     /// file: a live name is `AddrInUse`, and it is free once the socket is
-    /// dropped.
+    /// dropped or [unbound](Self::unbind).
     pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
-        match endpoint::bind_target(endpoint)? {
-            Target::Tcp(addr) => self.peers.bind(addr).map(Endpoint::Tcp),
+        let (id, bound) = match endpoint::bind_target(endpoint)? {
+            Target::Tcp(addr) => self
+                .peers
+                .bind(addr)
+                .map(|(id, addr)| (id, Endpoint::Tcp(addr))),
             #[cfg(unix)]
-            Target::Ipc(path) => self.peers.bind_ipc(&path).map(|()| Endpoint::Ipc(path)),
+            Target::Ipc(path) => self
+                .peers
+                .bind_ipc(&path)
+                .map(|id| (id, Endpoint::Ipc(path))),
             #[cfg(unix)]
-            Target::IpcAnywhere => self.peers.bind_ipc_anywhere().map(Endpoint::Ipc),
+            Target::IpcAnywhere => self
+                .peers
+                .bind_ipc_anywhere()
+                .map(|(id, path)| (id, Endpoint::Ipc(path))),
             #[cfg(not(unix))]
             Target::Ipc(_) | Target::IpcAnywhere => unreachable!("ipc is refused when parsing"),
             #[cfg(any(target_os = "linux", target_os = "android"))]
             Target::IpcAbstract(name) => self
                 .peers
                 .bind_ipc_abstract(&name)
-                .map(|()| Endpoint::IpcAbstract(name)),
+                .map(|id| (id, Endpoint::IpcAbstract(name))),
             Target::Inproc(name) => self
                 .peers
                 .bind_inproc(&name)
-                .map(|()| Endpoint::Inproc(name)),
+                .map(|id| (id, Endpoint::Inproc(name))),
         }
-        .map_err(Error::Io)
+        .map_err(Error::Io)?;
+        self.bound.push((bound.clone(), id));
+        Ok(bound)
+    }
+
+    /// Stops listening on `endpoint`, as libzmq's `zmq_unbind`, and closes
+    /// the connections accepted there. What those peers sent is discarded;
+    /// what was queued to them is still delivered within the
+    /// [`linger`](SocketOptions::linger).
+    ///
+    /// `endpoint` is as [`bind`](Self::bind) took it or as it returned it:
+    /// `tcp://*:5555` and `tcp://0.0.0.0:5555` are the same bind, but a
+    /// wildcard port or `ipc://*` must be given as bound. Returns once the
+    /// address can be bound again. Fails with [`Error::UnknownEndpoint`] if
+    /// the socket is not bound there.
+    pub fn unbind(&mut self, endpoint: &str) -> Result<(), Error> {
+        let wanted = endpoint::bind_target(endpoint)?.into_endpoint();
+        let mut found = Vec::new();
+        self.bound.retain(|(bound, id)| {
+            let keep = Some(bound) != wanted.as_ref();
+            if !keep {
+                found.push(*id);
+            }
+            keep
+        });
+        if found.is_empty() {
+            return Err(Error::UnknownEndpoint(endpoint.to_owned()));
+        }
+        for id in found {
+            self.peers.close(id);
+        }
+        Ok(())
     }
 
     /// Connects to `endpoint`, such as `tcp://localhost:5555`,
@@ -421,7 +467,12 @@ impl<T: SocketType> Socket<T> {
         &mut self,
         endpoint: &str,
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
-        let key = match endpoint::connect_target(endpoint)? {
+        let target = endpoint::connect_target(endpoint)?;
+        let resolved = target
+            .clone()
+            .into_endpoint()
+            .expect("ipc://* is refused when parsing");
+        let (id, key) = match target {
             Target::Tcp(addr) => self.peers.connect(addr),
             #[cfg(unix)]
             Target::Ipc(path) => self.peers.connect_ipc(&path),
@@ -430,10 +481,54 @@ impl<T: SocketType> Socket<T> {
             Target::IpcAnywhere => unreachable!("refused when parsing"),
             #[cfg(any(target_os = "linux", target_os = "android"))]
             Target::IpcAbstract(name) => self.peers.connect_ipc_abstract(&name),
-            Target::Inproc(name) => Some(self.peers.connect_inproc(&name)),
+            Target::Inproc(name) => {
+                let (id, key) = self.peers.connect_inproc(&name);
+                (id, Some(key))
+            }
         };
+        self.connected.push((endpoint.to_owned(), resolved, id));
         self.routing.connected(self.peers.list_mut());
         Ok(key)
+    }
+
+    /// Stops connecting to `endpoint`, as libzmq's `zmq_disconnect`: closes
+    /// each connection made to it, so they no longer reconnect. What those
+    /// peers sent is discarded; what was queued to them is still delivered
+    /// within the [`linger`](SocketOptions::linger), if they are connected.
+    ///
+    /// `endpoint` is as [`connect`](Self::connect) took it, or resolves to
+    /// the same address. Fails with [`Error::UnknownEndpoint`] if the socket
+    /// has no connection to it.
+    pub fn disconnect(&mut self, endpoint: &str) -> Result<(), Error> {
+        let as_written = self
+            .connected
+            .iter()
+            .any(|(written, ..)| written == endpoint);
+        // Resolved only when not given as written, sparing a lookup.
+        let resolved = if as_written {
+            None
+        } else {
+            endpoint::connect_target(endpoint)?.into_endpoint()
+        };
+        let mut found = Vec::new();
+        self.connected.retain(|(written, connected, id)| {
+            let keep = if as_written {
+                written != endpoint
+            } else {
+                Some(connected) != resolved.as_ref()
+            };
+            if !keep {
+                found.push(*id);
+            }
+            keep
+        });
+        if found.is_empty() {
+            return Err(Error::UnknownEndpoint(endpoint.to_owned()));
+        }
+        for id in found {
+            self.peers.close(id);
+        }
+        Ok(())
     }
 }
 

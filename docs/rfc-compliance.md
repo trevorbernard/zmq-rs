@@ -359,6 +359,12 @@ Rules shared by every pattern:
 
 **`IMMEDIATE`** (`SocketOptions::immediate`): a TCP or IPC connection is a peer only while its handshake has completed, so messages are not queued for peers that are not there, and what was queued on a connection that breaks is discarded. As in libzmq, `inproc` ignores it, and a new connection reaches the socket only when the socket is next used, so an idle SUB subscribes on it then. PEER's `connect_peer`, which libzmq refuses with `IMMEDIATE`, ignores it.
 
+**`unbind` and `disconnect`** (`zmq_unbind`, `zmq_disconnect`): each undoes a bind or connect, closing its listener or ending its retries, and drops the peers that came through it. As in libzmq, what those peers sent is discarded and what was queued to them is delivered within the linger. Differences:
+- `unbind` returns once the I/O thread has closed the listener, so the address can be bound again at once; libzmq closes it in the background.
+- `unbind` of an `inproc` name also closes the connections accepted on it, as for TCP and IPC; libzmq frees only the name.
+- `disconnect` takes the endpoint as written to `connect`, or any string resolving to the same address; `unbind` takes it as bound or as written, but a wildcard port or `ipc://*` only as bound. Neither matching is `UnknownEndpoint` (libzmq's `ENOENT`).
+
+
 ### PIPELINE (RFC 30) and EXPAIR (RFC 31)
 
 - **PUSH** round-robins to available peers. With none available it blocks or errors, and never drops.
@@ -393,7 +399,7 @@ GitHub CI, which installs Ubuntu's.
 
 **Done (CLIENT and SERVER):**
 - `Socket<Client>` and `Socket<Server>` send and receive `Frame`s, not `Message`s, so sending a multipart message does not compile. Received multipart messages are dropped.
-- SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect(id)` closes a client's connection.
+- SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect_client(id)` closes a client's connection.
 - Verified against libzmq's CLIENT and SERVER both ways, a libzmq SERVER replying included, through its draft routing-id API looked up at run time.
 
 **Done (RADIO and DISH):**
@@ -408,7 +414,7 @@ GitHub CI, which installs Ubuntu's.
 - Verified against libzmq's SCATTER and GATHER in both directions.
 
 **Done (PEER and CHANNEL):**
-- `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`PeerSendError`), `recv` and `disconnect` mirror SERVER's.
+- `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`PeerSendError`), `recv` and `disconnect_peer` mirror SERVER's.
 - `Socket<Channel>` is PAIR in single frames: the first peer is the one, and multipart messages received are dropped.
 - Not supported: libzmq's `ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG` and `ZMQ_HICCUP_MSG` options for PEER.
 - Verified against libzmq's PEER both ways and its CHANNEL.

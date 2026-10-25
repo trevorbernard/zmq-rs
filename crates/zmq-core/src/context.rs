@@ -190,6 +190,15 @@ impl Connection {
     }
 }
 
+/// A listener's accept queue, as a socket keeps it.
+#[derive(Debug)]
+pub(crate) struct AcceptQueue {
+    pub(crate) connections: Reader<Connection>,
+    /// For a listener an I/O thread serves: disconnects once the thread has
+    /// closed it, freeing its address.
+    pub(crate) closed: Option<mpsc::Receiver<()>>,
+}
+
 /// A bound TCP port. Each peer that connects and completes the handshake
 /// arrives as a [`Connection`]; peers that fail the handshake never appear.
 /// Dropping the listener closes the port.
@@ -197,6 +206,7 @@ impl Connection {
 pub struct Listener {
     local_addr: SocketAddr,
     connections: Reader<Connection>,
+    closed: mpsc::Receiver<()>,
 }
 
 impl Listener {
@@ -226,8 +236,11 @@ impl Listener {
         self.connections.recv_blocking()
     }
 
-    pub(crate) fn into_queue(self) -> Reader<Connection> {
-        self.connections
+    pub(crate) fn into_queue(self) -> AcceptQueue {
+        AcceptQueue {
+            connections: self.connections,
+            closed: Some(self.closed),
+        }
     }
 }
 
@@ -239,6 +252,7 @@ impl Listener {
 pub struct IpcListener {
     path: PathBuf,
     connections: Reader<Connection>,
+    closed: mpsc::Receiver<()>,
 }
 
 #[cfg(unix)]
@@ -268,8 +282,11 @@ impl IpcListener {
         self.connections.recv_blocking()
     }
 
-    pub(crate) fn into_queue(self) -> Reader<Connection> {
-        self.connections
+    pub(crate) fn into_queue(self) -> AcceptQueue {
+        AcceptQueue {
+            connections: self.connections,
+            closed: Some(self.closed),
+        }
     }
 }
 
@@ -281,6 +298,7 @@ impl IpcListener {
 pub struct IpcAbstractListener {
     name: String,
     connections: Reader<Connection>,
+    closed: mpsc::Receiver<()>,
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -310,8 +328,11 @@ impl IpcAbstractListener {
         self.connections.recv_blocking()
     }
 
-    pub(crate) fn into_queue(self) -> Reader<Connection> {
-        self.connections
+    pub(crate) fn into_queue(self) -> AcceptQueue {
+        AcceptQueue {
+            connections: self.connections,
+            closed: Some(self.closed),
+        }
     }
 }
 
@@ -345,8 +366,11 @@ impl InprocListener {
         self.connections.recv_blocking()
     }
 
-    pub(crate) fn into_queue(self) -> Reader<Connection> {
-        self.connections
+    pub(crate) fn into_queue(self) -> AcceptQueue {
+        AcceptQueue {
+            connections: self.connections,
+            closed: None,
+        }
     }
 }
 
@@ -467,10 +491,12 @@ impl Context {
         });
         let (listener, local_addr) = reported(bound, &config, &format!("tcp://{addr}"))?;
         let endpoint = format!("tcp://{local_addr}");
-        let connections = self.listen(StreamListener::Tcp(listener), None, endpoint, config);
+        let (connections, closed) =
+            self.listen(StreamListener::Tcp(listener), None, endpoint, config);
         Ok(Listener {
             local_addr,
             connections,
+            closed,
         })
     }
 
@@ -482,7 +508,7 @@ impl Context {
     pub fn bind_ipc(&self, path: &Path, config: ConnectionConfig) -> io::Result<IpcListener> {
         let endpoint = format!("ipc://{}", path.display());
         let (listener, cleanup) = reported(crate::transport::bind_ipc(path), &config, &endpoint)?;
-        let connections = self.listen(
+        let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
             Some(cleanup),
             endpoint,
@@ -491,6 +517,7 @@ impl Context {
         Ok(IpcListener {
             path: path.to_owned(),
             connections,
+            closed,
         })
     }
 
@@ -501,13 +528,17 @@ impl Context {
         let (listener, cleanup, path) =
             reported(crate::transport::bind_ipc_anywhere(), &config, "ipc://*")?;
         let endpoint = format!("ipc://{}", path.display());
-        let connections = self.listen(
+        let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
             Some(cleanup),
             endpoint,
             config,
         );
-        Ok(IpcListener { path, connections })
+        Ok(IpcListener {
+            path,
+            connections,
+            closed,
+        })
     }
 
     /// Binds `name` in Linux's abstract socket namespace, for
@@ -526,24 +557,28 @@ impl Context {
             &config,
             &endpoint,
         )?;
-        let connections = self.listen(StreamListener::Unix(listener), None, endpoint, config);
+        let (connections, closed) =
+            self.listen(StreamListener::Unix(listener), None, endpoint, config);
         Ok(IpcAbstractListener {
             name: name.to_owned(),
             connections,
+            closed,
         })
     }
 
     /// Serves `listener`, bound at `endpoint`, on an I/O thread, returning
-    /// its accept queue.
+    /// its accept queue and a receiver that disconnects once the thread has
+    /// closed it.
     fn listen(
         &self,
         listener: StreamListener,
         cleanup: Option<IpcCleanup>,
         endpoint: String,
         config: ConnectionConfig,
-    ) -> Reader<Connection> {
+    ) -> (Reader<Connection>, mpsc::Receiver<()>) {
         config.monitor.emit(&endpoint, EventKind::Listening);
         let (writer, connections) = pipe(Hwm::Unlimited);
+        let (closing, closed) = mpsc::channel();
         self.io_thread()
             .send(IoCommand::Listen(Box::new(ListenRequest {
                 listener,
@@ -551,8 +586,9 @@ impl Context {
                 connections: writer,
                 cleanup,
                 endpoint,
+                closed: closing,
             })));
-        connections
+        (connections, closed)
     }
 
     /// Binds the `inproc` `name` in this context. Fails with

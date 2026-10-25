@@ -14,9 +14,10 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
 use atomic_waker::AtomicWaker;
-use zmq_pipe::{Reader, TryRecvError, TrySendError};
+use zmq_pipe::{TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
+use crate::context::AcceptQueue;
 use crate::transport::Address;
 use crate::{Connection, ConnectionConfig, Context};
 
@@ -24,6 +25,11 @@ use crate::{Connection, ConnectionConfig, Context};
 /// stay sorted by key.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerKey(u64);
+
+/// One bind or connect of a socket, so that it can be undone: the
+/// listener or connection it made, and the peers that came through it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct EndpointId(u64);
 
 /// Maps and sets keyed by peer. We assign peer keys from a counter, so no
 /// peer can choose one, and they need no protection from flooding.
@@ -54,6 +60,8 @@ impl Hasher for PeerKeyHasher {
 #[derive(Debug)]
 pub struct Peer {
     key: PeerKey,
+    /// The bind or connect it came through, if any.
+    endpoint: Option<EndpointId>,
     pub(crate) connection: Connection,
 }
 
@@ -82,9 +90,17 @@ pub struct PeerList {
 impl PeerList {
     /// Adds a peer and returns its key.
     pub fn push(&mut self, connection: Connection) -> PeerKey {
+        self.push_from(connection, None)
+    }
+
+    fn push_from(&mut self, connection: Connection, endpoint: Option<EndpointId>) -> PeerKey {
         let key = PeerKey(self.next_key);
         self.next_key += 1;
-        self.peers.push(Peer { key, connection });
+        self.peers.push(Peer {
+            key,
+            endpoint,
+            connection,
+        });
         key
     }
 
@@ -142,8 +158,10 @@ pub struct Peers {
     context: Context,
     config: ConnectionConfig,
     list: PeerList,
-    /// Accept queues of the socket's TCP and `inproc` listeners.
-    listeners: Vec<Reader<Connection>>,
+    /// Accept queues of the socket's listeners, and of its `IMMEDIATE`
+    /// connects, each with the bind or connect that made it.
+    listeners: Vec<(EndpointId, AcceptQueue)>,
+    next_endpoint: u64,
     /// What each new peer is sent first, if anything.
     greeting: Option<Message>,
 }
@@ -156,6 +174,7 @@ impl Peers {
             config,
             list: PeerList::default(),
             listeners: Vec::new(),
+            next_endpoint: 0,
             greeting: None,
         }
     }
@@ -167,8 +186,20 @@ impl Peers {
         self.greeting = greeting;
     }
 
-    fn add(&mut self, connection: Connection) -> PeerKey {
-        add(&mut self.list, self.greeting.as_ref(), connection)
+    fn add(&mut self, connection: Connection, endpoint: EndpointId) -> PeerKey {
+        add(&mut self.list, self.greeting.as_ref(), connection, endpoint)
+    }
+
+    fn next_endpoint(&mut self) -> EndpointId {
+        let endpoint = EndpointId(self.next_endpoint);
+        self.next_endpoint += 1;
+        endpoint
+    }
+
+    fn listen(&mut self, queue: AcceptQueue) -> EndpointId {
+        let endpoint = self.next_endpoint();
+        self.listeners.push((endpoint, queue));
+        endpoint
     }
 
     /// The configuration new connections use.
@@ -180,60 +211,60 @@ impl Peers {
     /// the connection is up, as in libzmq. With
     /// [`immediate`](ConnectionConfig::immediate) there is no peer until
     /// then, so no key.
-    pub fn connect(&mut self, addr: SocketAddr) -> Option<PeerKey> {
+    pub fn connect(&mut self, addr: SocketAddr) -> (EndpointId, Option<PeerKey>) {
         self.connect_to(Address::Tcp(addr))
     }
 
-    fn connect_to(&mut self, addr: Address) -> Option<PeerKey> {
+    fn connect_to(&mut self, addr: Address) -> (EndpointId, Option<PeerKey>) {
         if self.config.immediate {
             let connections = self.context.connect_immediate(addr, self.config.clone());
-            self.listeners.push(connections);
-            return None;
+            let queue = AcceptQueue {
+                connections,
+                closed: None,
+            };
+            return (self.listen(queue), None);
         }
         let connection = self.context.connect_to(addr, self.config.clone());
-        Some(self.add(connection))
+        let endpoint = self.next_endpoint();
+        (endpoint, Some(self.add(connection, endpoint)))
     }
 
     /// Binds `addr` and accepts peers on it. Returns the bound address.
-    pub fn bind(&mut self, addr: SocketAddr) -> io::Result<SocketAddr> {
+    pub fn bind(&mut self, addr: SocketAddr) -> io::Result<(EndpointId, SocketAddr)> {
         let listener = self.context.bind(addr, self.config.clone())?;
         let local = listener.local_addr();
-        self.listeners.push(listener.into_queue());
-        Ok(local)
+        Ok((self.listen(listener.into_queue()), local))
     }
 
     /// Binds a Unix domain socket at `path` and accepts peers on it.
     #[cfg(unix)]
-    pub fn bind_ipc(&mut self, path: &std::path::Path) -> io::Result<()> {
+    pub fn bind_ipc(&mut self, path: &std::path::Path) -> io::Result<EndpointId> {
         let listener = self.context.bind_ipc(path, self.config.clone())?;
-        self.listeners.push(listener.into_queue());
-        Ok(())
+        Ok(self.listen(listener.into_queue()))
     }
 
     /// Binds a Unix domain socket at a fresh temporary path, returning it.
     #[cfg(unix)]
-    pub fn bind_ipc_anywhere(&mut self) -> io::Result<std::path::PathBuf> {
+    pub fn bind_ipc_anywhere(&mut self) -> io::Result<(EndpointId, std::path::PathBuf)> {
         let listener = self.context.bind_ipc_anywhere(self.config.clone())?;
         let path = listener.path().to_owned();
-        self.listeners.push(listener.into_queue());
-        Ok(path)
+        Ok((self.listen(listener.into_queue()), path))
     }
 
     /// Connects to the Unix domain socket at `path`, retrying until it is
     /// bound. No key with [`immediate`](ConnectionConfig::immediate), as
     /// for [`connect`](Self::connect).
     #[cfg(unix)]
-    pub fn connect_ipc(&mut self, path: &std::path::Path) -> Option<PeerKey> {
+    pub fn connect_ipc(&mut self, path: &std::path::Path) -> (EndpointId, Option<PeerKey>) {
         self.connect_to(Address::Ipc(path.to_owned()))
     }
 
     /// Binds `name` in Linux's abstract socket namespace and accepts peers
     /// on it.
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn bind_ipc_abstract(&mut self, name: &str) -> io::Result<()> {
+    pub fn bind_ipc_abstract(&mut self, name: &str) -> io::Result<EndpointId> {
         let listener = self.context.bind_ipc_abstract(name, self.config.clone())?;
-        self.listeners.push(listener.into_queue());
-        Ok(())
+        Ok(self.listen(listener.into_queue()))
     }
 
     /// Connects to `name` in Linux's abstract socket namespace, retrying
@@ -241,22 +272,45 @@ impl Peers {
     /// [`immediate`](ConnectionConfig::immediate), as for
     /// [`connect`](Self::connect).
     #[cfg(any(target_os = "linux", target_os = "android"))]
-    pub fn connect_ipc_abstract(&mut self, name: &str) -> Option<PeerKey> {
+    pub fn connect_ipc_abstract(&mut self, name: &str) -> (EndpointId, Option<PeerKey>) {
         self.connect_to(Address::IpcAbstract(name.to_owned()))
     }
 
     /// Binds the `inproc` `name` and accepts peers on it.
-    pub fn bind_inproc(&mut self, name: &str) -> io::Result<()> {
+    pub fn bind_inproc(&mut self, name: &str) -> io::Result<EndpointId> {
         let listener = self.context.bind_inproc(name, self.config.clone())?;
-        self.listeners.push(listener.into_queue());
-        Ok(())
+        Ok(self.listen(listener.into_queue()))
     }
 
     /// Connects to the `inproc` `name`, binding or not. `inproc` ignores
     /// [`immediate`](ConnectionConfig::immediate), as libzmq does.
-    pub fn connect_inproc(&mut self, name: &str) -> PeerKey {
+    pub fn connect_inproc(&mut self, name: &str) -> (EndpointId, PeerKey) {
         let connection = self.context.connect_inproc(name, self.config.clone());
-        self.add(connection)
+        let endpoint = self.next_endpoint();
+        (endpoint, self.add(connection, endpoint))
+    }
+
+    /// Undoes the bind or connect that made `endpoint`, as libzmq's
+    /// `zmq_unbind` and `zmq_disconnect`: closes its listener, or ends its
+    /// connection's retries, and drops the peers that came through it.
+    /// What they sent is discarded; what was queued to them is still
+    /// delivered within the linger. Returns once a closed listener's
+    /// address is free to bind again.
+    pub fn close(&mut self, endpoint: EndpointId) {
+        let mut closing = Vec::new();
+        self.listeners.retain_mut(|(made_by, queue)| {
+            let keep = *made_by != endpoint;
+            if !keep {
+                closing.extend(queue.closed.take());
+            }
+            keep
+        });
+        self.list.retain_mut(|peer| peer.endpoint != Some(endpoint));
+        for closed in closing {
+            // Disconnects, never sends, once the I/O thread drops the
+            // listener.
+            let _ = closed.recv();
+        }
     }
 
     /// A new monitor of this socket's events, from now on.
@@ -278,11 +332,11 @@ impl Peers {
     /// listener, so a new peer wakes a task waiting for one.
     pub fn accept(&mut self, cx: &mut TaskContext<'_>) {
         let (list, greeting) = (&mut self.list, self.greeting.as_ref());
-        self.listeners.retain_mut(|listener| {
+        self.listeners.retain_mut(|(endpoint, queue)| {
             loop {
-                match listener.poll_recv(cx) {
+                match queue.connections.poll_recv(cx) {
                     Poll::Ready(Some(connection)) => {
-                        add(list, greeting, connection);
+                        add(list, greeting, connection, *endpoint);
                     }
                     // The context stopped: this listener will accept no more.
                     Poll::Ready(None) => break false,
@@ -312,12 +366,17 @@ impl Peers {
     }
 }
 
-fn add(list: &mut PeerList, greeting: Option<&Message>, mut connection: Connection) -> PeerKey {
+fn add(
+    list: &mut PeerList,
+    greeting: Option<&Message>,
+    mut connection: Connection,
+    endpoint: EndpointId,
+) -> PeerKey {
     if let Some(greeting) = greeting {
         // A new pipe has room, unless the peer is already gone.
         let _ = connection.tx.try_send(greeting.clone());
     }
-    list.push(connection)
+    list.push_from(connection, Some(endpoint))
 }
 
 /// Round robin over the peers that have room, like libzmq's `lb_t`.
