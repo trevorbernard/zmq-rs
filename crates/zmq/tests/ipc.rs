@@ -13,6 +13,17 @@ const FIVE: Duration = Duration::from_secs(5);
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
+/// Waits until `events` has reported `count` completed handshakes.
+fn await_handshakes(events: &mut zmq::Monitor, count: usize) {
+    let mut seen = 0;
+    while seen < count {
+        let event = events.recv_timeout(FIVE).expect("a handshake in time");
+        if event.kind == zmq::EventKind::HandshakeSucceeded {
+            seen += 1;
+        }
+    }
+}
+
 fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'static) -> T {
     let (done, result) = mpsc::channel();
     thread::spawn(move || {
@@ -164,6 +175,7 @@ fn a_connection_comes_back_when_the_binder_does() {
     let mut pull = context.socket::<Pull>();
     pull.bind(&endpoint).unwrap();
     let mut push = context.socket::<Push>();
+    let mut events = push.monitor();
     push.connect(&endpoint).unwrap();
     push.send("before");
     let pull = within(FIVE, move || {
@@ -171,9 +183,11 @@ fn a_connection_comes_back_when_the_binder_does() {
         pull
     });
     drop(pull);
-    thread::sleep(Duration::from_millis(50));
     let mut pull = context.socket::<Pull>();
     pull.bind(&endpoint).unwrap();
+    // What is sent before the push reconnects goes to the closing
+    // connection and is lost, as in libzmq.
+    await_handshakes(&mut events, 2);
     push.send("after");
     assert_eq!(within(FIVE, move || pull.recv()), Message::from("after"));
 }
@@ -283,6 +297,7 @@ mod abstract_names {
         let mut pull = context.socket::<Pull>();
         pull.bind(&endpoint).unwrap();
         let mut push = context.socket::<Push>();
+        let mut events = push.monitor();
         push.connect(&endpoint).unwrap();
         push.send("before");
         let pull = within(FIVE, move || {
@@ -290,15 +305,12 @@ mod abstract_names {
             pull
         });
         drop(pull);
-        let started = std::time::Instant::now();
-        let mut pull = loop {
-            let mut pull = context.socket::<Pull>();
-            if pull.bind(&endpoint).is_ok() {
-                break pull;
-            }
-            assert!(started.elapsed() < FIVE, "the name stayed taken");
-            thread::sleep(Duration::from_millis(5));
-        };
+        // Free once the drop returns.
+        let mut pull = context.socket::<Pull>();
+        pull.bind(&endpoint).unwrap();
+        // What is sent before the push reconnects goes to the closing
+        // connection and is lost, as in libzmq.
+        super::await_handshakes(&mut events, 2);
         push.send("after");
         assert_eq!(within(FIVE, move || pull.recv()), Message::from("after"));
     }
