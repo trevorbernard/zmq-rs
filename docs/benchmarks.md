@@ -333,6 +333,52 @@ The bullets below give each case's numbers when its fix landed.
   slot; 8 B over ipc may be 3–5% slower for it, within run-to-run
   spread, and tcp and inproc are level.
 
+## Allocations
+
+Heap allocations per message, or per round trip for latency, counted
+in the benches' children with an `LD_PRELOAD` shim over glibc's `malloc`
+family. Each case ran at two counts and the difference was divided by
+the extra messages, so setup cancels out. Every count includes the
+sender's payload, and both libraries free it on another thread.
+
+| Case | Before | After | libzmq |
+|---|---|---|---|
+| thr inproc, any size | 1 | 1 | 1 |
+| thr tcp 8 B | 1 | 0 | 0 |
+| thr tcp 256 B | 1.07 | 1.07 | 1.04 |
+| thr tcp 4 KiB | 2.01 | 2.02 | 1.76 |
+| thr tcp 64 KiB | 3 | 2 | 2 |
+| lat inproc, any size | 3 | 0 | 0 |
+| lat tcp 256 B | 7.06 (16.9 KB) | 0.21 (658 B) | 0 (16 B) |
+| lat tcp 64 KiB | 9.06 | 4.06 | 2 |
+| multipart/2 | 3.04 | 2.03 | 2.03 |
+| curve/64k | 5 | 3 | 4 |
+
+- **A receive in request-reply allocated 8 KiB.** The decoder reserved
+  a full 8 KiB whenever less was spare, and with the message just
+  decoded still alive its buffer was shared, so `reserve` allocated
+  another and copied the zeroed tail into it, twice a round trip.
+  libzmq takes its buffer at the next read event, by which time the
+  message is gone. Reads now go into what is left until under 1 KiB is.
+- **REQ and REP collected frames into vectors** to split a request
+  from its envelope and a reply from its delimiter: three a round trip.
+  A delimiter-only envelope, a request straight from a REQ, now
+  allocates nothing.
+- **Vectored writes allocated their slice list,** 48 octets for each
+  message of 8 KiB or more; it is now on the stack. CURVE cloned the
+  boxed frame and sliced the opened one, each allocating a `Bytes`
+  header; both are now taken and advanced instead.
+- **The 8 B row was the bench's,** which built each payload as a vector
+  that the frame then copied inline. It now copies into the frame, as
+  libzmq's `zmq_msg_init_size` stores a small message inline.
+- **What remains is `Bytes` keeping its count apart from the data.**
+  A buffer shared between frames, at 4 KiB, or a payload cloned for
+  several subscribers, as in `fanout/4` (2.09 against 1.04), allocates
+  a header where libzmq's content carries its own. Over tcp at 64 KiB,
+  the two above libzmq's are the bench's REP cloning the body.
+- **Throughput and latency did not move** beyond run-to-run spread: a
+  malloc costs tens of nanoseconds against microseconds a message.
+
 ## Publisher fan-out
 
 `Publisher::send` alone, with criterion, for routing changes:
