@@ -176,6 +176,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+## Performance
+
+The library can't choose its own optimization settings: the application's
+profile builds it. For throughput, build release with fat LTO and one
+codegen unit, which ran 256 B messages 3–11% faster in
+[docs/benchmarks.md](docs/benchmarks.md)'s throughput cases, with no change
+measurable at 8 B or 4 KiB:
+
+```toml
+[profile.release]
+lto = "fat"
+codegen-units = 1
+```
+
+The allocator matters more. Every message larger than 23 octets is
+allocated by the sender and freed on another thread, which glibc's malloc
+handles poorly. In the benchmarks at 256 B over inproc, glibc's `malloc`
+and `free` took about half the cycles, and under mimalloc or jemalloc
+throughput ran up to three times as fast, for libzmq as well.
+
 ## Differences from libzmq
 
 Deliberate, beyond the API being typed. The full list, with reasons, is in

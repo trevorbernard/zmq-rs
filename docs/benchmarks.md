@@ -235,9 +235,10 @@ the same median as in earlier runs, 51 µs, and libzmq's spans 45–75.
   Under mimalloc or jemalloc (`LD_PRELOAD`) both run up to three times as
   fast; libzmq's 8 B case barely moves, as it stores small messages
   inline.
-- **Release builds with fat LTO** and one codegen unit run 7–19% faster
-  at 8 B and 256 B (measured at `51f314a`); the bench uses the default
-  profile.
+- **Release builds with fat LTO** and one codegen unit ran 7–19% faster
+  at 8 B and 256 B at `51f314a`. At `f34b1cc`, over two alternating runs,
+  256 B is 3–11% faster on every transport and 8 B and 4 KiB are level
+  within run-to-run spread. The bench uses the default profile.
 - **tcp at 64 KiB was 0.93 on copies.** Our I/O threads spent 41% of
   their time in memmove, against libzmq's 15%: the encoder copied every
   payload into its output buffer. Frames of 8 KiB and up are now written
