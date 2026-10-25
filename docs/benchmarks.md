@@ -42,6 +42,13 @@ Other patterns, such as fan-in, fan-out and CURVE, have their own bench
   after.
 - **Isolation:**
   - Every measurement runs in a fresh child process.
+  - Children run with glibc's heap trimming off
+    (`GLIBC_TUNABLES=glibc.malloc.trim_threshold=1073741824`, unless
+    `GLIBC_TUNABLES` is already set). Otherwise glibc returns the top of
+    the heap to the kernel as the receiver frees, the sender faults it back
+    in, and how often depends on thread timing. At inproc 64 KiB, either
+    library ran anywhere from 110k to 330k msg/s, following its page
+    faults; trimming off, both run at about 330k.
   - Over tcp and ipc, each side has its own context and thread, standing
     in for libzmq's two processes.
   - One warm-up run per case, then 5 rounds with cases interleaved.
@@ -244,10 +251,10 @@ libraries). Our latency is lower everywhere.
   spare capacity through the standard streams' own `read_buf`; that
   memset is gone, but throughput is unchanged, as this loopback case is
   bound elsewhere.
-- **Noise:** inproc 64 KiB throughput spreads widely for both libraries
-  in every run, and so does latency at small sizes. The machine ran the
-  `schedutil` governor; rerun a subset before acting on a difference
-  under about 10%.
+- **Noise:** latency at small sizes spreads widely for both libraries.
+  inproc 64 KiB throughput did too, until the bench turned glibc's heap
+  trimming off. The machine ran the `schedutil` governor; rerun a
+  subset before acting on a difference under about 10%.
 
 ## Other patterns
 

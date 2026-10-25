@@ -259,7 +259,16 @@ fn main() {
 
 /// Runs a child for one measurement and returns the line it printed.
 fn spawn(exe: &PathBuf, args: &[String], limit: Duration) -> Result<String, String> {
-    let mut child = Command::new(exe)
+    let mut command = Command::new(exe);
+    // glibc returns the top of its heap to the kernel whenever the
+    // receiver's frees leave enough of it unused, and the sender faults it
+    // back in. How often depends on thread timing: at inproc 64 KiB, either
+    // library ran anywhere from 110k to 330k msg/s, following its page
+    // faults. Never trimming measures the libraries rather than that.
+    if env::var_os("GLIBC_TUNABLES").is_none() {
+        command.env("GLIBC_TUNABLES", "glibc.malloc.trim_threshold=1073741824");
+    }
+    let mut child = command
         .arg("--child")
         .args(args)
         .stdout(Stdio::piped())
