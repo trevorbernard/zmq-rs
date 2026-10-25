@@ -1014,6 +1014,9 @@ fn only_frame(message: Message) -> Frame {
 }
 
 #[cfg(test)]
+mod properties;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::test_support::*;
