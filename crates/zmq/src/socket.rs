@@ -1,5 +1,6 @@
 //! Typed sockets: each type has only the operations its pattern allows.
 
+use std::convert::Infallible;
 use std::fmt;
 use std::future;
 use std::marker::PhantomData;
@@ -15,6 +16,7 @@ use zmq_pipe::Hwm;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
+use crate::polling::{PollItem, PollReadable, PollWritable};
 use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
 
 pub(crate) mod sealed {
@@ -32,6 +34,9 @@ pub trait SocketType: sealed::Sealed + 'static {
     /// How the socket routes messages among its peers.
     #[doc(hidden)]
     type Routing: Routing;
+    /// What one receive yields, as a poll holds it until it is taken.
+    #[doc(hidden)]
+    type Received: Send;
 }
 
 /// A socket type that can keep only the latest message, as libzmq's
@@ -110,6 +115,159 @@ impl Routing for Subscriber {
     }
 }
 
+/// A socket type that receives, so its sockets can be
+/// [polled](crate::poll) until a receive would not wait, with
+/// [`Socket::readable`]. REQ has none: its [`request`](Socket::request)
+/// waits for its own reply.
+///
+/// ```compile_fail
+/// # let context = zmq::Context::new().unwrap();
+/// let mut req = context.socket::<zmq::Req>();
+/// zmq::poll([req.readable()]);
+/// ```
+pub trait Receives: SocketType + Sized {
+    /// The next item, as the type's receives produce it.
+    #[doc(hidden)]
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Received>;
+}
+
+/// A socket type whose sends wait for a peer with room, so its sockets can
+/// be [polled](crate::poll) until a send would not wait, with
+/// [`Socket::writable`]. Types whose sends never wait, such as PUB and
+/// ROUTER, have none.
+///
+/// ```compile_fail
+/// # let context = zmq::Context::new().unwrap();
+/// let mut publisher = context.socket::<zmq::Pub>();
+/// zmq::poll([publisher.writable()]);
+/// ```
+pub trait WaitsForRoom: SocketType + Sized {
+    /// Whether a send would succeed now; registers `cx` if not.
+    #[doc(hidden)]
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()>;
+}
+
+impl Receives for Pair {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for Sub {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for XPub {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for ManualXPub {
+    fn poll_next(
+        socket: &mut Socket<Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
+        socket.poll_request(cx)
+    }
+}
+
+impl Receives for XSub {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for Pull {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for Rep {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Received> {
+        socket.poll_received(cx)
+    }
+}
+
+impl Receives for Dealer {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl Receives for Router {
+    fn poll_next(
+        socket: &mut Socket<Self>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<(RoutingId, Message)> {
+        socket.poll_recv(cx)
+    }
+}
+
+impl WaitsForRoom for Push {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        // As `poll_send`: PUSH discards what peers send and drops those gone.
+        socket.peers.prune_send_only();
+        socket.peers.accept(cx);
+        socket.routing.poll_ready(socket.peers.list_mut(), cx)
+    }
+}
+
+impl WaitsForRoom for Pair {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        socket.peers.accept(cx);
+        socket.routing.poll_ready(socket.peers.list_mut(), cx)
+    }
+}
+
+impl WaitsForRoom for Dealer {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        socket.peers.accept(cx);
+        socket.routing.send.poll_ready(socket.peers.list_mut(), cx)
+    }
+}
+
+impl<T: Receives> Socket<T> {
+    /// This socket, to [`poll`](crate::poll()) until a receive would not
+    /// wait. Once the poll reports it, `try_recv` returns at once.
+    pub fn readable(&mut self) -> PollItem<'_> {
+        PollItem::readable(self)
+    }
+}
+
+impl<T: WaitsForRoom> Socket<T> {
+    /// This socket, to [`poll`](crate::poll()) until a send would not wait.
+    /// Once the poll reports it, `try_send` succeeds, unless the peer with
+    /// room leaves first.
+    pub fn writable(&mut self) -> PollItem<'_> {
+        PollItem::writable(self)
+    }
+}
+
+impl<T: Receives> PollReadable for Socket<T> {
+    /// Receives into `pending` rather than peeking: SUB, DISH and others
+    /// drop messages as they receive, so a message in a pipe does not mean
+    /// a receive would return one.
+    fn poll_readable(&mut self, cx: &mut TaskContext<'_>) -> Poll<()> {
+        if self.pending.is_none() {
+            let Poll::Ready(received) = T::poll_next(self, cx) else {
+                return Poll::Pending;
+            };
+            self.pending = Some(received);
+        }
+        Poll::Ready(())
+    }
+}
+
+impl<T: WaitsForRoom> PollWritable for Socket<T> {
+    fn poll_writable(&mut self, cx: &mut TaskContext<'_>) -> Poll<()> {
+        T::poll_room(self, cx)
+    }
+}
+
 /// Sends each message to every SUB peer subscribed to a prefix of its
 /// first frame (RFC 29). Never blocks: a subscriber whose queue is full
 /// misses the message, as in libzmq.
@@ -150,6 +308,7 @@ impl sealed::Sealed for XPub {}
 impl SocketType for XPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
     type Routing = XPubRouting;
+    type Received = XPubEvent;
 }
 
 /// An XPUB that decides its peers' subscriptions, as libzmq's
@@ -176,12 +335,14 @@ impl sealed::Sealed for ManualXPub {}
 impl SocketType for ManualXPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
     type Routing = ManualXPubRouting;
+    type Received = (Option<zmq_core::PeerKey>, XPubEvent);
 }
 
 impl sealed::Sealed for XSub {}
 impl SocketType for XSub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XSub;
     type Routing = Subscriber;
+    type Received = Message;
 }
 
 /// Talks to exactly one other PAIR socket, both ways (RFC 31). The first
@@ -195,18 +356,21 @@ impl sealed::Sealed for Pair {}
 impl SocketType for Pair {
     const KIND: zmtp::SocketType = zmtp::SocketType::Pair;
     type Routing = PairRouting;
+    type Received = Message;
 }
 
 impl sealed::Sealed for Pub {}
 impl SocketType for Pub {
     const KIND: zmtp::SocketType = zmtp::SocketType::Pub;
     type Routing = Publisher;
+    type Received = Infallible;
 }
 
 impl sealed::Sealed for Sub {}
 impl SocketType for Sub {
     const KIND: zmtp::SocketType = zmtp::SocketType::Sub;
     type Routing = Subscriber;
+    type Received = Message;
 }
 
 /// Sends messages round robin to its PULL peers (RFC 30). Waits while no
@@ -222,12 +386,14 @@ impl sealed::Sealed for Push {}
 impl SocketType for Push {
     const KIND: zmtp::SocketType = zmtp::SocketType::Push;
     type Routing = LoadBalancer;
+    type Received = Infallible;
 }
 
 impl sealed::Sealed for Pull {}
 impl SocketType for Pull {
     const KIND: zmtp::SocketType = zmtp::SocketType::Pull;
     type Routing = FairQueue;
+    type Received = Message;
 }
 
 /// Sends round robin to, and receives fairly from, its peers (RFC 28):
@@ -259,12 +425,14 @@ impl sealed::Sealed for Req {}
 impl SocketType for Req {
     const KIND: zmtp::SocketType = zmtp::SocketType::Req;
     type Routing = Requester;
+    type Received = Infallible;
 }
 
 impl sealed::Sealed for Rep {}
 impl SocketType for Rep {
     const KIND: zmtp::SocketType = zmtp::SocketType::Rep;
     type Routing = Replier;
+    type Received = Received;
 }
 
 /// DEALER's routing: load-balanced sends, fair-queued receives.
@@ -287,12 +455,14 @@ impl sealed::Sealed for Dealer {}
 impl SocketType for Dealer {
     const KIND: zmtp::SocketType = zmtp::SocketType::Dealer;
     type Routing = DealerRouting;
+    type Received = Message;
 }
 
 impl sealed::Sealed for Router {}
 impl SocketType for Router {
     const KIND: zmtp::SocketType = zmtp::SocketType::Router;
     type Routing = RouterRouting;
+    type Received = (RoutingId, Message);
 }
 
 /// A socket of type `T`. What it can do depends on `T`: a
@@ -304,6 +474,9 @@ pub struct Socket<T: SocketType> {
     bound: Vec<(Endpoint, EndpointId)>,
     /// What it connected to, as written and as resolved, for `disconnect`.
     connected: Vec<(String, Endpoint, EndpointId)>,
+    /// What a poll for readability received, which the next receive
+    /// returns.
+    pending: Option<T::Received>,
     _type: PhantomData<T>,
 }
 
@@ -318,6 +491,11 @@ fn is_peer(_: zmtp::SocketType) -> bool {
 }
 
 impl<T: SocketType> Socket<T> {
+    /// What a poll for readability received, for the next receive.
+    pub(crate) fn take_pending(&mut self) -> Option<T::Received> {
+        self.pending.take()
+    }
+
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
@@ -348,6 +526,7 @@ impl<T: SocketType> Socket<T> {
             routing: T::Routing::default(),
             bound: Vec::new(),
             connected: Vec::new(),
+            pending: None,
             _type: PhantomData,
         }
     }
@@ -649,6 +828,9 @@ impl Socket<Pair> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -795,6 +977,9 @@ impl Socket<Sub> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -836,6 +1021,9 @@ impl Socket<XPub> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.0.poll_event(self.peers.list_mut(), cx)
     }
@@ -894,6 +1082,9 @@ impl Socket<ManualXPub> {
         &mut self,
         cx: &mut TaskContext<'_>,
     ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.0.poll_request(self.peers.list_mut(), cx)
     }
@@ -1034,6 +1225,9 @@ impl Socket<XSub> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -1061,6 +1255,9 @@ impl Socket<Pull> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         poll_fair_queued(&mut self.peers, &mut self.routing, cx)
     }
 }
@@ -1126,6 +1323,9 @@ impl Socket<Dealer> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         poll_fair_queued(&mut self.peers, &mut self.routing.recv, cx)
     }
 }
@@ -1269,6 +1469,9 @@ impl Socket<Rep> {
     }
 
     fn poll_received(&mut self, cx: &mut TaskContext<'_>) -> Poll<Received> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         self.routing.poll_recv(self.peers.list_mut(), cx)
     }
@@ -1455,6 +1658,9 @@ impl Socket<Router> {
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         self.peers.accept(cx);
         let RouterRouting { recv, table } = &mut self.routing;
         let peers = self.peers.list_mut();

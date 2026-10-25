@@ -104,6 +104,7 @@ struct ReadmeDoctests;
 mod draft;
 mod endpoint;
 mod options;
+mod polling;
 mod proxy;
 mod socket;
 mod wait;
@@ -118,13 +119,14 @@ pub use draft::{
 };
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
+pub use polling::{PollItem, poll, poll_timeout};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
 #[doc(hidden)]
 pub use socket::Routing;
 pub use socket::{
-    Conflatable, Dealer, ManualXPub, Pair, Pub, Publishes, Pull, Push, Rep, Req, Request,
-    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownRoutingId, XPub,
-    XSub,
+    Conflatable, Dealer, ManualXPub, Pair, Pub, Publishes, Pull, Push, Receives, Rep, Req, Request,
+    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownRoutingId,
+    WaitsForRoom, XPub, XSub,
 };
 #[cfg(feature = "draft")]
 pub use zmq_core::ServerSendError;

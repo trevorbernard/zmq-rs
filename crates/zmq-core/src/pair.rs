@@ -79,6 +79,25 @@ impl Pair {
         Err(message)
     }
 
+    /// Whether the peer has room for a message, so that
+    /// [`poll_send`](Self::poll_send) would succeed. Registers `cx` with it
+    /// if not.
+    pub fn poll_ready(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) -> Poll<()> {
+        // A peer found closed is replaced, so look twice at most.
+        for _ in 0..2 {
+            self.sync(peers);
+            let Some(peer) = self.active.and_then(|key| peers.get_mut(key)) else {
+                return Poll::Pending;
+            };
+            match peer.connection.tx.poll_ready(cx) {
+                Poll::Ready(Ok(())) => return Poll::Ready(()),
+                Poll::Ready(Err(())) => {}
+                Poll::Pending => return Poll::Pending,
+            }
+        }
+        Poll::Pending
+    }
+
     /// The next message from the peer, or `Pending` with `cx` registered.
     pub fn poll_recv(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) -> Poll<Message> {
         loop {

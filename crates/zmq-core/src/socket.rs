@@ -413,6 +413,18 @@ impl LoadBalancer {
         }
         Err(message)
     }
+
+    /// Whether some peer has room for a message, so that
+    /// [`poll_send`](Self::poll_send) would succeed. Registers `cx` with
+    /// every peer if none has.
+    pub fn poll_ready(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) -> Poll<()> {
+        for peer in &mut peers.peers {
+            if let Poll::Ready(Ok(())) = peer.connection.tx.poll_ready(cx) {
+                return Poll::Ready(());
+            }
+        }
+        Poll::Pending
+    }
 }
 
 /// Round robin over the peers that have a message waiting, like libzmq's

@@ -133,6 +133,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+### Waiting on several sockets: `poll`
+
+`zmq::poll` waits until any of its sockets is ready and says which, as
+`zmq_poll`. Each socket is borrowed only for the call, and one reported
+readable returns a message from its next `try_recv`. Only socket types that
+receive have `readable`, and only those whose sends can wait have
+`writable`.
+
+```rust
+use std::time::Duration;
+
+use zmq::{Context, Pull, Push};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let context = Context::new()?;
+    let mut jobs = context.socket::<Pull>();
+    jobs.bind("inproc://jobs")?;
+    let mut control = context.socket::<Pull>();
+    control.bind("inproc://control")?;
+
+    let mut boss = context.socket::<Push>();
+    boss.connect("inproc://jobs")?;
+    boss.send("job 1");
+
+    let ready = zmq::poll_timeout([jobs.readable(), control.readable()], Duration::from_secs(1));
+    let Some([job, stop]) = ready else {
+        return Ok(()); // nothing within a second
+    };
+    assert!(job && !stop);
+    assert_eq!(jobs.try_recv(), Some("job 1".into()));
+    Ok(())
+}
+```
+
 ### Security: CURVE with an authenticator
 
 Clients must know the server's public key. The server asks an authenticator
@@ -219,8 +253,8 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
   the last.
 - The PEER socket ignores `IMMEDIATE`; libzmq refuses `connect_peer` with it.
 
-Not yet: STREAM sockets and a poller (`zmq_poll`). Async code can wait on
-several sockets with its executor's `select!`.
+Not yet: STREAM sockets, and polling plain file descriptors beside sockets,
+which `zmq_poll` also does.
 
 ## Development
 

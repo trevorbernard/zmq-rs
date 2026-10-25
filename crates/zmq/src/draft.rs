@@ -1,6 +1,7 @@
 //! libzmq's draft socket types, behind the `draft` feature: their RFCs
 //! are drafts, so their API may change.
 
+use std::convert::Infallible;
 use std::fmt;
 use std::future;
 use std::num::NonZeroU32;
@@ -10,7 +11,7 @@ use std::time::Duration;
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
-use crate::socket::{Routing, SocketType, sealed};
+use crate::socket::{Receives, Routing, SocketType, WaitsForRoom, sealed};
 use crate::{Socket, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
@@ -79,12 +80,14 @@ impl sealed::Sealed for Radio {}
 impl SocketType for Radio {
     const KIND: zmtp::SocketType = zmtp::SocketType::Radio;
     type Routing = zmq_core::Radio;
+    type Received = Infallible;
 }
 
 impl sealed::Sealed for Dish {}
 impl SocketType for Dish {
     const KIND: zmtp::SocketType = zmtp::SocketType::Dish;
     type Routing = zmq_core::Dish;
+    type Received = (Group, Frame);
 }
 
 impl Socket<Radio> {
@@ -138,6 +141,9 @@ impl Socket<Dish> {
     }
 
     fn poll_recv_group(&mut self, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         let (peers, dish) = self.parts_accepting(cx);
         dish.poll_recv(peers, cx)
     }
@@ -147,12 +153,14 @@ impl sealed::Sealed for Client {}
 impl SocketType for Client {
     const KIND: zmtp::SocketType = zmtp::SocketType::Client;
     type Routing = ClientRouting;
+    type Received = Frame;
 }
 
 impl sealed::Sealed for Server {}
 impl SocketType for Server {
     const KIND: zmtp::SocketType = zmtp::SocketType::Server;
     type Routing = ServerTable;
+    type Received = (NonZeroU32, Frame);
 }
 
 impl ClientId {
@@ -234,6 +242,9 @@ impl Socket<Client> {
     }
 
     fn poll_recv_frame(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         let (peers, routing) = self.parts_accepting(cx);
         poll_single_part(peers, &mut routing.recv, cx)
     }
@@ -303,12 +314,14 @@ impl sealed::Sealed for Scatter {}
 impl SocketType for Scatter {
     const KIND: zmtp::SocketType = zmtp::SocketType::Scatter;
     type Routing = LoadBalancer;
+    type Received = Infallible;
 }
 
 impl sealed::Sealed for Gather {}
 impl SocketType for Gather {
     const KIND: zmtp::SocketType = zmtp::SocketType::Gather;
     type Routing = FairQueue;
+    type Received = Frame;
 }
 
 impl Socket<Scatter> {
@@ -379,6 +392,9 @@ impl Socket<Gather> {
     }
 
     fn poll_gather(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         let (peers, queue) = self.parts_accepting(cx);
         poll_single_part(peers, queue, cx)
     }
@@ -489,6 +505,7 @@ impl sealed::Sealed for Peer {}
 impl SocketType for Peer {
     const KIND: zmtp::SocketType = zmtp::SocketType::Peer;
     type Routing = ServerTable;
+    type Received = (NonZeroU32, Frame);
 }
 
 impl PeerId {
@@ -596,7 +613,7 @@ impl Socket<Peer> {
 
 // SERVER and PEER route the same way, by the ids their table gives peers.
 
-fn try_recv_routed<T: SocketType<Routing = ServerTable>>(
+fn try_recv_routed<T: SocketType<Routing = ServerTable, Received = (NonZeroU32, Frame)>>(
     socket: &mut Socket<T>,
 ) -> Option<(NonZeroU32, Frame)> {
     match poll_recv_routed(socket, &mut TaskContext::from_waker(Waker::noop())) {
@@ -605,10 +622,13 @@ fn try_recv_routed<T: SocketType<Routing = ServerTable>>(
     }
 }
 
-fn poll_recv_routed<T: SocketType<Routing = ServerTable>>(
+fn poll_recv_routed<T: SocketType<Routing = ServerTable, Received = (NonZeroU32, Frame)>>(
     socket: &mut Socket<T>,
     cx: &mut TaskContext<'_>,
 ) -> Poll<(NonZeroU32, Frame)> {
+    if let Some(received) = socket.take_pending() {
+        return Poll::Ready(received);
+    }
     let (peers, table) = socket.parts_accepting(cx);
     table.poll_recv(peers, cx)
 }
@@ -682,6 +702,7 @@ impl sealed::Sealed for Channel {}
 impl SocketType for Channel {
     const KIND: zmtp::SocketType = zmtp::SocketType::Channel;
     type Routing = zmq_core::Pair;
+    type Received = Frame;
 }
 
 impl Socket<Channel> {
@@ -760,6 +781,9 @@ impl Socket<Channel> {
     }
 
     fn poll_channel_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
         let (peers, pair) = self.parts_accepting(cx);
         loop {
             let Poll::Ready(message) = pair.poll_recv(peers, cx) else {
@@ -804,3 +828,63 @@ impl fmt::Display for NoSuchClient {
 }
 
 impl std::error::Error for NoSuchClient {}
+
+impl Receives for Dish {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
+        socket.poll_recv_group(cx)
+    }
+}
+
+impl Receives for Client {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        socket.poll_recv_frame(cx)
+    }
+}
+
+impl Receives for Server {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(NonZeroU32, Frame)> {
+        poll_recv_routed(socket, cx)
+    }
+}
+
+impl Receives for Gather {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        socket.poll_gather(cx)
+    }
+}
+
+impl Receives for Peer {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(NonZeroU32, Frame)> {
+        poll_recv_routed(socket, cx)
+    }
+}
+
+impl Receives for Channel {
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
+        socket.poll_channel_recv(cx)
+    }
+}
+
+impl WaitsForRoom for Client {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        let (peers, routing) = socket.parts_accepting(cx);
+        routing.send.poll_ready(peers, cx)
+    }
+}
+
+impl WaitsForRoom for Scatter {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        // As `poll_scatter`: SCATTER discards what peers send and drops
+        // those gone.
+        socket.prune_send_only();
+        let (peers, balancer) = socket.parts_accepting(cx);
+        balancer.poll_ready(peers, cx)
+    }
+}
+
+impl WaitsForRoom for Channel {
+    fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
+        let (peers, pair) = socket.parts_accepting(cx);
+        pair.poll_ready(peers, cx)
+    }
+}
