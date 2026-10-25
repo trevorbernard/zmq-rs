@@ -46,8 +46,12 @@ pub struct Replier {
 /// delimiter, which a reply must carry back.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Envelope {
+    /// Empty, and so unallocated, for the delimiter alone: a request
+    /// straight from a REQ.
     frames: Vec<Frame>,
 }
+
+static DELIMITER: [Frame; 1] = [Frame::new()];
 
 /// A request received by a REP: the peer, the envelope and the body.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -177,9 +181,9 @@ impl Replier {
         let Some(peer) = peers.get_mut(peer) else {
             return RouteOutcome::NoSuchPeer;
         };
-        // An envelope always ends with its delimiter, so it is never empty.
-        let Ok(mut message) = Message::try_from(envelope.frames) else {
-            return RouteOutcome::NoSuchPeer;
+        let mut message = match Message::try_from(envelope.frames) {
+            Ok(message) => message,
+            Err(_) => Message::new(Frame::new()),
         };
         message.extend(reply);
         match peer.connection.tx.try_send(message) {
@@ -202,29 +206,46 @@ fn unwrap_reply(reply: Message, id: Option<[u8; 4]>) -> Option<Message> {
     if !frames.next()?.is_empty() {
         return None;
     }
-    Message::try_from(frames.collect::<Vec<_>>()).ok()
+    collect(frames)
 }
 
 /// Splits a request at its first empty frame. `None` if there is no
 /// delimiter or nothing follows it.
 fn split_envelope(request: Message) -> Option<(Envelope, Message)> {
     let mut frames = request.into_iter();
-    let mut envelope = Vec::new();
+    let first = frames.next()?;
+    if first.is_empty() {
+        let body = collect(frames)?;
+        return Some((Envelope { frames: Vec::new() }, body));
+    }
+    let mut envelope = vec![first];
     for frame in frames.by_ref() {
         let delimiter = frame.is_empty();
         envelope.push(frame);
         if delimiter {
-            let body = Message::try_from(frames.collect::<Vec<_>>()).ok()?;
+            let body = collect(frames)?;
             return Some((Envelope { frames: envelope }, body));
         }
     }
     None
 }
 
+/// The frames as a message, without collecting them first. `None` if
+/// there are none.
+fn collect(mut frames: impl Iterator<Item = Frame>) -> Option<Message> {
+    let mut message = Message::new(frames.next()?);
+    message.extend(frames);
+    Some(message)
+}
+
 impl Envelope {
     /// The envelope's frames, ending with the empty delimiter.
     pub fn frames(&self) -> &[Frame] {
-        &self.frames
+        if self.frames.is_empty() {
+            &DELIMITER
+        } else {
+            &self.frames
+        }
     }
 }
 
