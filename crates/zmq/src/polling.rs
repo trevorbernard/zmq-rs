@@ -17,6 +17,8 @@ pub struct PollItem<'a> {
 enum Target<'a> {
     Readable(&'a mut dyn PollReadable),
     Writable(&'a mut dyn PollWritable),
+    /// Left out by [`PollItem::when`]: never ready.
+    Skipped,
 }
 
 /// A socket that can be polled until a receive would not wait.
@@ -32,6 +34,40 @@ pub(crate) trait PollWritable {
 }
 
 impl<'a> PollItem<'a> {
+    /// This item if `condition` holds, and otherwise one that is never
+    /// ready, so that a loop can wait on a socket only while it is wanted:
+    ///
+    /// ```
+    /// # use zmq::{Context, Dealer, Router};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let context = Context::new()?;
+    /// # let mut frontend = context.socket::<Router>();
+    /// # let mut backend = context.socket::<Router>();
+    /// # let mut idle = context.socket::<Dealer>();
+    /// # frontend.bind("inproc://frontend")?;
+    /// # idle.connect("inproc://frontend")?;
+    /// # idle.send("request");
+    /// let workers_free = false;
+    /// // Take requests only while a worker is free to handle them.
+    /// let ready = zmq::poll_timeout(
+    ///     [backend.readable(), frontend.readable().when(workers_free)],
+    ///     std::time::Duration::from_millis(10),
+    /// );
+    /// assert_eq!(ready, None);
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[must_use]
+    pub fn when(self, condition: bool) -> Self {
+        if condition {
+            self
+        } else {
+            Self {
+                target: Target::Skipped,
+            }
+        }
+    }
+
     pub(crate) fn readable(socket: &'a mut dyn PollReadable) -> Self {
         Self {
             target: Target::Readable(socket),
@@ -48,6 +84,7 @@ impl<'a> PollItem<'a> {
         match &mut self.target {
             Target::Readable(socket) => socket.poll_readable(cx),
             Target::Writable(socket) => socket.poll_writable(cx),
+            Target::Skipped => Poll::Pending,
         }
     }
 }
@@ -57,6 +94,7 @@ impl fmt::Debug for PollItem<'_> {
         let interest = match self.target {
             Target::Readable(_) => "readable",
             Target::Writable(_) => "writable",
+            Target::Skipped => "skipped",
         };
         f.debug_tuple("PollItem").field(&interest).finish()
     }
