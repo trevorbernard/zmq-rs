@@ -260,10 +260,10 @@ which `zmq_poll` also does.
 
 ```sh
 nix develop        # or `direnv allow`
-cargo test --workspace
-nix flake check    # tests, clippy, rustfmt
-cargo bench -p zmq-pipe   # pipe throughput, one process per measurement
-cargo bench -p zmq-interop --bench perf   # throughput and latency next to libzmq
+just               # lists the workflows
+just ci            # rustfmt, clippy, tests, as CI runs them
+just perf          # throughput and latency next to libzmq
+nix flake check    # tests, clippy, rustfmt, as Nix builds them
 ```
 
 ## Layout

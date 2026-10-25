@@ -1,0 +1,58 @@
+# Run inside the dev shell (`nix develop` or direnv), which provides the
+# toolchain, nextest, libzmq and the legacy libzmq peers.
+
+[private]
+default:
+    @just --list
+
+# Everything CI checks.
+ci: fmt-check clippy test
+
+# Tests; arguments filter, as for nextest. Doctests run only unfiltered.
+test *args:
+    cargo nextest run --workspace --all-features {{args}}
+    {{ if args == "" { "cargo test --workspace --all-features --doc" } else { "" } }}
+
+# Interop tests against libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0).
+test-legacy *args:
+    cargo nextest run -p zmq-interop --test legacy_peers {{args}}
+
+fmt:
+    cargo fmt --all
+
+fmt-check:
+    cargo fmt --all --check
+
+clippy:
+    cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+audit:
+    cargo audit
+
+# Tests, clippy and rustfmt, as Nix builds them.
+flake-check:
+    nix flake check
+
+# Throughput and latency next to libzmq; `just perf -- --quick` to smoke test.
+perf *args:
+    cargo bench -p zmq-interop --bench perf {{args}}
+
+# Patterns under load next to libzmq.
+scenarios *args:
+    cargo bench -p zmq-interop --bench scenarios {{args}}
+
+# Micro benchmarks: pipe (zmq-pipe), fanout or fairqueue (zmq-core).
+bench name *args:
+    cargo bench -p {{ if name == "pipe" { "zmq-pipe" } else { "zmq-core --bench " + name } }} {{args}}
+
+# A guide example, e.g. `just example hwserver`.
+example name *args:
+    cargo run -p zguide --bin {{name}} -- {{args}}
+
+# Writes the fuzz seed corpora; `just fuzz-seed --fetch` adds libzmq's.
+fuzz-seed *args:
+    nix develop .#fuzz -c ./fuzz/seed.sh {{args}}
+
+# Fuzzes a zmtp target, e.g. `just fuzz null_handshake`.
+fuzz target *args:
+    cd fuzz && nix develop ..#fuzz -c cargo fuzz run {{target}} -- -dict=zmtp.dict {{args}}

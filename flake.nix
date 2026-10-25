@@ -90,6 +90,7 @@
             rust
             pkgs.cargo-audit
             pkgs.cargo-nextest
+            pkgs.just
             pkgs.git
             pkgs.pkg-config
             pkgs.zeromq # reference libzmq for interop tests
