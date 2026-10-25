@@ -79,8 +79,13 @@
     devShells = forEachSupportedSystem (
       {pkgs}: let
         rust = toolchainFor pkgs;
+        legacy = pkgs.callPackage ./nix/legacy-zeromq.nix {};
       in {
         default = pkgs.mkShell {
+          # Peers on libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0), for the
+          # interop tests of downgrading. They skip without these.
+          ZMQ_LEGACY_PEER_2 = "${legacy.peer2}/bin/zmq-legacy-peer";
+          ZMQ_LEGACY_PEER_3 = "${legacy.peer3}/bin/zmq-legacy-peer";
           nativeBuildInputs = [
             rust
             pkgs.cargo-audit
