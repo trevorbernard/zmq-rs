@@ -23,6 +23,7 @@
 //! a smoke test.
 
 use std::env;
+use std::hint;
 use std::io::Read;
 use std::path::PathBuf;
 use std::process::{self, Child, Command, Stdio};
@@ -579,11 +580,22 @@ fn throughput(case: Case, count: usize) -> f64 {
     // off in the wrapper, so dropping it early would discard what it queued.
     let sending = thread::spawn(move || match sender {
         End::Ours(mut push) => {
-            // Copied into each message, which holds a small payload inline
-            // as libzmq does, where a vector would allocate and be freed.
-            let payload = vec![0; size];
+            // Built as libzmq's sender builds its own: a small payload
+            // copied inline, where a vector would allocate and be freed,
+            // and a larger one allocated and zeroed in place. A copy costs
+            // more than zeroing on Apple Silicon, which zeroes cache lines
+            // without reading them, and `black_box` keeps the zeroing from
+            // becoming a calloc, which may hand back zeroed pages unwritten.
+            let small = vec![0; size.min(Frame::INLINE_CAPACITY)];
             for _ in 0..count {
-                push.send(Message::from(Frame::copy_from_slice(&payload)));
+                let frame = if size <= Frame::INLINE_CAPACITY {
+                    Frame::copy_from_slice(&small)
+                } else {
+                    let mut payload = Vec::with_capacity(size);
+                    payload.resize(size, hint::black_box(0));
+                    Frame::from(payload)
+                };
+                push.send(Message::from(frame));
             }
             End::Ours(push)
         }
