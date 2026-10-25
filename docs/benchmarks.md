@@ -171,12 +171,12 @@ ipc 64 KiB (1.05).
 ## Results: Linux, Intel Xeon
 
 Intel Xeon E5-1650 v4 (6 cores, 12 threads, 64 GB), Linux 6.18, the
-`schedutil` governor, libzmq 4.3.5 from nixpkgs, commit `f3e7a19`.
+`schedutil` governor, libzmq 4.3.5 from nixpkgs, commit `b523aec`.
 2026-10-25.
 
 Our throughput is ahead or level everywhere. Our latency is lower
-everywhere except ipc at 64 KiB (0.90), whose runs overlap: ours has
-the same median as in earlier runs, 51 µs, and libzmq's spans 45–75.
+everywhere except tcp at 256 B (0.90), whose runs overlap: ours spans
+21–46 µs and libzmq's 27–69.
 
 ### Throughput, msg/s (Mb/s)
 
@@ -184,28 +184,28 @@ the same median as in earlier runs, 51 µs, and libzmq's spans 45–75.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 10.29M [9.46M–11.06M] (659) | 6.44M [6.05M–6.72M] (412) | 6.77M | 6.47M | 1.60 |
-| 256 B | 2.06M [2.00M–2.15M] (4221) | 1.61M [1.56M–1.62M] (3297) | 2.14M | 1.57M | 1.28 |
-| 4 KiB | 498.8k [471.4k–527.4k] (16345) | 282.4k [257.8k–351.7k] (9254) | 500.3k | 243.7k | 1.77 |
-| 64 KiB | 36.4k [34.3k–37.0k] (19076) | 35.9k [35.0k–36.4k] (18830) | 36.5k | 36.8k | 1.01 |
+| 8 B | 12.23M [10.32M–12.39M] (783) | 5.80M [5.73M–6.34M] (371) | 6.36M | 5.83M | 2.11 |
+| 256 B | 2.07M [1.94M–2.15M] (4245) | 1.56M [1.48M–1.63M] (3187) | 2.12M | 1.56M | 1.33 |
+| 4 KiB | 499.9k [488.6k–540.3k] (16380) | 266.7k [254.5k–377.9k] (8740) | 503.6k | 246.2k | 1.87 |
+| 64 KiB | 36.1k [34.9k–37.3k] (18924) | 35.7k [35.5k–36.1k] (18717) | 37.1k | 36.5k | 1.01 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 9.26M [8.77M–10.09M] (593) | 5.90M [5.50M–6.13M] (378) | 6.75M | 6.05M | 1.57 |
-| 256 B | 2.08M [2.06M–2.10M] (4267) | 1.99M [1.93M–2.00M] (4074) | 2.09M | 1.93M | 1.05 |
-| 4 KiB | 603.6k [586.5k–607.6k] (19779) | 445.5k [441.2k–449.1k] (14597) | 543.6k | 478.8k | 1.36 |
-| 64 KiB | 60.1k [58.5k–60.5k] (31491) | 48.1k [47.3k–49.7k] (25213) | 59.2k | 44.4k | 1.25 |
+| 8 B | 10.50M [9.58M–10.97M] (672) | 6.27M [5.88M–6.69M] (401) | 6.51M | 6.68M | 1.67 |
+| 256 B | 2.08M [2.07M–2.13M] (4268) | 2.08M [2.02M–2.12M] (4266) | 2.15M | 2.06M | 1.00 |
+| 4 KiB | 587.3k [569.9k–604.6k] (19245) | 445.3k [434.1k–450.9k] (14592) | 537.5k | 478.7k | 1.32 |
+| 64 KiB | 60.4k [57.4k–61.2k] (31682) | 49.1k [48.6k–49.2k] (25761) | 59.9k | 43.6k | 1.23 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 11.45M [10.09M–11.89M] (733) | 5.91M [5.81M–6.24M] (378) | 1.94 |
-| 256 B | 1.95M [1.88M–1.99M] (3997) | 1.92M [1.84M–1.94M] (3928) | 1.02 |
-| 4 KiB | 1.34M [1.31M–1.48M] (43839) | 1.34M [1.30M–1.41M] (43878) | 1.00 |
-| 64 KiB | 337.4k [332.6k–346.7k] (176918) | 346.5k [335.7k–351.7k] (181644) | 0.97 |
+| 8 B | 13.36M [11.44M–14.56M] (855) | 6.35M [6.27M–6.52M] (407) | 2.10 |
+| 256 B | 2.05M [1.99M–2.07M] (4204) | 1.92M [1.85M–1.93M] (3922) | 1.07 |
+| 4 KiB | 1.33M [1.32M–1.44M] (43477) | 1.32M [1.24M–1.34M] (43212) | 1.01 |
+| 64 KiB | 334.9k [328.3k–338.3k] (175566) | 344.2k [336.0k–355.1k] (180438) | 0.97 |
 
 ### Latency, one-way µs (p50/p99)
 
@@ -213,31 +213,49 @@ the same median as in earlier runs, 51 µs, and libzmq's spans 45–75.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 28.3 [24.2–34.3] (22.9/56.2) | 47.3 [34.0–63.5] (45.6/85.3) | 51.5 | 34.7 | 1.67 |
-| 256 B | 39.9 [24.1–49.1] (36.6/64.7) | 59.6 [55.3–75.0] (71.6/85.9) | 54.2 | 58.1 | 1.50 |
-| 4 KiB | 49.4 [33.9–54.6] (52.5/67.5) | 66.6 [65.3–77.1] (73.3/94.0) | 56.5 | 61.5 | 1.35 |
-| 64 KiB | 97.5 [80.3–104.5] (99.2/133.0) | 126.6 [84.6–146.0] (128.4/193.3) | 111.5 | 121.7 | 1.30 |
+| 8 B | 25.4 [20.6–40.5] (22.9/43.4) | 54.2 [46.9–69.3] (50.4/85.6) | 49.4 | 54.2 | 2.14 |
+| 256 B | 41.5 [21.2–45.8] (44.8/59.4) | 37.3 [26.9–68.8] (29.5/80.7) | 41.4 | 50.8 | 0.90 |
+| 4 KiB | 51.0 [25.5–53.1] (55.5/69.3) | 71.7 [57.8–78.8] (76.2/93.4) | 28.8 | 55.4 | 1.41 |
+| 64 KiB | 78.4 [57.6–105.0] (74.5/123.6) | 146.9 [102.9–155.4] (154.7/198.0) | 105.1 | 124.3 | 1.87 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 27.2 [15.4–28.2] (26.4/37.6) | 38.4 [29.1–47.2] (41.7/61.1) | 23.4 | 25.0 | 1.41 |
-| 256 B | 20.6 [14.2–27.9] (20.2/32.9) | 40.4 [36.4–47.1] (43.2/65.1) | 26.1 | 26.4 | 1.96 |
-| 4 KiB | 30.7 [18.4–33.9] (31.0/40.5) | 48.9 [42.4–56.6] (57.6/72.0) | 26.9 | 28.4 | 1.59 |
-| 64 KiB | 50.9 [32.3–62.8] (50.9/64.6) | 46.0 [44.7–75.1] (45.8/60.5) | 51.8 | 44.8 | 0.90 |
+| 8 B | 20.8 [18.6–26.6] (19.4/29.7) | 36.7 [32.3–46.2] (29.9/66.6) | 30.7 | 30.4 | 1.77 |
+| 256 B | 25.0 [20.1–25.6] (25.5/31.1) | 46.4 [41.0–52.7] (52.4/63.8) | 40.4 | 31.6 | 1.86 |
+| 4 KiB | 19.3 [17.0–26.7] (19.2/26.5) | 47.6 [26.7–50.8] (56.5/71.1) | 32.2 | 25.2 | 2.46 |
+| 64 KiB | 34.4 [31.9–51.8] (33.8/44.6) | 42.9 [39.9–69.1] (38.9/67.4) | 49.9 | 45.6 | 1.25 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 4.6 [4.0–5.6] (4.5/6.2) | 8.8 [6.9–11.2] (8.3/13.7) | 1.93 |
-| 256 B | 4.7 [4.0–5.6] (4.5/6.5) | 10.3 [7.1–11.5] (10.3/12.8) | 2.20 |
-| 4 KiB | 4.6 [4.3–5.3] (4.5/6.0) | 9.5 [7.0–11.3] (9.4/12.4) | 2.05 |
-| 64 KiB | 4.6 [3.6–4.7] (4.4/6.0) | 7.5 [6.9–9.7] (7.3/11.5) | 1.64 |
+| 8 B | 4.4 [3.4–5.9] (4.1/8.8) | 10.9 [6.5–12.2] (11.0/14.6) | 2.49 |
+| 256 B | 5.1 [4.1–5.3] (5.0/7.0) | 10.1 [6.8–12.1] (9.9/13.0) | 1.99 |
+| 4 KiB | 4.9 [4.6–5.2] (4.8/6.1) | 9.6 [6.7–10.8] (9.5/12.1) | 1.98 |
+| 64 KiB | 4.4 [3.5–4.6] (4.2/10.7) | 8.5 [6.8–9.6] (8.0/12.8) | 1.93 |
 
 ### Reading them
 
+- **Against `f3e7a19`,** our 8 B throughput rose 19% over tcp (10.29M
+  to 12.23M msg/s), 13% over ipc and 17% over inproc, as each sender
+  stopped building its payload in a vector the frame then copied inline
+  (`eabb8ce`). libzmq's tcp 8 B read 10% lower than then (6.44M to
+  5.80M), within its usual spread, so that ratio moved more, from 1.60
+  to 2.11. Other cases are within run-to-run spread.
+- **`curve/64k` is 6% slower than before keepalive, on layout.**
+  `501448b` grew `ConnectionConfig`, which each `Engine` holds first, by
+  40 octets of keepalive options, moving every hot field after it: the
+  CURVE codec, the decoder and the output. In three interleaved rounds
+  each, `curve/64k` fell from 13.0k msg/s at `463fd53` to 11.2k, and
+  read 12.2k with `Engine` aligned to 128 octets (`414ee4f`). In four
+  more, `463fd53` against `09d7939` read 13.25k against 12.45k (medians).
+  Boxing the config, which holds the hot fields where they were, brings
+  it back to 13.2k, but costs 9% at 8 B over tcp and 15% over ipc, the
+  rest of the layout moving with it, so it is not done. Laying out
+  `Engine`'s hot fields deliberately would make both independent of the
+  config's size.
 - **Pipes used to be std's `mpsc`,** a multi-producer list doing two
   read-modify-writes per send and per receive, with a 1992 B block
   allocated every 31 items and freed on the other thread. The chunked
@@ -310,23 +328,23 @@ cargo bench -p zmq-interop --bench scenarios -- fanin  # cases whose name contai
 Each case runs in a fresh process, once to warm up and then five
 rounds; the table gives medians.
 
-### Results: Linux, Intel Xeon (`f3e7a19`)
+### Results: Linux, Intel Xeon (`b523aec`)
 
 On the Xeon above:
 
 | Case | ours msg/s | libzmq msg/s | ours/libzmq |
 |---|---|---|---|
-| multipart/2 | 2.80M | 2.01M | 1.39 |
-| multipart/8 | 563.5k | 539.5k | 1.04 |
-| fanout/1 | 4.14M | 3.63M | 1.14 |
-| fanout/4 | 1.79M | 1.36M | 1.31 |
-| fanout/16 | 563.7k | 353.9k | 1.59 |
-| fanin/16 | 3.97M | 2.54M | 1.56 |
-| fanin/64 | 3.36M | 2.53M | 1.33 |
-| router/1 | 2.21M | 1.56M | 1.42 |
-| router/16 | 3.97M | 2.56M | 1.55 |
-| curve/256 | 685.0k | 656.1k | 1.04 |
-| curve/64k | 13.2k | 11.6k | 1.13 |
+| multipart/2 | 2.81M | 2.04M | 1.38 |
+| multipart/8 | 554.3k | 536.8k | 1.03 |
+| fanout/1 | 3.98M | 3.65M | 1.09 |
+| fanout/4 | 1.81M | 1.48M | 1.22 |
+| fanout/16 | 549.1k | 354.2k | 1.55 |
+| fanin/16 | 3.85M | 2.56M | 1.50 |
+| fanin/64 | 3.04M | 2.41M | 1.26 |
+| router/1 | 2.13M | 1.56M | 1.36 |
+| router/16 | 3.91M | 2.54M | 1.54 |
+| curve/256 | 684.3k | 655.5k | 1.04 |
+| curve/64k | 12.7k | 11.6k | 1.10 |
 
 ### Results: Apple M1 Pro (`414ee4f`)
 
