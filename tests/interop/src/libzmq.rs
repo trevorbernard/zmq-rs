@@ -150,6 +150,7 @@ struct RawContext(NonNull<c_void>);
 
 // SAFETY: a libzmq context is thread-safe.
 unsafe impl Send for RawContext {}
+// SAFETY: as above.
 unsafe impl Sync for RawContext {}
 
 impl Context {

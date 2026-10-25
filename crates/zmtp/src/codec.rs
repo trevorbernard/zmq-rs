@@ -67,7 +67,11 @@ pub enum DecodeError {
     /// The message, counting its frames so far, is larger than
     /// [`DecoderConfig::max_message_size`], or a frame is larger than this
     /// platform can address.
-    MessageTooLarge { size: u64 },
+    MessageTooLarge {
+        /// Octets in the message so far, counting the frame that crossed
+        /// the limit.
+        size: u64,
+    },
     /// A ZMTP 1.0 frame length of zero, which cannot hold the flags octet.
     ZeroLength,
     /// A ZMTP 2.0/3.x long size with the top bit set (RFC 37 caps it at

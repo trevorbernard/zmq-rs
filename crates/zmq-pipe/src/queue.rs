@@ -243,6 +243,8 @@ impl<T> Drop for Shared<T> {
             if is_last_slot(position) {
                 // SAFETY: as in `Consumer::pop`; no other thread is left.
                 let next = unsafe { (*chunk).next.load(Ordering::Relaxed) };
+                // SAFETY: its last item was just dropped, and nothing else
+                // links to it.
                 drop(unsafe { Box::from_raw(chunk) });
                 chunk = next;
             }

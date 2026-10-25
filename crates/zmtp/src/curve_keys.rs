@@ -48,6 +48,7 @@ impl PublicKey {
     }
 
     /// The 40-character Z85 form.
+    #[must_use]
     pub fn to_z85(&self) -> String {
         z85::encode(&self.0).expect("32 octets are whole Z85 groups")
     }
@@ -91,6 +92,7 @@ impl Keypair {
     }
 
     /// The public half.
+    #[must_use]
     pub fn public(&self) -> PublicKey {
         self.public
     }

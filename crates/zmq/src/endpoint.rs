@@ -37,6 +37,7 @@ pub enum Endpoint {
 
 impl Endpoint {
     /// The TCP address, for a TCP endpoint.
+    #[must_use]
     pub fn tcp_addr(&self) -> Option<SocketAddr> {
         match self {
             Self::Tcp(addr) => Some(*addr),

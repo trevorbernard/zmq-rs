@@ -89,11 +89,13 @@ impl PeerList {
     }
 
     /// How many peers there are.
+    #[must_use]
     pub fn len(&self) -> usize {
         self.peers.len()
     }
 
     /// Whether there are no peers.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.peers.is_empty()
     }
@@ -666,6 +668,7 @@ impl RouterTable {
     }
 
     /// The routing id of `peer`, if it has been identified and not ignored.
+    #[must_use]
     pub fn routing_id(&self, peer: PeerKey) -> Option<&Frame> {
         match self.by_peer.get(&peer) {
             Some(Route::Routable(routing_id)) => Some(routing_id),

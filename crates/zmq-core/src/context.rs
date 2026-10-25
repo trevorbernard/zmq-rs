@@ -201,6 +201,7 @@ pub struct Listener {
 
 impl Listener {
     /// The bound address, with the actual port when binding to port 0.
+    #[must_use]
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
     }
@@ -373,6 +374,8 @@ fn pair(
     {
         return None;
     }
+    // Poisoning is ignored: each lock only stores a value, which a panic
+    // cannot leave half done.
     *server.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(client_config));
     *client.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(server_config));
     Some(server)

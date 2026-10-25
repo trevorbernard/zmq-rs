@@ -53,8 +53,11 @@ pub enum ZapReply {
 /// Why authentication failed, as reported by [`ZapReply`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ZapFailure {
+    /// 300: try again later.
     Temporary,
+    /// 400: the credentials were rejected.
     Denied,
+    /// 500: the authenticator failed.
     Internal,
 }
 

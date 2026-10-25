@@ -61,6 +61,7 @@ pub enum PeerGreeting {
     Zmtp3 {
         major: u8,
         minor: u8,
+        /// Whether the peer claims the server role of PLAIN or CURVE.
         as_server: bool,
     },
 }
@@ -89,7 +90,10 @@ pub enum GreetingError {
     /// did not exist before ZMTP 3.x.
     LegacyPeerRefused,
     /// The peer announced a different security mechanism.
-    MechanismMismatch { peer: [u8; MECHANISM_LEN] },
+    MechanismMismatch {
+        /// The peer's mechanism name, NUL-padded as on the wire.
+        peer: [u8; MECHANISM_LEN],
+    },
 }
 
 /// `FF`, eight padding octets, `7F`.

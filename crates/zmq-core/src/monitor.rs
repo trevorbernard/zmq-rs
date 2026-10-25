@@ -116,6 +116,8 @@ impl MonitorSink {
         }
     }
 
+    /// Ignores poisoning: a panic mid-`retain` or mid-send can at worst
+    /// leave a closed monitor in the list, which the next `emit` drops.
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Writer<Event>>> {
         self.monitors.lock().unwrap_or_else(PoisonError::into_inner)
     }

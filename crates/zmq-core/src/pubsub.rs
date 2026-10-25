@@ -45,12 +45,14 @@ impl Topics {
     }
 
     /// Whether `topic` is subscribed.
+    #[must_use]
     pub fn contains(&self, topic: &[u8]) -> bool {
         self.0.get(topic).is_some()
     }
 
     /// Whether a message whose first frame is `data` is wanted: some topic
     /// is a prefix of it.
+    #[must_use]
     pub fn matches(&self, data: &[u8]) -> bool {
         self.0.prefixes_of(data).next().is_some()
     }
@@ -61,6 +63,7 @@ impl Topics {
     }
 
     /// Whether nothing is subscribed.
+    #[must_use]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

@@ -632,7 +632,8 @@ impl Engine {
                         .map(|heartbeat| Instant::now() + heartbeat.interval);
                 }
                 // Published before any message from this peer can be
-                // delivered, so a ROUTER always knows who sent it.
+                // delivered, so a ROUTER always knows who sent it. Poisoning
+                // is ignored: storing a value cannot be left half done.
                 *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
                 let encoder = Encoder::new(version);
                 // A SUB's topics, or a DISH's groups.

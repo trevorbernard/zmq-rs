@@ -2,7 +2,7 @@
 //! are drafts, so their API may change.
 
 use std::fmt;
-use std::future::poll_fn;
+use std::future;
 use std::num::NonZeroU32;
 use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
@@ -134,7 +134,7 @@ impl Socket<Dish> {
 
     /// The next message and its group, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (Group, Frame) {
-        poll_fn(|cx| self.poll_recv_group(cx)).await
+        future::poll_fn(|cx| self.poll_recv_group(cx)).await
     }
 
     fn poll_recv_group(&mut self, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
@@ -198,7 +198,7 @@ impl Socket<Client> {
     /// Sends `frame`, waiting while no server has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
-        poll_fn(|cx| self.poll_send_frame(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_send_frame(&mut slot, cx)).await;
     }
 
     /// The next message, if one is waiting.
@@ -221,7 +221,7 @@ impl Socket<Client> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        poll_fn(|cx| self.poll_recv_frame(cx)).await
+        future::poll_fn(|cx| self.poll_recv_frame(cx)).await
     }
 
     fn poll_send_frame(
@@ -342,7 +342,7 @@ impl Socket<Scatter> {
     /// Sends `frame`, waiting while no gather has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
-        poll_fn(|cx| self.poll_scatter(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_scatter(&mut slot, cx)).await;
     }
 
     fn poll_scatter(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
@@ -375,7 +375,7 @@ impl Socket<Gather> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        poll_fn(|cx| self.poll_gather(cx)).await
+        future::poll_fn(|cx| self.poll_gather(cx)).await
     }
 
     fn poll_gather(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
@@ -407,7 +407,7 @@ impl Socket<Server> {
 
     /// The next message and its sender's id, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (ClientId, Frame) {
-        let (id, frame) = poll_fn(|cx| poll_recv_routed(self, cx)).await;
+        let (id, frame) = future::poll_fn(|cx| poll_recv_routed(self, cx)).await;
         (ClientId(id), frame)
     }
 
@@ -447,7 +447,7 @@ impl Socket<Server> {
         frame: impl Into<Frame>,
     ) -> Result<(), NoSuchClient> {
         let mut slot = Some(frame.into());
-        poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
+        future::poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
             .await
             .map_err(NoSuchClient)
     }
@@ -540,7 +540,7 @@ impl Socket<Peer> {
 
     /// The next message and its sender's id, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (PeerId, Frame) {
-        let (id, frame) = poll_fn(|cx| poll_recv_routed(self, cx)).await;
+        let (id, frame) = future::poll_fn(|cx| poll_recv_routed(self, cx)).await;
         (PeerId(id), frame)
     }
 
@@ -582,7 +582,7 @@ impl Socket<Peer> {
         frame: impl Into<Frame>,
     ) -> Result<(), NoSuchPeer> {
         let mut slot = Some(frame.into());
-        poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
+        future::poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
             .await
             .map_err(NoSuchPeer)
     }
@@ -715,7 +715,7 @@ impl Socket<Channel> {
     /// Sends `frame`, waiting until there is a peer with room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
         let mut slot = Some(Message::new(frame.into()));
-        poll_fn(|cx| self.poll_channel_send(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_channel_send(&mut slot, cx)).await;
     }
 
     /// The next message, if one is waiting.
@@ -738,7 +738,7 @@ impl Socket<Channel> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        poll_fn(|cx| self.poll_channel_recv(cx)).await
+        future::poll_fn(|cx| self.poll_channel_recv(cx)).await
     }
 
     fn poll_channel_send(

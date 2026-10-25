@@ -9,7 +9,7 @@
 //! rather than after every message.
 
 use std::fmt;
-use std::future::poll_fn;
+use std::future;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::atomic::{self, AtomicBool, AtomicU64, Ordering};
@@ -92,6 +92,8 @@ enum Receiver<T> {
     Latest(Arc<Mutex<Option<T>>>),
 }
 
+/// Ignores poisoning: the slot is only ever replaced or taken whole, so a
+/// panic while holding the lock cannot leave it half updated.
 fn lock<T>(slot: &Mutex<Option<T>>) -> std::sync::MutexGuard<'_, Option<T>> {
     slot.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -235,7 +237,7 @@ impl<T> Writer<T> {
     /// Queues `item`, waiting while the pipe is full.
     pub async fn send(&mut self, mut item: T) -> Result<(), Closed<T>> {
         loop {
-            if poll_fn(|cx| self.poll_ready(cx)).await.is_err() {
+            if future::poll_fn(|cx| self.poll_ready(cx)).await.is_err() {
                 return Err(Closed(item));
             }
             match self.try_send(item) {
@@ -277,10 +279,11 @@ impl<T> Writer<T> {
 
     /// Waits until the reader is gone.
     pub async fn closed(&mut self) {
-        poll_fn(|cx| self.poll_closed(cx)).await;
+        future::poll_fn(|cx| self.poll_closed(cx)).await;
     }
 
     /// Whether the reader is gone.
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.shared.reader_closed.load(Ordering::Acquire)
     }
@@ -376,12 +379,14 @@ impl<T> Reader<T> {
     }
 
     /// Whether the writer is gone. Items it sent may still be queued.
+    #[must_use]
     pub fn is_closed(&self) -> bool {
         self.shared.writer_closed.load(Ordering::Acquire)
     }
 
     /// Whether the writer is gone and every item it sent has been taken,
     /// found without taking one.
+    #[must_use]
     pub fn is_drained(&self) -> bool {
         // Acquire pairs with the writer's release, publishing its count.
         if !self.is_closed() {
@@ -409,7 +414,7 @@ impl<T> Reader<T> {
 
     /// The next item, waiting while the pipe is empty.
     pub async fn recv(&mut self) -> Option<T> {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     /// The next item, blocking the thread while the pipe is empty.

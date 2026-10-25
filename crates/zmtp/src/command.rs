@@ -95,6 +95,7 @@ pub enum InvalidGroup {
 pub enum InvalidName {
     Empty,
     TooLong,
+    /// An octet outside RFC 37's `A-Za-z0-9-_.+`.
     Character(u8),
 }
 
@@ -282,11 +283,13 @@ impl Ttl {
     }
 
     /// Tenths of a second.
+    #[must_use]
     pub const fn deciseconds(self) -> u16 {
         self.0
     }
 
     /// The time-to-live as a `Duration`.
+    #[must_use]
     pub fn as_duration(self) -> Duration {
         Duration::from_millis(u64::from(self.0) * 100)
     }

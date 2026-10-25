@@ -49,6 +49,7 @@ impl SocketType {
     ];
 
     /// The `Socket-Type` property value (RFC 23, 37).
+    #[must_use]
     pub const fn name(self) -> &'static str {
         match self {
             Self::Pair => "PAIR",
@@ -74,6 +75,7 @@ impl SocketType {
     }
 
     /// Parses a `Socket-Type` property value. Names are case-sensitive.
+    #[must_use]
     pub fn from_name(name: &[u8]) -> Option<Self> {
         Self::ALL
             .into_iter()
@@ -82,6 +84,7 @@ impl SocketType {
 
     /// Decodes a ZMTP 1.0/2.0 greeting socket-type octet. Accepts RFC 15's
     /// codes and libzmq's, which sends 9 and 10 for XPUB and XSUB.
+    #[must_use]
     pub const fn from_legacy_code(code: u8) -> Option<Self> {
         match code {
             0 => Some(Self::Pair),
@@ -101,6 +104,7 @@ impl SocketType {
 
     /// Whether a peer of type `peer` may connect to this socket, per RFC 23/37
     /// and libzmq (which also allows DEALER to DEALER).
+    #[must_use]
     pub const fn accepts(self, peer: Self) -> bool {
         use SocketType::*;
         matches!(
@@ -126,6 +130,7 @@ impl SocketType {
     }
 
     /// Whether READY carries this socket's `Identity` (REQ, DEALER, ROUTER).
+    #[must_use]
     pub const fn sends_identity(self) -> bool {
         matches!(self, Self::Req | Self::Dealer | Self::Router)
     }
@@ -134,6 +139,7 @@ impl SocketType {
     /// for types that did not exist before ZMTP 3.x.
     ///
     /// XPUB and XSUB are sent as PUB and SUB, as RFC 15 requires.
+    #[must_use]
     pub const fn legacy_code(self) -> Option<u8> {
         match self {
             Self::Pair => Some(0),

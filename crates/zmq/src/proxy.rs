@@ -289,6 +289,7 @@ impl ProxyControl {
     }
 
     /// What the proxy has moved so far.
+    #[must_use]
     pub fn statistics(&self) -> ProxyStatistics {
         let read = |i: usize| self.shared.counters[i].load(Ordering::Relaxed);
         let count = |i: usize| Count {

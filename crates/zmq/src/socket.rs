@@ -1,7 +1,7 @@
 //! Typed sockets: each type has only the operations its pattern allows.
 
 use std::fmt;
-use std::future::poll_fn;
+use std::future;
 use std::marker::PhantomData;
 use std::task::{Context as TaskContext, Poll, Waker};
 use std::time::Duration;
@@ -466,7 +466,7 @@ impl Socket<Push> {
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
     }
 
     pub(crate) fn poll_send(
@@ -511,7 +511,7 @@ impl Socket<Pair> {
     /// Sends `message`, waiting until there is a peer with room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
     }
 
     /// The next message, if one is waiting.
@@ -531,7 +531,7 @@ impl Socket<Pair> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_send(
@@ -631,7 +631,7 @@ impl<T: Publishes> Socket<T> {
     /// subscribers it was queued for.
     pub async fn send_all_async(&mut self, message: impl Into<Message>) -> usize {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send_all(&mut slot, cx)).await
+        future::poll_fn(|cx| self.poll_send_all(&mut slot, cx)).await
     }
 
     fn poll_send_all(
@@ -695,7 +695,7 @@ impl Socket<Sub> {
 
     /// The next message on a subscribed topic, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
@@ -736,7 +736,7 @@ impl Socket<XPub> {
 
     /// The next event, waiting until one arrives.
     pub async fn recv_async(&mut self) -> XPubEvent {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
@@ -786,7 +786,7 @@ impl Socket<ManualXPub> {
 
     /// The next request, waiting until one arrives.
     pub async fn recv_async(&mut self) -> SubscriptionRequest<'_> {
-        let (peer, event) = poll_fn(|cx| self.poll_request(cx)).await;
+        let (peer, event) = future::poll_fn(|cx| self.poll_request(cx)).await;
         SubscriptionRequest {
             socket: self,
             peer,
@@ -934,7 +934,7 @@ impl Socket<XSub> {
 
     /// The next message on a subscribed topic, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
@@ -961,7 +961,7 @@ impl Socket<Pull> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
@@ -998,7 +998,7 @@ impl Socket<Dealer> {
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
     }
 
     /// The next message, if one is waiting.
@@ -1018,7 +1018,7 @@ impl Socket<Dealer> {
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_send(
@@ -1096,7 +1096,7 @@ impl Socket<Req> {
         message: impl Into<Message>,
     ) -> Result<Message, PeerGone> {
         let mut state = RequestState::Sending(Some(message.into()));
-        poll_fn(|cx| self.poll_request(&mut state, cx)).await
+        future::poll_fn(|cx| self.poll_request(&mut state, cx)).await
     }
 
     fn poll_request(
@@ -1165,7 +1165,7 @@ impl Socket<Rep> {
 
     /// The next request, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Request<'_> {
-        let received = poll_fn(|cx| self.poll_received(cx)).await;
+        let received = future::poll_fn(|cx| self.poll_received(cx)).await;
         Request {
             socket: self,
             received,
@@ -1301,7 +1301,7 @@ impl Socket<Router> {
         message: impl Into<Message>,
     ) -> Result<(), UnknownRoutingId> {
         let mut slot = Some(message.into());
-        poll_fn(|cx| self.poll_send(to, &mut slot, cx))
+        future::poll_fn(|cx| self.poll_send(to, &mut slot, cx))
             .await
             .map_err(UnknownRoutingId)
     }
@@ -1355,7 +1355,7 @@ impl Socket<Router> {
     /// The next message and its sender's routing id, waiting until one
     /// arrives.
     pub async fn recv_async(&mut self) -> (RoutingId, Message) {
-        poll_fn(|cx| self.poll_recv(cx)).await
+        future::poll_fn(|cx| self.poll_recv(cx)).await
     }
 
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
