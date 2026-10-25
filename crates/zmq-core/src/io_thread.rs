@@ -394,6 +394,7 @@ impl EventLoop {
         mut stream: Stream,
         config: &ConnectionConfig,
     ) -> Option<Engine> {
+        stream.tune(config.tcp_keepalive.as_ref());
         self.poll
             .registry()
             .register(

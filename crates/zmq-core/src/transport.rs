@@ -14,6 +14,8 @@ use mio::event::Source;
 use mio::net::TcpListener;
 use mio::{Interest, Registry, Token};
 
+use crate::TcpKeepalive;
+
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) use ipc::bind_ipc_abstract;
 #[cfg(unix)]
@@ -142,16 +144,45 @@ impl Stream {
             return Err(err);
         }
         match connected {
-            Ok(()) => {
-                // libzmq disables Nagle; batching happens in the encoder.
-                if let Self::Tcp(stream) = self {
-                    let _ = stream.set_nodelay(true);
-                }
-                Ok(true)
-            }
+            Ok(()) => Ok(true),
             Err(err) if err.kind() == io::ErrorKind::NotConnected => Ok(false),
             Err(err) => Err(err),
         }
+    }
+
+    /// Sets a TCP stream's options, connecting or accepted, as libzmq's
+    /// `tune_tcp_socket` and `tune_tcp_keepalives`: Nagle off, as batching
+    /// happens in the encoder, and keepalive probes if asked for. Failures
+    /// leave the system's defaults.
+    pub(crate) fn tune(&self, keepalive: Option<&TcpKeepalive>) {
+        let Self::Tcp(stream) = self else {
+            return;
+        };
+        let _ = stream.set_nodelay(true);
+        let Some(keepalive) = keepalive else {
+            return;
+        };
+        let mut params = socket2::TcpKeepalive::new();
+        if let Some(idle) = keepalive.idle {
+            params = params.with_time(idle);
+        }
+        #[cfg(any(
+            target_os = "linux",
+            target_os = "android",
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "windows",
+        ))]
+        {
+            if let Some(interval) = keepalive.interval {
+                params = params.with_interval(interval);
+            }
+            if let Some(count) = keepalive.count {
+                params = params.with_retries(count);
+            }
+        }
+        let _ = socket2::SockRef::from(stream).set_tcp_keepalive(&params);
     }
 
     /// The peer's address as ZAP reports it: its IP for TCP, and empty for
@@ -401,6 +432,7 @@ mod ipc {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     fn pair() -> (Stream, UnixStream) {
         let (ours, theirs) = UnixStream::pair().unwrap();
@@ -429,5 +461,44 @@ mod tests {
             0,
             "end of stream"
         );
+    }
+
+    #[test]
+    fn tuning_turns_nagle_off_and_keepalive_on() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let stream = Stream::Tcp(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        let Stream::Tcp(tcp) = &stream else {
+            unreachable!("made as TCP");
+        };
+        stream.tune(Some(&TcpKeepalive {
+            idle: Some(Duration::from_secs(30)),
+            interval: Some(Duration::from_secs(5)),
+            count: Some(4),
+        }));
+        let socket = socket2::SockRef::from(tcp);
+        assert!(socket.tcp_nodelay().unwrap());
+        assert!(socket.keepalive().unwrap());
+        assert_eq!(
+            socket.tcp_keepalive_time().unwrap(),
+            Duration::from_secs(30)
+        );
+        assert_eq!(
+            socket.tcp_keepalive_interval().unwrap(),
+            Duration::from_secs(5)
+        );
+        assert_eq!(socket.tcp_keepalive_retries().unwrap(), 4);
+    }
+
+    #[test]
+    fn keepalive_stays_off_unless_asked_for() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let stream = Stream::Tcp(TcpStream::connect(listener.local_addr().unwrap()).unwrap());
+        let Stream::Tcp(tcp) = &stream else {
+            unreachable!("made as TCP");
+        };
+        stream.tune(None);
+        let socket = socket2::SockRef::from(tcp);
+        assert!(socket.tcp_nodelay().unwrap());
+        assert!(!socket.keepalive().unwrap());
     }
 }

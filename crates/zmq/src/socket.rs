@@ -339,6 +339,7 @@ impl<T: SocketType> Socket<T> {
             max_message_size: options.max_message_size,
             security: options.security,
             heartbeat: options.heartbeat,
+            tcp_keepalive: options.tcp_keepalive,
             handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
         };

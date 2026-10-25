@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 
 use std::time::Duration;
 
-use zmq_core::{Heartbeat, Linger, Reconnect, Security};
+use zmq_core::{Heartbeat, Linger, Reconnect, Security, TcpKeepalive};
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Identity};
 
@@ -41,6 +41,11 @@ pub struct SocketOptions {
     /// ZMTP 3.1 heartbeats (`ZMQ_HEARTBEAT_IVL` and friends), off by
     /// default.
     pub heartbeat: Option<Heartbeat>,
+    /// TCP keepalive probes on TCP connections (`ZMQ_TCP_KEEPALIVE` and
+    /// friends), off by default, leaving the system's setting. They find a
+    /// peer that vanished without closing, as when a NAT or load balancer
+    /// drops an idle connection.
+    pub tcp_keepalive: Option<TcpKeepalive>,
     /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
     pub handshake_timeout: Option<Duration>,
 }
@@ -59,6 +64,7 @@ impl Default for SocketOptions {
             max_message_size: None,
             security: Security::default(),
             heartbeat: None,
+            tcp_keepalive: None,
             handshake_timeout: Some(Duration::from_secs(30)),
         }
     }

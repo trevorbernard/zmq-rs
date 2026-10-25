@@ -105,6 +105,8 @@ pub struct ConnectionConfig {
     pub security: Security,
     /// ZMTP 3.1 heartbeats, off by default.
     pub heartbeat: Option<Heartbeat>,
+    /// TCP keepalive probes, off by default.
+    pub tcp_keepalive: Option<TcpKeepalive>,
     /// How long the greeting and security handshake may take before the
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s).
     pub handshake_timeout: Option<Duration>,
@@ -113,6 +115,22 @@ pub struct ConnectionConfig {
     ///
     /// [`Event`]: crate::Event
     pub monitor: MonitorSink,
+}
+
+/// TCP keepalive probes on each TCP connection, which find a peer that
+/// vanished without closing, as behind a NAT or load balancer that dropped
+/// the connection: libzmq's `ZMQ_TCP_KEEPALIVE`, `ZMQ_TCP_KEEPALIVE_IDLE`,
+/// `ZMQ_TCP_KEEPALIVE_INTVL` and `ZMQ_TCP_KEEPALIVE_CNT`. A field left
+/// `None` keeps the system's default for it. The interval and count are
+/// set on Linux, Android, macOS, iOS, FreeBSD and Windows only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct TcpKeepalive {
+    /// How long a connection is idle before the first probe.
+    pub idle: Option<Duration>,
+    /// How long between unanswered probes.
+    pub interval: Option<Duration>,
+    /// How many unanswered probes close the connection.
+    pub count: Option<u32>,
 }
 
 /// ZMTP 3.1 heartbeats: libzmq's `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT`
@@ -455,6 +473,7 @@ impl ConnectionConfig {
             linger: Linger::default(),
             security: Security::default(),
             heartbeat: None,
+            tcp_keepalive: None,
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
         }

@@ -16,6 +16,7 @@ draft = []
 atomic-waker.workspace = true
 bytes.workspace = true
 mio.workspace = true
+socket2.workspace = true
 zmtp.workspace = true
 zmq-pipe.workspace = true
 
