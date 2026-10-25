@@ -1,11 +1,8 @@
 //! Simple request-reply broker: binds ROUTER to tcp://*:5559 for clients
-//! and DEALER to tcp://*:5560 for services.
-//!
-//! The guide switches messages between the two sockets with `zmq_poll`,
-//! which zmq-rs does not have yet, so this uses the built-in proxy, as
-//! msgqueue does.
+//! and DEALER to tcp://*:5560 for services, and switches messages between
+//! them.
 
-use zmq::{Context, Dealer, Proxy, Router};
+use zmq::{Context, Dealer, Message, Router, RoutingId};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
@@ -14,6 +11,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut backend = context.socket::<Dealer>();
     backend.bind("tcp://*:5560")?;
 
-    Proxy::new(&mut frontend, &mut backend).run();
-    Ok(())
+    // Switch messages between sockets
+    loop {
+        let [from_client, from_service] = zmq::poll([frontend.readable(), backend.readable()]);
+        if from_client {
+            // The client's routing id goes first, so the reply finds it
+            let (client, request) = frontend.recv();
+            let mut message = Message::new(client.as_bytes().to_vec());
+            message.extend(request);
+            backend.send(message);
+        }
+        if from_service {
+            let (client, reply) = backend.recv().into_parts();
+            frontend.send(&RoutingId::new(client)?, Message::try_from(reply)?)?;
+        }
+    }
 }

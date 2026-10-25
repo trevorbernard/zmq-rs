@@ -16,19 +16,19 @@ and the Majordomo APIs (`mdp`, `mdcliapi`, `mdcliapi2`, `mdwrkapi`).
 | Chapter | Examples |
 |---|---|
 | 1 | hwserver, hwclient, version, wuserver, wuclient, taskvent, taskwork, tasksink |
-| 2 | msreader, rrclient, rrworker, rrbroker, msgqueue, wuproxy, mtserver, mtrelay, syncpub, syncsub, psenvpub, psenvsub |
-| 3 | identity, rtreq, rtdealer |
+| 2 | msreader, mspoller, taskwork2, tasksink2, rrclient, rrworker, rrbroker, msgqueue, wuproxy, mtserver, mtrelay, syncpub, syncsub, psenvpub, psenvsub |
+| 3 | identity, rtreq, rtdealer, lbbroker |
 | 4 | lpclient, lpserver, mdbroker, mdclient, mdclient2, mdworker, mmiecho, titanic, ticlient, flserver1, flserver2, flserver3, flclient1, flclient2 |
 | 5 | espresso, pathopub, pathosub, suisnail, clonesrv1, clonecli1 |
 | 7 | fileio1, fileio2, fileio3, tripping, eagain, dechat |
 
-A `zmq_poll` on a single socket becomes `recv_timeout` or `request_timeout`.
-rrbroker uses the built-in proxy instead of polling both its sockets.
+`zmq_poll` becomes `zmq::poll`. On a single socket it becomes `recv_timeout`
+or `request_timeout`, and a socket polled only sometimes, as lbbroker's
+frontend while no worker is free, is `readable().when(...)`.
 
 ## Not ported
 
-- Polling several sockets, until zmq-rs has a poller: mspoller, taskwork2,
-  tasksink2, lbbroker, lbbroker2, lbbroker3, asyncsrv, peering1, peering2,
+- Polling several sockets, not yet ported: lbbroker2, lbbroker3, asyncsrv, peering1, peering2,
   peering3, spqueue, spworker, ppqueue, ppworker, bstarsrv, bstarsrv2,
   bstarcli, lvcache, flcliapi, flclient3, clonesrv2 to clonesrv6,
   clonecli2 to clonecli6, clone. kvmsg is used only by these, so it waits
@@ -53,3 +53,5 @@ rrbroker uses the built-in proxy instead of polling both its sockets.
 - mdbroker's ROUTER uses `try_send`, dropping when a peer's queue is full,
   as libzmq's ROUTER does; `send` would block.
 - titanic stores frames with a length prefix, not CZMQ's `zmsg_save` format.
+- lbbroker waits for its clients to print before exiting, where the C's
+  `zmq_ctx_destroy` waits for every socket to close.
