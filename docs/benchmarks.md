@@ -64,11 +64,11 @@ Other patterns, such as fan-in, fan-out and CURVE, have their own bench
 ## Results: Apple M1 Pro
 
 Apple M1 Pro (10 cores, 16 GB), macOS 26.4.1, libzmq 4.3.5 from nixpkgs,
-commit `f34b1cc` with the sender zeroing large payloads, as above.
-2026-10-25.
+commit `414ee4f`. 2026-10-25.
 
-Our throughput is ahead everywhere except ipc at 64 KiB (0.86), and level
-at inproc 4 KiB and 64 KiB. Our latency is lower everywhere.
+Our throughput is ahead everywhere except ipc at 64 KiB (0.82), and level
+at inproc 64 KiB. Our latency is lower everywhere, though only just at
+ipc 64 KiB (1.05).
 
 ### Throughput, msg/s (Mb/s)
 
@@ -76,28 +76,28 @@ at inproc 4 KiB and 64 KiB. Our latency is lower everywhere.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 20.23M [19.59M–20.40M] (1295) | 5.44M [5.23M–5.51M] (348) | 5.91M | 8.98M | 3.72 |
-| 256 B | 8.04M [7.86M–8.32M] (16458) | 3.47M [3.35M–3.52M] (7111) | 5.11M | 3.39M | 2.31 |
-| 4 KiB | 866.7k [844.6k–893.6k] (28398) | 357.6k [352.7k–362.8k] (11719) | 984.3k | 358.7k | 2.42 |
-| 64 KiB | 66.9k [65.0k–68.2k] (35054) | 54.5k [52.9k–55.0k] (28548) | 69.5k | 54.6k | 1.23 |
+| 8 B | 21.67M [13.21M–21.90M] (1387) | 5.77M [5.72M–5.88M] (369) | 5.87M | 9.23M | 3.76 |
+| 256 B | 8.32M [8.25M–9.01M] (17038) | 3.38M [3.23M–3.52M] (6932) | 5.15M | 3.36M | 2.46 |
+| 4 KiB | 886.6k [866.5k–910.6k] (29053) | 360.3k [335.3k–371.4k] (11806) | 1.01M | 354.7k | 2.46 |
+| 64 KiB | 70.8k [65.1k–73.6k] (37136) | 59.0k [52.7k–60.3k] (30931) | 74.2k | 58.7k | 1.20 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 21.08M [13.16M–21.23M] (1349) | 5.61M [5.59M–5.66M] (359) | 5.67M | 10.66M | 3.76 |
-| 256 B | 4.74M [4.46M–5.04M] (9706) | 2.50M [2.47M–2.53M] (5122) | 3.65M | 2.54M | 1.89 |
-| 4 KiB | 412.9k [395.6k–418.3k] (13529) | 252.1k [249.2k–252.7k] (8260) | 324.2k | 232.4k | 1.64 |
-| 64 KiB | 16.1k [16.0k–16.2k] (8434) | 18.7k [18.5k–18.8k] (9791) | 15.4k | 16.7k | 0.86 |
+| 8 B | 21.47M [21.33M–21.79M] (1374) | 5.68M [5.61M–5.79M] (363) | 5.69M | 10.19M | 3.78 |
+| 256 B | 5.43M [5.16M–5.50M] (11125) | 2.83M [2.79M–2.85M] (5788) | 4.17M | 3.00M | 1.92 |
+| 4 KiB | 465.6k [440.0k–470.1k] (15258) | 289.2k [269.4k–297.3k] (9476) | 383.3k | 257.4k | 1.61 |
+| 64 KiB | 17.0k [16.7k–17.3k] (8904) | 20.8k [20.3k–21.2k] (10921) | 16.4k | 17.9k | 0.82 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 25.62M [25.20M–26.00M] (1640) | 7.17M [6.99M–7.35M] (459) | 3.57 |
-| 256 B | 13.59M [12.91M–15.75M] (27834) | 6.36M [5.86M–6.42M] (13019) | 2.14 |
-| 4 KiB | 5.45M [4.21M–5.64M] (178679) | 4.81M [4.72M–4.87M] (157523) | 1.13 |
-| 64 KiB | 875.9k [855.8k–886.8k] (459205) | 881.3k [809.7k–902.0k] (462039) | 0.99 |
+| 8 B | 26.94M [24.34M–27.12M] (1724) | 7.29M [6.96M–7.50M] (466) | 3.70 |
+| 256 B | 16.17M [13.66M–17.51M] (33111) | 6.65M [6.33M–6.87M] (13623) | 2.43 |
+| 4 KiB | 6.25M [6.03M–6.39M] (204910) | 5.13M [4.79M–5.22M] (168206) | 1.22 |
+| 64 KiB | 912.4k [829.9k–922.7k] (478359) | 918.6k [841.1k–928.2k] (481598) | 0.99 |
 
 ### Latency, one-way µs (p50/p99)
 
@@ -105,57 +105,66 @@ at inproc 4 KiB and 64 KiB. Our latency is lower everywhere.
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 18.7 [18.5–19.4] (17.8/37.0) | 33.3 [33.0–33.4] (32.0/57.4) | 27.5 | 26.9 | 1.78 |
-| 256 B | 19.0 [18.5–19.6] (18.1/38.3) | 34.0 [33.5–35.1] (32.6/60.6) | 27.6 | 27.8 | 1.79 |
-| 4 KiB | 20.1 [19.7–20.7] (19.1/39.9) | 34.3 [33.7–34.6] (32.9/58.8) | 27.9 | 28.0 | 1.70 |
-| 64 KiB | 32.0 [31.5–32.4] (31.0/49.7) | 58.2 [57.1–60.7] (56.6/92.9) | 46.4 | 46.5 | 1.82 |
+| 8 B | 17.7 [17.5–18.3] (17.5/35.0) | 30.7 [30.1–31.6] (30.1/56.0) | 25.7 | 25.7 | 1.73 |
+| 256 B | 17.8 [17.7–18.7] (17.6/32.5) | 31.4 [30.7–33.3] (30.5/61.9) | 25.8 | 25.9 | 1.76 |
+| 4 KiB | 19.0 [18.6–20.2] (18.6/35.1) | 31.2 [30.4–32.4] (30.6/54.0) | 26.5 | 26.5 | 1.64 |
+| 64 KiB | 31.5 [30.5–35.1] (30.5/52.5) | 55.0 [53.2–58.3] (53.7/82.8) | 43.8 | 44.5 | 1.75 |
 
 **ipc**
 
 | Size | ours→ours | libzmq→libzmq | ours→libzmq | libzmq→ours | ours/libzmq |
 |---|---|---|---|---|---|
-| 8 B | 11.3 [11.1–11.4] (10.8/23.1) | 24.0 [23.8–24.4] (23.1/54.2) | 19.2 | 19.0 | 2.13 |
-| 256 B | 11.3 [11.0–11.6] (10.9/22.7) | 23.7 [23.4–24.2] (23.4/42.8) | 19.5 | 19.3 | 2.09 |
-| 4 KiB | 12.1 [11.8–12.3] (11.6/23.4) | 24.4 [23.8–24.9] (23.8/50.5) | 19.8 | 20.0 | 2.02 |
-| 64 KiB | 66.2 [63.3–69.0] (61.8/150.8) | 81.7 [79.3–83.8] (83.3/111.4) | 77.3 | 75.1 | 1.23 |
+| 8 B | 10.0 [9.9–10.5] (9.8/14.6) | 20.6 [20.5–21.9] (20.7/35.0) | 17.3 | 17.1 | 2.06 |
+| 256 B | 10.1 [9.9–10.5] (9.8/16.9) | 20.7 [20.3–21.5] (20.8/35.1) | 17.2 | 17.2 | 2.06 |
+| 4 KiB | 11.0 [10.7–11.4] (10.6/20.7) | 21.4 [21.0–21.7] (21.1/42.9) | 17.5 | 17.6 | 1.95 |
+| 64 KiB | 60.6 [60.1–64.7] (60.9/82.4) | 63.7 [62.2–69.9] (62.9/85.1) | 68.6 | 70.4 | 1.05 |
 
 **inproc**
 
 | Size | ours→ours | libzmq→libzmq | ours/libzmq |
 |---|---|---|---|
-| 8 B | 1.6 [1.5–3.2] (1.4/4.9) | 14.2 [14.1–14.5] (14.5/30.0) | 8.92 |
-| 256 B | 1.6 [1.6–1.8] (1.4/3.8) | 14.2 [14.2–14.4] (14.5/30.6) | 8.93 |
-| 4 KiB | 1.6 [1.6–2.1] (1.5/3.7) | 14.2 [14.1–15.2] (14.6/29.1) | 8.75 |
-| 64 KiB | 1.6 [1.4–2.0] (1.5/4.1) | 14.1 [14.0–14.4] (14.6/26.6) | 8.63 |
+| 8 B | 1.4 [1.4–1.5] (1.4/3.1) | 12.4 [12.1–12.6] (11.8/26.9) | 8.67 |
+| 256 B | 1.4 [1.4–1.5] (1.4/3.1) | 12.3 [12.0–12.5] (11.9/22.7) | 8.64 |
+| 4 KiB | 1.4 [1.4–1.5] (1.4/3.3) | 12.1 [12.1–12.4] (11.6/23.3) | 8.47 |
+| 64 KiB | 1.4 [1.4–2.2] (1.4/3.4) | 12.0 [12.0–12.3] (11.4/22.6) | 8.41 |
 
 ### Reading them
 
-- **Small messages run about twice as fast as at `b2abe9f`,** the last
-  M1 run: 8 B went from 8.84M to 20.23M msg/s over tcp, 7.15M to 21.08M
-  over ipc and 12.08M to 25.62M over inproc, with the pipe, fair-queue
-  and I/O changes measured on Linux below. libzmq's numbers are
-  unchanged.
-- **inproc at 64 KiB reads 0.99 because each sender now builds its
-  payload the same way.** At `b2abe9f` it read 1.54: our sender used
+- **Against `f34b1cc`, the last M1 run,** most cases are within
+  run-to-run spread. inproc 256 B rose from 13.59M to 16.17M msg/s
+  (2.14 to 2.43), already 16.88M at `501448b`; ipc 4 KiB from 412.9k to
+  465.6k. libzmq's ipc 64 KiB latency fell from 81.7 to 63.7 µs, taking
+  that ratio from 1.23 to 1.05; ours moved from 66.2 to 60.6.
+- **`Engine` is aligned to a cache line** (`414ee4f`), after
+  `multipart/2` fell from 9.13M to 7.81M msg/s at `501448b` (medians of
+  10). That commit only grew `ConnectionConfig`, which each engine
+  holds, by its keepalive settings, and padding it by as much at
+  `463fd53` did the same. The receiving I/O thread bounds the case, and
+  `Decoder::decode`, the same machine code in both, took twice its
+  samples, stalling on loads and stores of the decoder's fields. Engines
+  live inline in the I/O thread's session map, so where those fields
+  fell across cache lines followed the config's size. Aligned to 128
+  octets, as `zmq-pipe` pads, it ran at 9.57M; no `perf` case moved
+  beyond spread.
+- **inproc at 64 KiB reads 0.99 because each sender builds its payload
+  the same way.** At `b2abe9f` it read 1.54: our sender used
   `vec![0; size]`, a calloc, which can hand back pages already known to
   be zero without writing them. Copying a payload in instead (`eabb8ce`)
   read 0.64, as a copy costs more than zeroing on Apple Silicon, which
   zeroes cache lines without reading them first. Both senders now zero a
-  fresh allocation. Only this case moved; tcp and ipc at 4 KiB and up
-  were within 3% under each sender.
+  fresh allocation.
 - **ipc at 64 KiB is still behind, and still on the sending side.**
-  Our sender reaches 15.4k msg/s into libzmq, where libzmq's own sender
-  reaches 16.7k into ours. ipc throughput at 4 KiB and up is far below
+  Our sender reaches 16.4k msg/s into libzmq, where libzmq's own sender
+  reaches 17.9k into ours. ipc throughput at 4 KiB and up is far below
   tcp for both libraries on this machine, so Unix-socket buffering is
   probably part of it.
-- **inproc latency, about 1.6 µs against 14 µs.** Our blocking calls park
+- **inproc latency, about 1.4 µs against 12 µs.** Our blocking calls park
   the thread and are woken directly by the pipe. libzmq wakes a blocked
   socket through its mailbox's signaler, a file descriptor it polls.
 - **Mixed pairs land between the two same-library pairs** for latency, so
   both of our ends contribute to the difference.
-- **Run-to-run spread was narrower than at `b2abe9f`,** mostly within
-  ±5%, except our 8 B ipc minimum (13.16M against a 21.08M median) and
-  inproc 4 KiB, which read from 0.82 to 1.13 across six runs. Compare
+- **Spread was mostly within ±5%,** except our 8 B tcp minimum (13.21M
+  against a 21.67M median) and inproc 256 B (13.66M–17.51M). Compare
   medians, and rerun a subset before acting on a difference under about
   10%.
 
@@ -319,26 +328,27 @@ On the Xeon above:
 | curve/256 | 685.0k | 656.1k | 1.04 |
 | curve/64k | 13.2k | 11.6k | 1.13 |
 
-### Results: Apple M1 Pro (`f34b1cc`)
+### Results: Apple M1 Pro (`414ee4f`)
 
 On the M1 Pro above, 2026-10-25:
 
 | Case | ours msg/s | libzmq msg/s | ours/libzmq |
 |---|---|---|---|
-| multipart/2 | 9.82M | 2.68M | 3.66 |
-| multipart/8 | 2.21M | 778.0k | 2.84 |
-| fanout/1 | 9.22M | 5.52M | 1.67 |
-| fanout/4 | 4.97M | 2.35M | 2.12 |
-| fanout/16 | 1.43M | 441.0k | 3.25 |
-| fanin/16 | 9.55M | 4.83M | 1.98 |
-| fanin/64 | 8.40M | 3.83M | 2.19 |
-| router/1 | 8.95M | 2.87M | 3.12 |
-| router/16 | 8.09M | 2.86M | 2.83 |
-| curve/256 | 872.4k | 737.6k | 1.18 |
-| curve/64k | 16.0k | 5.6k | 2.85 |
+| multipart/2 | 9.64M | 3.01M | 3.20 |
+| multipart/8 | 2.58M | 857.7k | 3.01 |
+| fanout/1 | 10.16M | 6.99M | 1.45 |
+| fanout/4 | 5.14M | 2.47M | 2.08 |
+| fanout/16 | 1.44M | 423.2k | 3.40 |
+| fanin/16 | 9.38M | 4.86M | 1.93 |
+| fanin/64 | 8.90M | 4.03M | 2.21 |
+| router/1 | 9.33M | 2.93M | 3.19 |
+| router/16 | 8.59M | 3.06M | 2.81 |
+| curve/256 | 938.2k | 763.4k | 1.23 |
+| curve/64k | 16.4k | 5.7k | 2.88 |
 
 We lead every case by more than on the Xeon. libzmq's `curve/64k` is
-2.1 times slower here than there, where ours is faster.
+2.0 times slower here than there, where ours is faster. `multipart`
+fell 15% at `501448b` and is back with `Engine` aligned, as above.
 
 The bullets below give each case's numbers on the Xeon when its fix
 landed.
