@@ -33,6 +33,10 @@ const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 /// Stop taking messages from the socket while this much output is unsent.
 const MAX_PENDING_OUTPUT: usize = 64 * 1024;
 
+/// Aligned to a cache line (128 octets, as `zmq-pipe` pads): where its
+/// fields fell across lines moved `multipart/2` by 15% on the M1 as
+/// `ConnectionConfig` grew.
+#[repr(align(128))]
 pub(crate) struct Engine {
     stream: Stream,
     config: ConnectionConfig,
