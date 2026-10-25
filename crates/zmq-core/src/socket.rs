@@ -10,7 +10,7 @@ use std::io;
 use std::mem;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
 use atomic_waker::AtomicWaker;
@@ -306,11 +306,7 @@ impl Peers {
             keep
         });
         self.list.retain_mut(|peer| peer.endpoint != Some(endpoint));
-        for closed in closing {
-            // Disconnects, never sends, once the I/O thread drops the
-            // listener.
-            let _ = closed.recv();
-        }
+        wait_closed(closing);
     }
 
     /// A new monitor of this socket's events, from now on.
@@ -363,6 +359,30 @@ impl Peers {
     /// The peers, for a routing strategy.
     pub fn list_mut(&mut self) -> &mut PeerList {
         &mut self.list
+    }
+}
+
+impl Drop for Peers {
+    /// Waits, as [`close`](Self::close) does, until the I/O threads have
+    /// closed the socket's listeners, so that their addresses can be bound
+    /// again once it is dropped. libzmq closes them in the background, but
+    /// its ipc bind removes whatever file is at the path.
+    fn drop(&mut self) {
+        let closing: Vec<_> = self
+            .listeners
+            .drain(..)
+            .filter_map(|(_, mut queue)| queue.closed.take())
+            .collect();
+        wait_closed(closing);
+    }
+}
+
+/// Waits until each listener's I/O thread has dropped it, its accept queue
+/// already dropped.
+fn wait_closed(closing: Vec<mpsc::Receiver<()>>) {
+    for closed in closing {
+        // Disconnects, never sends, once the I/O thread drops the listener.
+        let _ = closed.recv();
     }
 }
 

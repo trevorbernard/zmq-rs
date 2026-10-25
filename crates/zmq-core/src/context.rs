@@ -689,8 +689,10 @@ impl Context {
             }
             None => {
                 let pending = &mut registry.pending.entry(name.to_owned()).or_default();
-                // Forget connections given up on while waiting.
-                pending.retain(|pending| !pending.server.rx.is_closed());
+                // Forget connections given up on while waiting, once nothing
+                // they sent is left: libzmq delivers what a connection queued
+                // before its socket was closed.
+                pending.retain(|pending| !pending.server.rx.is_drained());
                 pending.push(PendingConnect {
                     config,
                     server,

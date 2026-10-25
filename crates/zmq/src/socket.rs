@@ -563,11 +563,15 @@ impl<T: SocketType> Socket<T> {
     /// `inproc://name`, and accepts peers on it. Returns where it is bound:
     /// the actual port for `tcp://…:*`, and the fresh path for `ipc://*`.
     ///
-    /// An `ipc` path's socket file is removed when the socket is dropped. A
-    /// leftover socket file nobody listens on is replaced, but a live socket
-    /// or any other file is `AddrInUse`. An abstract `ipc://@name` has no
-    /// file: a live name is `AddrInUse`, and it is free once the socket is
-    /// dropped or [unbound](Self::unbind).
+    /// Dropping the socket, as [unbinding](Self::unbind), returns once its
+    /// addresses are free to bind again, and removes an `ipc` path's socket
+    /// file. A leftover socket file nobody listens on is replaced, but a
+    /// live socket or any other file is `AddrInUse`. An abstract
+    /// `ipc://@name` has no file: a live name is `AddrInUse`.
+    ///
+    /// Connections already waiting for an `inproc` name join the socket in
+    /// the bind, as in libzmq, so a SUB that binds subscribes on them at
+    /// once.
     pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
         let (id, bound) = match endpoint::bind_target(endpoint)? {
             Target::Tcp(addr) => self
@@ -598,6 +602,11 @@ impl<T: SocketType> Socket<T> {
         }
         .map_err(Error::Io)?;
         self.bound.push((bound.clone(), id));
+        // Connections already waiting for an inproc name join now, as
+        // libzmq attaches them in the bind, so a SUB subscribes on them at
+        // once rather than when next used.
+        self.peers.accept(&mut noop());
+        self.routing.connected(self.peers.list_mut());
         Ok(bound)
     }
 
