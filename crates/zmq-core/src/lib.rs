@@ -41,7 +41,7 @@ pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};
 pub use socket::{
     EndpointId, FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome,
-    RouterSendError, RouterTable,
+    RouterSendError, RouterTable, noop_context,
 };
 #[cfg(feature = "draft")]
 pub use socket::{ServerSendError, ServerTable};

@@ -131,6 +131,44 @@ fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
     });
 }
 
+/// The proxy polls its frontend, then sends the subscription into it in
+/// the same turn. That send must not take the frontend's listener from
+/// the proxy, or a publisher connecting afterwards is never taken in, and
+/// never hears the subscription.
+#[test]
+fn a_publisher_connecting_after_a_subscription_still_hears_it() {
+    let context = Context::new().unwrap();
+    let mut frontend = context.socket::<XSub>();
+    frontend.bind("inproc://late-upstream").unwrap();
+    let mut backend = context.socket::<XPub>();
+    backend.bind("inproc://late-downstream").unwrap();
+    let mut proxy = Proxy::new(&mut frontend, &mut backend);
+    let control = proxy.control();
+
+    thread::scope(|scope| {
+        let running = scope.spawn(|| proxy.run());
+        let _stop = StopOnDrop(control.clone());
+        let mut subscriber = context.socket::<Sub>();
+        subscriber.subscribe("news");
+        subscriber.connect("inproc://late-downstream").unwrap();
+        // Let the proxy forward the subscription to a frontend with no
+        // publisher yet.
+        let started = Instant::now();
+        while control.statistics().frontend.sent.messages == 0 {
+            assert!(started.elapsed() < FIVE, "never forwarded");
+            thread::sleep(Duration::from_millis(1));
+        }
+        let mut publisher = context.socket::<XPub>();
+        publisher.connect("inproc://late-upstream").unwrap();
+        assert_eq!(
+            within(FIVE, move || publisher.recv()),
+            zmq::XPubEvent::Subscribe(zmq::Frame::from("news"))
+        );
+        control.terminate();
+        running.join().unwrap();
+    });
+}
+
 #[test]
 fn a_pull_push_proxy_is_a_streamer() {
     let context = Context::new().unwrap();

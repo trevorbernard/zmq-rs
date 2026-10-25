@@ -4,7 +4,7 @@ use std::convert::Infallible;
 use std::fmt;
 use std::future;
 use std::marker::PhantomData;
-use std::task::{Context as TaskContext, Poll, Waker};
+use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use zmq_core::{
@@ -725,7 +725,7 @@ impl Socket<Push> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
         let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_send(&mut slot, &mut noop());
         slot.map_or(Ok(()), Err)
     }
 
@@ -770,7 +770,7 @@ impl Socket<Pair> {
     /// back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
         let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_send(&mut slot, &mut noop());
         slot.map_or(Ok(()), Err)
     }
 
@@ -800,7 +800,7 @@ impl Socket<Pair> {
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message, blocking until one arrives.
@@ -950,8 +950,7 @@ impl Socket<Sub> {
     /// empty topic matches everything. Subscribing to a topic again needs
     /// another [`unsubscribe`](Self::unsubscribe) to undo.
     pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         self.routing
             .subscribe(self.peers.list_mut(), topic.as_ref());
     }
@@ -959,15 +958,14 @@ impl Socket<Sub> {
     /// Removes one subscription to `topic`. Returns whether there was one.
     /// Messages already queued that no longer match are dropped.
     pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         self.routing
             .unsubscribe(self.peers.list_mut(), topic.as_ref())
     }
 
     /// The next message on a subscribed topic, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message on a subscribed topic, blocking until one arrives.
@@ -1011,7 +1009,7 @@ impl Socket<XPub> {
 
     /// The next event, if one is waiting.
     pub fn try_recv(&mut self) -> Option<XPubEvent> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next event, blocking until one arrives.
@@ -1177,16 +1175,14 @@ impl Socket<XSub> {
     /// Subscribes to messages whose first frame starts with `topic`, as
     /// [`Socket<Sub>::subscribe`] does.
     pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         self.routing
             .subscribe(self.peers.list_mut(), topic.as_ref());
     }
 
     /// Removes one subscription to `topic`. Returns whether there was one.
     pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         self.routing
             .unsubscribe(self.peers.list_mut(), topic.as_ref())
     }
@@ -1195,8 +1191,7 @@ impl Socket<XSub> {
     /// single frame starting with `0x01` or `0x00` is a subscription and
     /// subscribes or unsubscribes to the rest.
     pub fn send(&mut self, message: impl Into<Message>) {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         self.routing
             .send_upstream(self.peers.list_mut(), message.into());
     }
@@ -1215,7 +1210,7 @@ impl Socket<XSub> {
 
     /// The next message on a subscribed topic, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message on a subscribed topic, blocking until one arrives.
@@ -1245,7 +1240,7 @@ impl Socket<XSub> {
 impl Socket<Pull> {
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message, blocking until one arrives.
@@ -1275,7 +1270,7 @@ impl Socket<Dealer> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
         let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_send(&mut slot, &mut noop());
         slot.map_or(Ok(()), Err)
     }
 
@@ -1305,7 +1300,7 @@ impl Socket<Dealer> {
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message, blocking until one arrives.
@@ -1442,7 +1437,7 @@ enum RequestState {
 impl Socket<Rep> {
     /// The next request, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Request<'_>> {
-        let received = ready(self.poll_received(&mut TaskContext::from_waker(Waker::noop())))?;
+        let received = ready(self.poll_received(&mut noop()))?;
         Some(Request {
             socket: self,
             received,
@@ -1559,8 +1554,7 @@ impl Socket<Router> {
         to: &RoutingId,
         message: impl Into<Message>,
     ) -> Result<(), RouterSendError> {
-        self.peers
-            .accept(&mut TaskContext::from_waker(Waker::noop()));
+        self.peers.accept(&mut noop());
         let RouterRouting { table, .. } = &mut self.routing;
         let peers = self.peers.list_mut();
         table.sync(peers);
@@ -1645,7 +1639,7 @@ impl Socket<Router> {
     /// The next message and the routing id of the peer that sent it, if
     /// one is waiting.
     pub fn try_recv(&mut self) -> Option<(RoutingId, Message)> {
-        ready(self.poll_recv(&mut TaskContext::from_waker(Waker::noop())))
+        ready(self.poll_recv(&mut noop()))
     }
 
     /// The next message and its sender's routing id, blocking until one
@@ -1723,8 +1717,8 @@ fn poll_fair_queued(
         .map(|(_, message)| message)
 }
 
-fn noop() -> TaskContext<'static> {
-    TaskContext::from_waker(Waker::noop())
+pub(crate) fn noop() -> TaskContext<'static> {
+    zmq_core::noop_context()
 }
 
 fn ready<T>(poll: Poll<T>) -> Option<T> {

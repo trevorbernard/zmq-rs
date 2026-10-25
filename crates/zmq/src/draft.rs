@@ -5,13 +5,13 @@ use std::convert::Infallible;
 use std::fmt;
 use std::future;
 use std::num::NonZeroU32;
-use std::task::{Context as TaskContext, Poll, Waker};
+use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
-use crate::socket::{Receives, Routing, SocketType, WaitsForRoom, sealed};
+use crate::socket::{Receives, Routing, SocketType, WaitsForRoom, noop, sealed};
 use crate::{Socket, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
@@ -95,7 +95,7 @@ impl Socket<Radio> {
     /// Returns how many dishes it was queued for: none if nobody has joined
     /// yet, as joins take a moment to arrive after connecting.
     pub fn send(&mut self, group: &Group, body: impl Into<Frame>) -> usize {
-        let mut cx = TaskContext::from_waker(Waker::noop());
+        let mut cx = noop();
         let (peers, radio) = self.parts_accepting(&mut cx);
         radio.send(peers, group, body.into())
     }
@@ -104,7 +104,7 @@ impl Socket<Radio> {
 impl Socket<Dish> {
     /// Joins `group`. Returns false if it was already joined.
     pub fn join(&mut self, group: &Group) -> bool {
-        let mut cx = TaskContext::from_waker(Waker::noop());
+        let mut cx = noop();
         let (peers, dish) = self.parts_accepting(&mut cx);
         dish.join(peers, group)
     }
@@ -112,14 +112,14 @@ impl Socket<Dish> {
     /// Leaves `group`. Returns false if it was not joined. Messages already
     /// queued for the group are dropped.
     pub fn leave(&mut self, group: &Group) -> bool {
-        let mut cx = TaskContext::from_waker(Waker::noop());
+        let mut cx = noop();
         let (peers, dish) = self.parts_accepting(&mut cx);
         dish.leave(peers, group)
     }
 
     /// The next message and its group, if one is waiting.
     pub fn try_recv(&mut self) -> Option<(Group, Frame)> {
-        match self.poll_recv_group(&mut TaskContext::from_waker(Waker::noop())) {
+        match self.poll_recv_group(&mut noop()) {
             Poll::Ready(received) => Some(received),
             Poll::Pending => None,
         }
@@ -179,7 +179,7 @@ impl Socket<Client> {
     /// Sends `frame` if a server has room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
         let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_send_frame(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_send_frame(&mut slot, &mut noop());
         slot.map_or(Ok(()), |message| Err(only_frame(message)))
     }
 
@@ -211,7 +211,7 @@ impl Socket<Client> {
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_recv_frame(&mut TaskContext::from_waker(Waker::noop())) {
+        match self.poll_recv_frame(&mut noop()) {
             Poll::Ready(frame) => Some(frame),
             Poll::Pending => None,
         }
@@ -328,7 +328,7 @@ impl Socket<Scatter> {
     /// Sends `frame` if a gather has room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
         let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_scatter(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_scatter(&mut slot, &mut noop());
         slot.map_or(Ok(()), |message| Err(only_frame(message)))
     }
 
@@ -370,7 +370,7 @@ impl Socket<Scatter> {
 impl Socket<Gather> {
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_gather(&mut TaskContext::from_waker(Waker::noop())) {
+        match self.poll_gather(&mut noop()) {
             Poll::Ready(frame) => Some(frame),
             Poll::Pending => None,
         }
@@ -527,7 +527,7 @@ impl Socket<Peer> {
         let key = self
             .connect_key(endpoint)?
             .expect("PEER never connects with ZMQ_IMMEDIATE");
-        let mut cx = TaskContext::from_waker(Waker::noop());
+        let mut cx = noop();
         let (peers, table) = self.parts_accepting(&mut cx);
         let id = table
             .id_of(peers, key)
@@ -616,7 +616,7 @@ impl Socket<Peer> {
 fn try_recv_routed<T: SocketType<Routing = ServerTable, Received = (NonZeroU32, Frame)>>(
     socket: &mut Socket<T>,
 ) -> Option<(NonZeroU32, Frame)> {
-    match poll_recv_routed(socket, &mut TaskContext::from_waker(Waker::noop())) {
+    match poll_recv_routed(socket, &mut noop()) {
         Poll::Ready(received) => Some(received),
         Poll::Pending => None,
     }
@@ -638,7 +638,7 @@ fn try_send_routed<T: SocketType<Routing = ServerTable>>(
     to: NonZeroU32,
     frame: Frame,
 ) -> Result<(), ServerSendError> {
-    let mut cx = TaskContext::from_waker(Waker::noop());
+    let mut cx = noop();
     let (peers, table) = socket.parts_accepting(&mut cx);
     table.try_send(peers, to, frame, &mut cx)
 }
@@ -686,7 +686,7 @@ fn disconnect_routed<T: SocketType<Routing = ServerTable>>(
     socket: &mut Socket<T>,
     to: NonZeroU32,
 ) -> bool {
-    let mut cx = TaskContext::from_waker(Waker::noop());
+    let mut cx = noop();
     let (peers, table) = socket.parts_accepting(&mut cx);
     table.disconnect(peers, to)
 }
@@ -709,7 +709,7 @@ impl Socket<Channel> {
     /// Sends `frame` if there is a peer with room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
         let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_channel_send(&mut slot, &mut TaskContext::from_waker(Waker::noop()));
+        let _ = self.poll_channel_send(&mut slot, &mut noop());
         slot.map_or(Ok(()), |message| Err(only_frame(message)))
     }
 
@@ -741,7 +741,7 @@ impl Socket<Channel> {
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_channel_recv(&mut TaskContext::from_waker(Waker::noop())) {
+        match self.poll_channel_recv(&mut noop()) {
             Poll::Ready(frame) => Some(frame),
             Poll::Pending => None,
         }

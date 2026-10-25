@@ -151,6 +151,19 @@ impl PeerList {
     }
 }
 
+/// The waker non-blocking calls poll with, through [`noop_context`]. One
+/// static, recognised by its address: `Waker::noop` may not compare equal
+/// across crates.
+static NOOP_WAKER: &Waker = Waker::noop();
+
+/// A context for non-blocking calls. [`Peers::accept`] takes what is
+/// queued without registering it, so it does not replace the waker of a
+/// task that polled the socket earlier in the same turn, as a proxy does
+/// before sending into it.
+pub fn noop_context() -> TaskContext<'static> {
+    TaskContext::from_waker(NOOP_WAKER)
+}
+
 /// The connections a socket talks to: those it connected, and those its
 /// listeners accepted.
 #[derive(Debug)]
@@ -325,12 +338,26 @@ impl Peers {
     }
 
     /// Adds peers that listeners have accepted. Registers `cx` with every
-    /// listener, so a new peer wakes a task waiting for one.
+    /// listener, so a new peer wakes a task waiting for one, unless `cx` is
+    /// [`noop_context`]'s, as non-blocking calls pass: registering it would replace
+    /// the waker of a task that polled the socket earlier in the same turn,
+    /// as a proxy does before sending into it, and that task would then
+    /// miss the next peer.
     pub fn accept(&mut self, cx: &mut TaskContext<'_>) {
+        let register = !std::ptr::eq(cx.waker(), NOOP_WAKER);
         let (list, greeting) = (&mut self.list, self.greeting.as_ref());
         self.listeners.retain_mut(|(endpoint, queue)| {
             loop {
-                match queue.connections.poll_recv(cx) {
+                let next = if register {
+                    queue.connections.poll_recv(cx)
+                } else {
+                    match queue.connections.try_recv() {
+                        Ok(connection) => Poll::Ready(Some(connection)),
+                        Err(TryRecvError::Empty) => Poll::Pending,
+                        Err(TryRecvError::Closed) => Poll::Ready(None),
+                    }
+                };
+                match next {
                     Poll::Ready(Some(connection)) => {
                         add(list, greeting, connection, *endpoint);
                     }
