@@ -147,7 +147,6 @@ fn infinite_receive_inproc_bind_first() {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: an inproc pipe made before its bind keeps only the connecting side's HWM; libzmq adds the binding side's when it binds"]
 fn infinite_receive_inproc_connect_first() {
     assert_eq!(inproc_connect_first(1, 0), MAX_SENDS);
 }
@@ -169,7 +168,6 @@ fn finite_both_bind_first() {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: an inproc pipe made before its bind keeps only the connecting side's HWM; libzmq adds the binding side's when it binds"]
 fn finite_both_connect_first() {
     // Send and receive HWMs of 1, so total that can be queued is 2
     assert_eq!(inproc_connect_first(1, 1), 2);

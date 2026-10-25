@@ -347,6 +347,7 @@ Rules shared by every pattern:
 - `ManualXPub` is `XPUB_MANUAL`. Each subscription or cancel arrives as a `SubscriptionRequest` tied to the peer that sent it. It has no effect until `accept`, or until `subscribe`/`unsubscribe` set something else for that peer. `SubscriptionRequest::send` is `XPUB_MANUAL_LAST_VALUE`: to that peer alone. Every request is reported, whatever the verbosity; a departed peer's requested topics come as cancels with nobody to act on.
 - `set_welcome` is `XPUB_WELCOME_MSG`, sent to each new peer.
 - `set_invert_matching` on PUB, XPUB and SUB is `INVERT_MATCHING`. On XSUB it is deprecated and does nothing, as XSUB filters nothing.
+- Over tcp and ipc an XPUB rarely refuses at its HWM: the I/O thread frees room in the pipe as soon as it writes, and the kernel's buffers take the rest. libzmq's writer learns of reads only in batches, so its queue reaches the HWM sooner.
 - Not yet: `ONLY_FIRST_SUBSCRIBE`, `TOPICS_COUNT`.
 
 **Done (PUB and SUB):**
@@ -358,7 +359,7 @@ Rules shared by every pattern:
 
 **`CONFLATE`** (PUSH, PULL, PUB, SUB, DEALER): each queue holds only the latest message and the HWM no longer applies. libzmq conflates both directions, which can lose all but the last of a SUB's subscriptions; here the subscription direction never conflates.
 
-**`IMMEDIATE`** (`SocketOptions::immediate`): a TCP or IPC connection is a peer only while its handshake has completed, so messages are not queued for peers that are not there, and what was queued on a connection that breaks is discarded. As in libzmq, `inproc` ignores it. A connection accepted later reaches the socket only when the socket is next used, so an idle SUB subscribes on it then; `inproc` connections already waiting for a name join in the bind, as libzmq attaches them there, and keep what they queued even if their socket was dropped first. PEER's `connect_peer`, which libzmq refuses with `IMMEDIATE`, ignores it.
+**`IMMEDIATE`** (`SocketOptions::immediate`): a TCP or IPC connection is a peer only while its handshake has completed, so messages are not queued for peers that are not there, and what was queued on a connection that breaks is discarded. As in libzmq, `inproc` ignores it. A connection accepted later reaches the socket only when the socket is next used, so an idle SUB subscribes on it then; `inproc` connections already waiting for a name join in the bind, as libzmq attaches them there, and keep what they queued even if their socket was dropped first. Their pipes then hold both sides' HWMs, as for a connect to a bound name, where before the bind they held only the connecting side's. PEER's `connect_peer`, which libzmq refuses with `IMMEDIATE`, ignores it.
 
 **`unbind` and `disconnect`** (`zmq_unbind`, `zmq_disconnect`): each undoes a bind or connect, closing its listener or ending its retries, and drops the peers that came through it. As in libzmq, what those peers sent is discarded and what was queued to them is delivered within the linger. Differences:
 - `unbind` returns once the I/O thread has closed the listener, so the address can be bound again at once; libzmq closes it in the background.

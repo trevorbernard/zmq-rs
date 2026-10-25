@@ -627,7 +627,17 @@ impl Context {
         }
         let (mut writer, connections) = pipe(Hwm::Unlimited);
         for pending in registry.pending.remove(name).unwrap_or_default() {
-            if let Some(server) = pair(&config, &pending.config, pending.server, &pending.client) {
+            let mut server = pending.server;
+            // Made before the bind, with only the connector's marks: each
+            // direction now holds what both sides would have buffered, as
+            // for a connect to a bound name.
+            server
+                .rx
+                .raise_hwm(hwm_sum(pending.config.send_hwm, config.recv_hwm));
+            server
+                .tx
+                .raise_hwm(hwm_sum(config.send_hwm, pending.config.recv_hwm));
+            if let Some(server) = pair(&config, &pending.config, server, &pending.client) {
                 let _ = writer.try_send(server);
             }
         }

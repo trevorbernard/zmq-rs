@@ -35,11 +35,11 @@ pub enum Hwm {
 /// Creates a pipe.
 pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
     let (producer, consumer) = queue::queue();
-    let shared = Arc::new(Shared::default());
-    let hwm = match hwm {
-        Hwm::Unlimited => None,
-        Hwm::Messages(n) => Some(n.get() as u64),
-    };
+    let hwm = limit(hwm);
+    let shared = Arc::new(Shared {
+        hwm: AtomicU64::new(hwm.unwrap_or(UNLIMITED)),
+        ..Shared::default()
+    });
     let writer = Writer {
         sender: Some(Sender::Queue(producer)),
         shared: shared.clone(),
@@ -92,6 +92,17 @@ enum Receiver<T> {
     Latest(Arc<Mutex<Option<T>>>),
 }
 
+/// The most items a pipe holds, or `None` for no limit.
+fn limit(hwm: Hwm) -> Option<u64> {
+    match hwm {
+        Hwm::Unlimited => None,
+        Hwm::Messages(n) => Some(n.get() as u64),
+    }
+}
+
+/// `Shared::hwm` for no limit: a limit is never zero.
+const UNLIMITED: u64 = 0;
+
 /// Ignores poisoning: the slot is only ever replaced or taken whole, so a
 /// panic while holding the lock cannot leave it half updated.
 fn lock<T>(slot: &Mutex<Option<T>>) -> std::sync::MutexGuard<'_, Option<T>> {
@@ -111,8 +122,31 @@ struct Shared {
     writer_closed: AtomicBool,
     /// Items the writer sent in all, stored once as it goes away.
     final_written: AtomicU64,
+    /// The high-water mark, [`UNLIMITED`] for none. Only ever raised, by
+    /// [`Writer::raise_hwm`] or [`Reader::raise_hwm`]; the writer caches it
+    /// and reloads it only when the pipe looks full.
+    hwm: AtomicU64,
     reader: CachePadded<ReaderWait>,
     writer_waker: CachePadded<AtomicWaker>,
+}
+
+impl Shared {
+    fn hwm(&self) -> Option<u64> {
+        match self.hwm.load(Ordering::Acquire) {
+            UNLIMITED => None,
+            hwm => Some(hwm),
+        }
+    }
+
+    fn raise_hwm(&self, hwm: Hwm) {
+        let new = limit(hwm).unwrap_or(UNLIMITED);
+        let _ = self
+            .hwm
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+                let higher = current != UNLIMITED && (new == UNLIMITED || new > current);
+                higher.then_some(new)
+            });
+    }
 }
 
 /// How a waiting reader is woken. One line: a conflated pipe's writer reads
@@ -195,6 +229,14 @@ pub enum RecvTimeoutError {
 }
 
 impl<T> Writer<T> {
+    /// Raises the high-water mark to `hwm` if that is higher, as libzmq's
+    /// `pipe_t::set_hwms` does when an inproc bind adds the binder's own to
+    /// a pipe made before it. Never lowers it.
+    pub fn raise_hwm(&mut self, hwm: Hwm) {
+        self.shared.raise_hwm(hwm);
+        self.hwm = self.shared.hwm();
+    }
+
     /// Queues `item` if the pipe is below its high-water mark.
     pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
         if self.is_closed() {
@@ -300,7 +342,13 @@ impl<T> Writer<T> {
             return false;
         }
         self.peer_read = self.shared.read.load(Ordering::Acquire);
-        self.written - self.peer_read >= hwm
+        if self.written - self.peer_read < hwm {
+            return false;
+        }
+        // The mark may have been raised since it was cached.
+        self.hwm = self.shared.hwm();
+        self.hwm
+            .is_some_and(|hwm| self.written - self.peer_read >= hwm)
     }
 
     fn ready(&mut self) -> Poll<Result<(), ()>> {
@@ -327,6 +375,19 @@ impl<T> Drop for Writer<T> {
 }
 
 impl<T> Reader<T> {
+    /// Raises the high-water mark to `hwm` if that is higher, as
+    /// [`Writer::raise_hwm`] does from this end, and wakes a writer waiting
+    /// for room.
+    pub fn raise_hwm(&mut self, hwm: Hwm) {
+        if matches!(self.receiver, Receiver::Latest(_)) {
+            return;
+        }
+        self.shared.raise_hwm(hwm);
+        // libzmq's pipe_t::compute_lwm.
+        self.lwm = self.shared.hwm().map(|hwm| hwm.div_ceil(2));
+        self.shared.writer_waker.wake();
+    }
+
     /// Takes the next item if one is queued.
     pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
         self.take(false)
@@ -636,6 +697,57 @@ mod tests {
             Err(TrySendError::Full(5)),
             "never more than 4 queued"
         );
+    }
+
+    #[test]
+    fn the_reader_can_raise_the_mark_for_a_full_writer() {
+        let (mut writer, mut reader) = pipe(hwm(1));
+        writer.try_send(0).unwrap();
+        let (woken, waker) = counting_waker();
+        assert!(
+            writer
+                .poll_ready(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        reader.raise_hwm(hwm(3));
+        assert!(wakes(&woken) > 0, "the waiting writer is woken");
+        writer.try_send(1).unwrap();
+        writer.try_send(2).unwrap();
+        assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+    }
+
+    #[test]
+    fn the_writer_can_raise_its_own_mark() {
+        let (mut writer, _reader) = pipe(hwm(1));
+        writer.raise_hwm(hwm(2));
+        writer.try_send(0).unwrap();
+        writer.try_send(1).unwrap();
+        assert_eq!(writer.try_send(2), Err(TrySendError::Full(2)));
+    }
+
+    #[test]
+    fn raising_to_unlimited_lifts_the_mark() {
+        let (mut writer, mut reader) = pipe(hwm(1));
+        reader.raise_hwm(Hwm::Unlimited);
+        for i in 0..100 {
+            writer.try_send(i).unwrap();
+        }
+    }
+
+    #[test]
+    fn the_mark_is_never_lowered() {
+        let (mut writer, mut reader) = pipe(hwm(3));
+        reader.raise_hwm(hwm(1));
+        writer.raise_hwm(hwm(2));
+        for i in 0..3 {
+            writer.try_send(i).unwrap();
+        }
+        assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
+        reader.raise_hwm(hwm(1));
+        for i in 0..10 {
+            writer.try_send(i).unwrap();
+        }
     }
 
     #[test]
