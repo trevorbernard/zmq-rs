@@ -293,9 +293,12 @@ everywhere except tcp at 256 B (0.90), whose runs overlap: ours spans
   fast; libzmq's 8 B case barely moves, as it stores small messages
   inline.
 - **Release builds with fat LTO** and one codegen unit ran 7–19% faster
-  at 8 B and 256 B at `51f314a`. At `f34b1cc`, over two alternating runs,
-  256 B is 3–11% faster on every transport and 8 B and 4 KiB are level
-  within run-to-run spread. The bench uses the default profile.
+  at 8 B and 256 B at `51f314a`, and at `f34b1cc` 3–11% faster at 256 B
+  with 8 B level. At `975f058`, interleaved, three rounds each, they run
+  8 B 22% slower over tcp (9.83M to 7.70M msg/s), 20% over ipc and 15%
+  over inproc, 256 B 2–5% faster, and 4 KiB level. Where the 8 B path's
+  code lands across crate boundaries moves it more than anything here;
+  the bench uses the default profile.
 - **tcp at 64 KiB was 0.93 on copies.** Our I/O threads spent 41% of
   their time in memmove, against libzmq's 15%: the encoder copied every
   payload into its output buffer. Frames of 8 KiB and up are now written

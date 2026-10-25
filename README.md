@@ -213,10 +213,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ## Performance
 
 The library can't choose its own optimization settings: the application's
-profile builds it. For throughput, build release with fat LTO and one
-codegen unit, which ran 256 B messages 3–11% faster in
-[docs/benchmarks.md](docs/benchmarks.md)'s throughput cases, with no change
-measurable at 8 B or 4 KiB:
+profile builds it. Fat LTO with one codegen unit is not a clear win; measure
+your own workload before adopting it. In
+[docs/benchmarks.md](docs/benchmarks.md)'s throughput cases it ran 256 B
+messages 2–5% faster, but 8 B messages 15–22% slower, with 4 KiB level:
 
 ```toml
 [profile.release]
