@@ -1,6 +1,10 @@
 //! Helpers shared by the ZeroMQ Guide's examples, as the guide's
 //! `zhelpers.h`.
 
+pub mod bstar;
+pub mod clone;
+pub mod flcliapi;
+pub mod kvmsg;
 pub mod kvsimple;
 pub mod mdcliapi;
 pub mod mdcliapi2;
@@ -11,7 +15,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Identity, Message};
+use zmq::{Frame, Identity, Message, Router, RoutingId, Socket};
 
 /// A random number in `0..n`, as the guide's `randof`.
 pub fn randof(n: u64) -> u64 {
@@ -52,4 +56,26 @@ pub fn dump(message: &Message) {
 /// A random printable identity, as the guide's `s_set_id`.
 pub fn random_identity() -> Identity {
     Identity::new(format!("{:04X}-{:04X}", randof(0x10000), randof(0x10000))).expect("short enough")
+}
+
+/// The message a ROUTER received, with its sender's routing id back in
+/// front, as libzmq's ROUTER delivers it.
+pub fn with_sender((from, message): (RoutingId, Message)) -> Message {
+    let mut framed = Message::new(Frame::from(from));
+    framed.extend(message);
+    framed
+}
+
+/// Sends `message` to the peer its first frame names, as libzmq's ROUTER
+/// does. Like it, drops the message if there is no such peer or it is
+/// full.
+pub fn route(
+    router: &mut Socket<Router>,
+    message: Message,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (to, rest) = message.into_parts();
+    if let Ok(rest) = Message::try_from(rest) {
+        let _ = router.try_send(&RoutingId::new(to)?, rest);
+    }
+    Ok(())
 }
