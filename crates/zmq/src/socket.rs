@@ -115,6 +115,26 @@ impl Routing for Subscriber {
     }
 }
 
+/// XSUB's routing: SUB's, delivering every message, as libzmq's XSUB
+/// does. Only SUB filters by topic.
+#[doc(hidden)]
+#[derive(Debug)]
+pub struct XSubRouting(Subscriber);
+
+impl Default for XSubRouting {
+    fn default() -> Self {
+        let mut subscriber = Subscriber::default();
+        subscriber.set_deliver_all(true);
+        Self(subscriber)
+    }
+}
+
+impl Routing for XSubRouting {
+    fn connected(&mut self, peers: &mut PeerList) {
+        self.0.connected(peers);
+    }
+}
+
 /// A socket type that receives, so its sockets can be
 /// [polled](crate::poll) until a receive would not wait, with
 /// [`Socket::readable`]. REQ has none: its [`request`](Socket::request)
@@ -341,7 +361,7 @@ impl SocketType for ManualXPub {
 impl sealed::Sealed for XSub {}
 impl SocketType for XSub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XSub;
-    type Routing = Subscriber;
+    type Routing = XSubRouting;
     type Received = Message;
 }
 
@@ -1166,17 +1186,20 @@ impl fmt::Debug for SubscriptionRequest<'_> {
 }
 
 impl Socket<XSub> {
-    /// Whether messages starting with none of the topics are received
-    /// instead, as libzmq's `ZMQ_INVERT_MATCHING`. Off by default.
+    /// Does nothing: an XSUB delivers every message, as libzmq's does, so
+    /// there is nothing to invert. Invert the matching on its publishers.
+    #[deprecated(note = "an XSUB delivers every message, so there is nothing to invert")]
     pub fn set_invert_matching(&mut self, on: bool) {
-        self.routing.set_invert_matching(on);
+        let _ = on;
     }
 
-    /// Subscribes to messages whose first frame starts with `topic`, as
-    /// [`Socket<Sub>::subscribe`] does.
+    /// Asks its publishers for messages whose first frame starts with
+    /// `topic`, as [`Socket<Sub>::subscribe`] does. Unlike SUB, it does not
+    /// filter what arrives: as libzmq's XSUB, it delivers every message.
     pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
         self.peers.accept(&mut noop());
         self.routing
+            .0
             .subscribe(self.peers.list_mut(), topic.as_ref());
     }
 
@@ -1184,6 +1207,7 @@ impl Socket<XSub> {
     pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
         self.peers.accept(&mut noop());
         self.routing
+            .0
             .unsubscribe(self.peers.list_mut(), topic.as_ref())
     }
 
@@ -1193,6 +1217,7 @@ impl Socket<XSub> {
     pub fn send(&mut self, message: impl Into<Message>) {
         self.peers.accept(&mut noop());
         self.routing
+            .0
             .send_upstream(self.peers.list_mut(), message.into());
     }
 
@@ -1208,22 +1233,22 @@ impl Socket<XSub> {
         }
     }
 
-    /// The next message on a subscribed topic, if one is waiting.
+    /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
         ready(self.poll_recv(&mut noop()))
     }
 
-    /// The next message on a subscribed topic, blocking until one arrives.
+    /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
         wait::block_on(|cx| self.poll_recv(cx))
     }
 
-    /// The next message on a subscribed topic, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
         wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
     }
 
-    /// The next message on a subscribed topic, waiting until one arrives.
+    /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
         future::poll_fn(|cx| self.poll_recv(cx)).await
     }
@@ -1233,7 +1258,7 @@ impl Socket<XSub> {
             return Poll::Ready(received);
         }
         self.peers.accept(cx);
-        self.routing.poll_recv(self.peers.list_mut(), cx)
+        self.routing.0.poll_recv(self.peers.list_mut(), cx)
     }
 }
 

@@ -327,6 +327,7 @@ Rules shared by every pattern:
   - libzmq also delivers non-subscription messages sent by XSUB peers.
 - **XSUB**
   - Forwards to all publishers.
+  - Delivers every message it receives, as libzmq's XSUB does: only SUB filters by topic. Its subscriptions tell publishers what to send.
   - SHOULD unsubscribe on close, and resends its subscriptions on reconnect.
 - libzmq extensions: `XPUB_NODROP` (errors instead of dropping, opt-in), `VERBOSE`/`VERBOSER`, `MANUAL`, `WELCOME_MSG`, `INVERT_MATCHING`, `ONLY_FIRST_SUBSCRIBE`, `CONFLATE`.
 
@@ -345,7 +346,7 @@ Rules shared by every pattern:
 - `set_verbosity(Verbosity::Subscriptions)` is `XPUB_VERBOSE`, and `Verbosity::Everything` is `XPUB_VERBOSER`. As in libzmq, a peer that leaves under `Everything` cancels each of its topics even if others remain.
 - `ManualXPub` is `XPUB_MANUAL`. Each subscription or cancel arrives as a `SubscriptionRequest` tied to the peer that sent it. It has no effect until `accept`, or until `subscribe`/`unsubscribe` set something else for that peer. `SubscriptionRequest::send` is `XPUB_MANUAL_LAST_VALUE`: to that peer alone. Every request is reported, whatever the verbosity; a departed peer's requested topics come as cancels with nobody to act on.
 - `set_welcome` is `XPUB_WELCOME_MSG`, sent to each new peer.
-- `set_invert_matching` on PUB, XPUB, SUB and XSUB is `INVERT_MATCHING`.
+- `set_invert_matching` on PUB, XPUB and SUB is `INVERT_MATCHING`. On XSUB it is deprecated and does nothing, as XSUB filters nothing.
 - Not yet: `ONLY_FIRST_SUBSCRIBE`, `TOPICS_COUNT`.
 
 **Done (PUB and SUB):**

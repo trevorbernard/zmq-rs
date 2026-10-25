@@ -633,6 +633,9 @@ pub struct Subscriber {
     topics: Topics,
     /// Whether wanted messages are those matching no topic.
     invert: bool,
+    /// Whether every message is delivered, matching or not, as libzmq's
+    /// XSUB does: only SUB filters.
+    deliver_all: bool,
     recv: FairQueue,
     /// The newest peer that has been sent the topics. Keys only grow.
     greeted: Option<PeerKey>,
@@ -703,10 +706,16 @@ impl Subscriber {
             let Poll::Ready((_, message)) = self.recv.poll_recv(peers, cx) else {
                 return Poll::Pending;
             };
-            if self.topics.matches(message.split_first().0) != self.invert {
+            if self.deliver_all || self.topics.matches(message.split_first().0) != self.invert {
                 return Poll::Ready(message);
             }
         }
+    }
+
+    /// Whether every message is delivered, whatever its topic, as libzmq's
+    /// XSUB does. The topics are still sent to peers, which filter by them.
+    pub fn set_deliver_all(&mut self, on: bool) {
+        self.deliver_all = on;
     }
 
     /// Whether messages matching no topic are received instead (libzmq's

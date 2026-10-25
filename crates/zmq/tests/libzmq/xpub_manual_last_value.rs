@@ -17,13 +17,11 @@ use crate::support::SETTLE;
 use crate::xpub_manual::{cases, expect, expect_nothing, on_request, subscribed};
 
 #[test]
-#[ignore = "zmq-rs bug: an XSUB drops messages for topics it did not subscribe to, which libzmq's XSUB delivers"]
 fn basic() {
     cases::basic();
 }
 
 #[test]
-#[ignore = "zmq-rs bug: an XSUB drops messages for topics it did not subscribe to, which libzmq's XSUB delivers"]
 fn unsubscribe_manual() {
     cases::unsubscribe_manual();
 }
@@ -42,7 +40,6 @@ fn missing_subscriptions() {
 }
 
 #[test]
-#[ignore = "zmq-rs bug: an XSUB drops messages for topics it did not subscribe to, which libzmq's XSUB delivers"]
 fn unsubscribe_cleanup() {
     cases::unsubscribe_cleanup();
 }
