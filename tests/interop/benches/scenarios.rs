@@ -141,11 +141,17 @@ fn run(scenario: Scenario, ours: bool) -> f64 {
 }
 
 fn ours_message(frames: usize, size: usize) -> Message {
-    // Built frame by frame, as libzmq's sender sends them, without first
-    // collecting them into a list.
-    let mut message = Message::new(vec![0; size]);
-    message.extend((1..frames).map(|_| Frame::from(vec![0; size])));
-    message
+    let frame = || Frame::from(vec![0; size]);
+    // libzmq's sender keeps no list of frames. Two fit a message without
+    // one; more go to one list allocated at its final size, which
+    // collecting does and extending, growing it, does not.
+    if frames <= 2 {
+        let mut message = Message::new(frame());
+        message.extend((1..frames).map(|_| frame()));
+        message
+    } else {
+        Message::try_from((0..frames).map(|_| frame()).collect::<Vec<_>>()).expect("frames")
+    }
 }
 
 fn multipart(ours: bool, frames: usize, count: usize) -> f64 {
