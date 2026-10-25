@@ -34,5 +34,15 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
+      - name: Install nextest
+        # v2.87.27
+        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
+        with:
+          tool: nextest
+
       - name: Test
-        run: cargo test --workspace --all-features
+        run: cargo nextest run --workspace --all-features
+
+      # nextest does not run doctests.
+      - name: Doctests
+        run: cargo test --workspace --all-features --doc
