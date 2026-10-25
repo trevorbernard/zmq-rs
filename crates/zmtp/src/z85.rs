@@ -24,8 +24,8 @@ pub fn encode(data: &[u8]) -> Result<String, Z85Error> {
         return Err(Z85Error::Length);
     }
     let mut text = String::with_capacity(data.len() / 4 * 5);
-    for group in data.chunks_exact(4) {
-        let mut value = u32::from_be_bytes([group[0], group[1], group[2], group[3]]);
+    for group in data.as_chunks::<4>().0 {
+        let mut value = u32::from_be_bytes(*group);
         let mut digits = [0u8; 5];
         for digit in digits.iter_mut().rev() {
             *digit = ALPHABET[(value % 85) as usize];
@@ -43,7 +43,7 @@ pub fn decode(text: &str) -> Result<Vec<u8>, Z85Error> {
         return Err(Z85Error::Length);
     }
     let mut data = Vec::with_capacity(octets.len() / 5 * 4);
-    for (start, group) in (0..).step_by(5).zip(octets.chunks_exact(5)) {
+    for (start, group) in (0..).step_by(5).zip(octets.as_chunks::<5>().0) {
         let mut value: u64 = 0;
         for (at, &c) in (start..).zip(group) {
             // The alphabet is ASCII, so the first octet outside it starts

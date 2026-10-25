@@ -215,8 +215,7 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
     let warmed = Arc::new(AtomicUsize::new(0));
     let finished = Arc::new(AtomicUsize::new(0));
     let mut threads = Vec::new();
-    let elapsed;
-    if ours {
+    let elapsed = if ours {
         let pub_cx = Context::new().unwrap();
         let mut publisher = pub_cx.socket_with::<Pub>(unlimited());
         let bound = publisher.bind("tcp://127.0.0.1:*").unwrap().to_string();
@@ -252,7 +251,7 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
         for t in threads {
             t.join().unwrap();
         }
-        elapsed = started.elapsed();
+        started.elapsed()
     } else {
         let publisher = libzmq::Socket::new(Kind::Pub);
         publisher.set_hwm(0, 0);
@@ -290,8 +289,8 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
         for t in threads {
             t.join().unwrap();
         }
-        elapsed = started.elapsed();
-    }
+        started.elapsed()
+    };
     count as f64 / elapsed.as_secs_f64()
 }
 

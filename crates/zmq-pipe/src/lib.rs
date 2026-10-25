@@ -142,7 +142,7 @@ impl Shared {
         let new = limit(hwm).unwrap_or(UNLIMITED);
         let _ = self
             .hwm
-            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |current| {
+            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
                 let higher = current != UNLIMITED && (new == UNLIMITED || new > current);
                 higher.then_some(new)
             });
