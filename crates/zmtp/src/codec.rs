@@ -101,6 +101,10 @@ const V1_LONG: u8 = 0xFF;
 
 /// Space reserved for reading while between frames.
 const READ_SIZE: usize = 8 * 1024;
+/// Least space worth reading into before reserving more. Reading into what
+/// is left, rather than reserving a full [`READ_SIZE`], keeps a frame still
+/// alive from making every read move to a new buffer.
+const MIN_READ: usize = 1024;
 /// Most space reserved ahead of a large frame's body. Reserving the declared
 /// size up front would let a peer make us allocate any amount by lying.
 const MAX_RESERVE: usize = 1024 * 1024;
@@ -286,7 +290,11 @@ impl Decoder {
         };
         let target = wanted.min(MAX_READ);
         let spare = self.buf.len() - self.filled;
-        if spare < target {
+        let needed = match self.state {
+            State::Header => MIN_READ,
+            State::Body { size, .. } => size.saturating_sub(self.filled).max(MIN_READ),
+        };
+        if spare < target.min(needed) {
             // Zero only space no read has been offered yet. `reserve` keeps
             // the initialized prefix, including zeroed spare space.
             self.buf.reserve(wanted - spare);
@@ -689,6 +697,32 @@ mod tests {
             None,
             "unreported octets are never decoded"
         );
+    }
+
+    #[test]
+    fn a_live_frame_leaves_its_buffer_to_be_read_into() {
+        let input = encode(Version::V3_1, &message(&[&[7; 256]]));
+        let mut d = decoder(Version::V3_1);
+        let mut first = std::ptr::null();
+        d.fill(|buf| {
+            first = buf.as_ptr();
+            buf[..input.len()].copy_from_slice(&input);
+            Ok::<_, ()>(input.len())
+        })
+        .unwrap();
+        let held = d.decode().unwrap();
+        assert!(held.is_some());
+        d.fill(|buf| {
+            assert_eq!(
+                buf.as_ptr(),
+                first.wrapping_add(input.len()),
+                "moved to a new buffer"
+            );
+            buf[..input.len()].copy_from_slice(&input);
+            Ok::<_, ()>(input.len())
+        })
+        .unwrap();
+        assert_eq!(d.decode().unwrap(), held);
     }
 
     #[test]
