@@ -23,7 +23,7 @@
 
 use std::fmt;
 
-use bytes::Bytes;
+use bytes::{Buf, Bytes};
 use dryoc::classic::crypto_box::{
     crypto_box_beforenm, crypto_box_detached_afternm_inplace, crypto_box_keypair,
     crypto_box_open_detached_afternm_inplace,
@@ -595,11 +595,13 @@ impl CurveCodec {
     pub fn decode(&mut self, incoming: Incoming) -> Result<Option<Incoming>, CurveError> {
         let body = match incoming {
             Incoming::Command(body) => body,
-            Incoming::Message(message) => match message.split_first() {
-                (body, []) => body.clone(),
-                // MESSAGE is never sent with MORE: each frame is boxed alone.
-                _ => return Err(CurveError::NotMessage),
-            },
+            // MESSAGE is never sent with MORE: each frame is boxed alone.
+            Incoming::Message(message) if message.len().get() > 1 => {
+                return Err(CurveError::NotMessage);
+            }
+            // Taken, not cloned: cloning a frame that owns its buffer
+            // allocates a shared header for it.
+            Incoming::Message(message) => message.into_iter().next().expect("one frame"),
         };
         let data = body.strip_prefix(MESSAGE).ok_or(CurveError::NotMessage)?;
         if data.len() < 8 + TAG + 1 {
@@ -622,7 +624,11 @@ impl CurveCodec {
         .map_err(|_| CurveError::Cryptographic)?;
         self.peer_nonce = nonce;
         let flags = opened[0];
-        let payload = Frame::from_shared(Bytes::from(opened).slice(1..));
+        // Advanced past the flags rather than sliced, which, like a clone,
+        // would allocate a shared header.
+        let mut opened = Bytes::from(opened);
+        opened.advance(1);
+        let payload = Frame::from_shared(opened);
         if flags & COMMAND != 0 {
             if self.partial.is_some() {
                 return Err(CurveError::Malformed);
