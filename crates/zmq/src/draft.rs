@@ -100,7 +100,12 @@ impl Socket<Dish> {
     pub fn leave(&mut self, group: &Group) -> bool {
         let mut cx = noop();
         let (peers, dish) = self.parts_accepting(&mut cx);
-        dish.leave(peers, group)
+        let left = dish.leave(peers, group);
+        // One that a poll already took counts as queued.
+        if left && self.pending.as_ref().is_some_and(|(held, _)| held == group) {
+            self.pending = None;
+        }
+        left
     }
 
     /// The next message and its group, if one is waiting.

@@ -187,3 +187,20 @@ fn a_bound_subscriber_tells_publishers_that_connect() {
         Message::from("x marks the spot")
     );
 }
+
+#[test]
+fn unsubscribing_drops_a_message_a_poll_already_took() {
+    let context = Context::new().unwrap();
+    let mut publisher = context.socket::<Pub>();
+    publisher.bind("inproc://held").unwrap();
+    let mut subscriber = context.socket::<Sub>();
+    subscriber.subscribe("a");
+    subscriber.connect("inproc://held").unwrap();
+    assert_eq!(publisher.send("a1"), 1);
+    assert_eq!(
+        zmq::poll_timeout([subscriber.readable()], FIVE),
+        Some([true])
+    );
+    assert!(subscriber.unsubscribe("a"));
+    assert_eq!(subscriber.try_recv(), None);
+}

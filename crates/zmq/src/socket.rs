@@ -170,7 +170,7 @@ pub trait WaitsForRoom: SocketType + Sized {
 impl<T: Receives> Socket<T> {
     /// What a poll for readability received, or else the next.
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<T::Received> {
-        if let Some(received) = self.take_pending() {
+        if let Some(received) = self.pending.take() {
             return Poll::Ready(received);
         }
         T::poll_next(self, cx)
@@ -615,7 +615,7 @@ pub struct Socket<T: SocketType> {
     connected: Vec<(String, Endpoint, EndpointId)>,
     /// What a poll for readability received, which the next receive
     /// returns.
-    pending: Option<T::Received>,
+    pub(crate) pending: Option<T::Received>,
     _type: PhantomData<T>,
 }
 
@@ -630,11 +630,6 @@ fn is_peer(_: zmtp::SocketType) -> bool {
 }
 
 impl<T: SocketType> Socket<T> {
-    /// What a poll for readability received, for the next receive.
-    pub(crate) fn take_pending(&mut self) -> Option<T::Received> {
-        self.pending.take()
-    }
-
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
@@ -1033,8 +1028,18 @@ impl Socket<Sub> {
     /// Messages already queued that no longer match are dropped.
     pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
         self.peers.accept(&mut noop());
-        self.routing
-            .unsubscribe(self.peers.list_mut(), topic.as_ref())
+        let removed = self
+            .routing
+            .unsubscribe(self.peers.list_mut(), topic.as_ref());
+        // One that a poll already took counts as queued.
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|message| !self.routing.wants(message))
+        {
+            self.pending = None;
+        }
+        removed
     }
 
     /// The next message on a subscribed topic, if one is waiting.

@@ -710,10 +710,15 @@ impl Subscriber {
             let Poll::Ready((_, message)) = self.recv.poll_recv(peers, cx) else {
                 return Poll::Pending;
             };
-            if self.deliver_all || self.topics.matches(message.split_first().0) != self.invert {
+            if self.wants(&message) {
                 return Poll::Ready(message);
             }
         }
+    }
+
+    /// Whether `message` is one to receive, by its topic.
+    pub fn wants(&self, message: &Message) -> bool {
+        self.deliver_all || self.topics.matches(message.split_first().0) != self.invert
     }
 
     /// Whether every message is delivered, whatever its topic, as libzmq's

@@ -135,3 +135,17 @@ fn joins_are_never_dropped_however_many() {
         assert!(dish.try_recv().is_some());
     }
 }
+
+#[test]
+fn leaving_drops_a_message_a_poll_already_took() {
+    let context = Context::new().unwrap();
+    let mut radio = context.socket::<Radio>();
+    radio.bind("inproc://radio-held").unwrap();
+    let mut dish = context.socket::<Dish>();
+    dish.connect("inproc://radio-held").unwrap();
+    assert!(dish.join(&group("news")));
+    assert_eq!(radio.send(&group("news"), "rain"), 1);
+    assert_eq!(zmq::poll_timeout([dish.readable()], FIVE), Some([true]));
+    assert!(dish.leave(&group("news")));
+    assert_eq!(dish.try_recv(), None);
+}
