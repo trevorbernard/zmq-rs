@@ -8,6 +8,8 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
+use crate::command::MAX_SHORT;
+use crate::identity::MAX_IDENTITY;
 use crate::{
     Authenticated, Command, CommandError, Encoder, ErrorReason, Frame, Identity, Incoming, Message,
     Metadata, PeerGreeting, PropertyName, SocketType, Version, ZapCredentials, ZapFailure,
@@ -95,7 +97,6 @@ pub enum HandshakeError {
 
 /// Sent to a ZMTP 3.x peer whose socket type we reject.
 const REJECTION: &str = "incompatible socket type";
-const MAX_IDENTITY: usize = u8::MAX as usize;
 
 impl NullHandshake {
     /// Starts the handshake with a peer whose greeting is `peer`, writing our
@@ -354,7 +355,7 @@ pub(crate) fn write_command(version: Version, command: &Command, out: &mut Vec<u
 
 /// Writes a command frame whose body is `name` followed by `data`.
 pub(crate) fn write_raw_command(version: Version, name: &str, data: &[u8], out: &mut Vec<u8>) {
-    debug_assert!(!name.is_empty() && name.len() <= MAX_IDENTITY);
+    debug_assert!(!name.is_empty() && name.len() <= MAX_SHORT);
     let mut body = Zeroizing::new(Vec::with_capacity(1 + name.len() + data.len()));
     body.push(name.len() as u8);
     body.extend_from_slice(name.as_bytes());

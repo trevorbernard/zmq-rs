@@ -112,7 +112,10 @@ pub enum CommandError {
     EmptyPropertyName,
 }
 
-const MAX_SHORT: usize = u8::MAX as usize;
+/// The most octets in a short string, which a length octet precedes
+/// (RFC 23, 37): a command name, an ERROR reason, a group, or a PLAIN
+/// credential.
+pub(crate) const MAX_SHORT: usize = u8::MAX as usize;
 const MAX_PING_CONTEXT: usize = 16;
 const MAX_PROPERTY_VALUE: usize = i32::MAX as usize;
 const DECISECOND_NANOS: u128 = 100_000_000;

@@ -488,9 +488,6 @@ impl InprocListener {
     }
 }
 
-/// Introduces the two ends of an `inproc` connection to each other, as a
-/// handshake would, and returns the server's end. Incompatible socket types
-/// are never paired: dropping the server's end closes the connection.
 /// One direction of a connection: only the latest message if `conflate`,
 /// otherwise up to `hwm`.
 pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader<Message>) {
@@ -501,6 +498,9 @@ pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader
     }
 }
 
+/// Introduces the two ends of an `inproc` connection to each other, as a
+/// handshake would, and returns the server's end. Incompatible socket types
+/// are never paired: dropping the server's end closes the connection.
 fn pair(
     server_config: &ConnectionConfig,
     client_config: &ConnectionConfig,

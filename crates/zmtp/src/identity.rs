@@ -20,11 +20,14 @@ pub enum InvalidIdentity {
     ReservedPrefix,
 }
 
+/// The most octets in an identity, as libzmq limits a routing id.
+pub(crate) const MAX_IDENTITY: usize = u8::MAX as usize;
+
 impl Identity {
     /// Validates `identity`.
     pub fn new(identity: impl Into<Frame>) -> Result<Self, InvalidIdentity> {
         let identity = identity.into();
-        if identity.len() > usize::from(u8::MAX) {
+        if identity.len() > MAX_IDENTITY {
             Err(InvalidIdentity::TooLong)
         } else if identity.first() == Some(&0) {
             Err(InvalidIdentity::ReservedPrefix)

@@ -159,7 +159,8 @@ impl Shared {
 #[derive(Debug, Default)]
 struct ReaderWait {
     /// Raised by a conflated pipe's reader about to wait, so the writer
-    /// wakes it only then. A queue keeps this state in its own counter.
+    /// wakes it only then. A queue marks the slot the reader waits on as
+    /// sleeping instead.
     waiting: AtomicBool,
     waker: AtomicWaker,
 }

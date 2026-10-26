@@ -10,8 +10,9 @@ use crate::z85::{self, Z85Error};
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct PublicKey([u8; 32]);
 
-/// A CURVE secret key. Zeroized when dropped, never printed, and not
-/// `Clone`, so it exists in one place.
+/// A CURVE secret key. Zeroized when dropped and never printed. Not
+/// `Clone`, so every copy is deliberate: the CURVE mechanisms each keep a
+/// zeroizing copy for the length of a handshake.
 pub struct SecretKey(Zeroizing<[u8; 32]>);
 
 /// A long-term key pair. Only generated or derived from its secret key, so
@@ -25,7 +26,7 @@ pub struct Keypair {
 /// Why a key could not be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyError {
-    /// Not 40 Z85 characters, or not 32 octets.
+    /// Not 40 Z85 characters.
     Length,
     /// Not valid Z85.
     Z85(Z85Error),
@@ -135,7 +136,7 @@ impl fmt::Debug for SecretKey {
 impl fmt::Display for KeyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Length => f.write_str("a CURVE key is 32 octets, or 40 Z85 characters"),
+            Self::Length => f.write_str("a CURVE key in Z85 is 40 characters"),
             Self::Z85(err) => write!(f, "invalid CURVE key: {err}"),
         }
     }

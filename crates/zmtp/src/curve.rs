@@ -42,9 +42,27 @@ use crate::{
 
 const TAG: usize = 16;
 const KEY: usize = 32;
-const COOKIE: usize = 16 + KEY + KEY + TAG;
-const MORE: u8 = 0x01;
-const COMMAND: u8 = 0x02;
+/// A nonce's part on the wire: 8 octets of counter after a 16-octet
+/// prefix, or 16 random octets after an 8-octet one.
+const SHORT_NONCE: usize = 8;
+const LONG_NONCE: usize = 16;
+/// HELLO's padding, so that HELLO is as long as WELCOME (anti-amplification).
+const HELLO_PADDING: usize = 72;
+/// HELLO's signature: a box of 64 zero octets.
+const SIGNATURE: usize = 64 + TAG;
+/// HELLO: version 1.0, padding, C', a short nonce and the signature box.
+const HELLO: usize = 2 + HELLO_PADDING + KEY + SHORT_NONCE + SIGNATURE;
+/// Box[C' s'] under the cookie key, after its long nonce.
+const COOKIE: usize = LONG_NONCE + KEY + KEY + TAG;
+/// WELCOME: a long nonce and Box[S' cookie].
+const WELCOME: usize = LONG_NONCE + KEY + COOKIE + TAG;
+/// The vouch, Box[C' S].
+const VOUCH: usize = KEY + KEY + TAG;
+/// The least INITIATE's box holds: C, the vouch's long nonce and the vouch.
+const INITIATE_BOXED: usize = KEY + LONG_NONCE + VOUCH;
+/// The flags inside a MESSAGE box (RFC 26), not the wire's (RFC 37).
+const BOX_MORE: u8 = 0x01;
+const BOX_COMMAND: u8 = 0x02;
 
 const HELLO_PREFIX: &[u8; 16] = b"CurveZMQHELLO---";
 const INITIATE_PREFIX: &[u8; 16] = b"CurveZMQINITIATE";
@@ -223,11 +241,11 @@ impl CurveClient {
         let version = require_zmtp_3(peer)?;
         let transient = Transient::generate();
         let key = BoxKey::between(server_key.as_bytes(), &transient.secret)?;
-        let signature = seal(&key, &short_nonce(HELLO_PREFIX, 1), &[0; 64]);
-        let mut hello = Vec::with_capacity(194);
+        let signature = seal(&key, &short_nonce(HELLO_PREFIX, 1), &[0; SIGNATURE - TAG]);
+        let mut hello = Vec::with_capacity(HELLO);
         // Version 1.0, then anti-amplification padding.
         hello.extend_from_slice(&[1, 0]);
-        hello.extend_from_slice(&[0; 72]);
+        hello.extend_from_slice(&[0; HELLO_PADDING]);
         hello.extend_from_slice(&transient.public);
         hello.extend_from_slice(&1u64.to_be_bytes());
         hello.extend_from_slice(&signature);
@@ -269,10 +287,10 @@ impl CurveClient {
     /// Opens WELCOME and answers with INITIATE. Returns the box key for
     /// the rest of the connection.
     fn welcome(&self, data: &[u8], out: &mut Vec<u8>) -> Result<BoxKey, HandshakeError> {
-        if data.len() != 16 + 144 {
+        if data.len() != WELCOME {
             return Err(malformed("WELCOME"));
         }
-        let (nonce, sealed) = data.split_at(16);
+        let (nonce, sealed) = data.split_at(LONG_NONCE);
         let opened = open(
             &BoxKey::between(self.server_key.as_bytes(), &self.transient.secret)?,
             &long_nonce(b"WELCOME-", nonce),
@@ -283,7 +301,7 @@ impl CurveClient {
         let key = BoxKey::between(&server_transient, &self.transient.secret)?;
 
         // The vouch proves C and C' belong together: Box[C',S](C->S').
-        let vouch_nonce = random::<16>();
+        let vouch_nonce = random::<LONG_NONCE>();
         let mut vouched = Vec::with_capacity(2 * KEY);
         vouched.extend_from_slice(&self.transient.public);
         vouched.extend_from_slice(self.server_key.as_bytes());
@@ -301,7 +319,7 @@ impl CurveClient {
             &mut plaintext,
         );
         let sealed = seal(&key, &short_nonce(INITIATE_PREFIX, 2), &plaintext);
-        let mut initiate = Vec::with_capacity(cookie.len() + 8 + sealed.len());
+        let mut initiate = Vec::with_capacity(cookie.len() + SHORT_NONCE + sealed.len());
         initiate.extend_from_slice(cookie);
         initiate.extend_from_slice(&2u64.to_be_bytes());
         initiate.extend_from_slice(&sealed);
@@ -313,10 +331,10 @@ impl CurveClient {
         let ClientState::WaitingForReady { key } = self.state else {
             unreachable!("READY is only handled while waiting for it");
         };
-        if data.len() < 8 + TAG {
+        if data.len() < SHORT_NONCE + TAG {
             return Err(malformed("READY"));
         }
-        let (nonce, sealed) = data.split_at(8);
+        let (nonce, sealed) = data.split_at(SHORT_NONCE);
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         let opened = open(&key, &short_nonce(READY_PREFIX, nonce), sealed)?;
         let metadata =
@@ -382,21 +400,27 @@ impl CurveServer {
 
     /// Checks HELLO and answers with WELCOME.
     fn hello(&self, data: &[u8], out: &mut Vec<u8>) -> Result<ServerState, HandshakeError> {
-        if data.len() != 194 || data[..2] != [1, 0] {
+        if data.len() != HELLO {
             return Err(malformed("HELLO"));
         }
-        let client_transient: Key = data[74..106].try_into().expect("32 octets");
-        let nonce = u64::from_be_bytes(data[106..114].try_into().expect("8 octets"));
+        let (version, rest) = data.split_at(2);
+        if version != [1, 0] {
+            return Err(malformed("HELLO"));
+        }
+        let (client_transient, rest) = rest[HELLO_PADDING..].split_at(KEY);
+        let (nonce, signature) = rest.split_at(SHORT_NONCE);
+        let client_transient: Key = client_transient.try_into().expect("32 octets");
+        let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         // The signature box only proves the client knows our key; its 64
         // zero octets are not checked, as libzmq does not.
         let long_term = BoxKey::between(&client_transient, &self.secret)?;
-        open(&long_term, &short_nonce(HELLO_PREFIX, nonce), &data[114..])?;
+        open(&long_term, &short_nonce(HELLO_PREFIX, nonce), signature)?;
 
         // The cookie holds C' and s' under a key only we know, so the
         // client must send them back in INITIATE.
         let transient = Transient::generate();
         let cookie_key = BoxKey::secret(random::<KEY>());
-        let cookie_nonce = random::<16>();
+        let cookie_nonce = random::<LONG_NONCE>();
         let mut cookie_plaintext = Zeroizing::new(Vec::with_capacity(2 * KEY));
         cookie_plaintext.extend_from_slice(&client_transient);
         cookie_plaintext.extend_from_slice(&*transient.secret);
@@ -410,13 +434,13 @@ impl CurveServer {
         plaintext.extend_from_slice(&transient.public);
         plaintext.extend_from_slice(&cookie_nonce);
         plaintext.extend_from_slice(&cookie);
-        let welcome_nonce = random::<16>();
+        let welcome_nonce = random::<LONG_NONCE>();
         let sealed = seal(
             &long_term,
             &long_nonce(b"WELCOME-", &welcome_nonce),
             &plaintext,
         );
-        let mut welcome = Vec::with_capacity(16 + sealed.len());
+        let mut welcome = Vec::with_capacity(WELCOME);
         welcome.extend_from_slice(&welcome_nonce);
         welcome.extend_from_slice(&sealed);
         write_raw_command(self.version, "WELCOME", &welcome, out);
@@ -437,11 +461,11 @@ impl CurveServer {
         else {
             unreachable!("INITIATE is only handled while waiting for it");
         };
-        if data.len() < COOKIE + 8 + TAG + KEY + 16 + 80 {
+        if data.len() < COOKIE + SHORT_NONCE + INITIATE_BOXED + TAG {
             return Err(malformed("INITIATE"));
         }
         let (cookie, rest) = data.split_at(COOKIE);
-        let (cookie_nonce, cookie_box) = cookie.split_at(16);
+        let (cookie_nonce, cookie_box) = cookie.split_at(LONG_NONCE);
         let cookie = open(
             &cookie_key,
             &long_nonce(b"COOKIE--", cookie_nonce),
@@ -451,16 +475,17 @@ impl CurveServer {
             return Err(HandshakeError::Cryptographic);
         }
 
-        let (nonce, sealed) = rest.split_at(8);
+        let (nonce, sealed) = rest.split_at(SHORT_NONCE);
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         let key = BoxKey::between(&client_transient, &transient.secret)?;
         let opened = open(&key, &short_nonce(INITIATE_PREFIX, nonce), sealed)?;
-        if opened.len() < KEY + 16 + 80 {
+        if opened.len() < INITIATE_BOXED {
             return Err(malformed("INITIATE"));
         }
-        let client_key = PublicKey::from_bytes(opened[..KEY].try_into().expect("32 octets"));
-        let vouch_nonce = &opened[KEY..KEY + 16];
-        let vouch = &opened[KEY + 16..KEY + 16 + 80];
+        let (client_key, rest) = opened.split_at(KEY);
+        let (vouch_nonce, rest) = rest.split_at(LONG_NONCE);
+        let (vouch, metadata) = rest.split_at(VOUCH);
+        let client_key = PublicKey::from_bytes(client_key.try_into().expect("32 octets"));
         let vouched = open(
             &BoxKey::between(client_key.as_bytes(), &transient.secret)?,
             &long_nonce(b"VOUCH---", vouch_nonce),
@@ -470,8 +495,8 @@ impl CurveServer {
         if vouched[..KEY] != client_transient || vouched[KEY..] != *self.public.as_bytes() {
             return Err(HandshakeError::Cryptographic);
         }
-        let metadata = parse_metadata(&opened[KEY + 16 + 80..], "INITIATE")
-            .map_err(HandshakeError::MalformedCommand)?;
+        let metadata =
+            parse_metadata(metadata, "INITIATE").map_err(HandshakeError::MalformedCommand)?;
 
         let request = ZapRequest {
             domain: self.config.domain.clone(),
@@ -540,7 +565,7 @@ impl CurveCodec {
     ) -> Result<(), CurveError> {
         let last = message.len().get() - 1;
         for (i, frame) in message.iter().enumerate() {
-            let flags = if i < last { MORE } else { 0 };
+            let flags = if i < last { BOX_MORE } else { 0 };
             self.encode_frame(flags, frame, encoder, out)?;
         }
         Ok(())
@@ -553,7 +578,7 @@ impl CurveCodec {
         encoder: Encoder,
         out: &mut Vec<u8>,
     ) -> Result<(), CurveError> {
-        self.encode_frame(COMMAND, body, encoder, out)
+        self.encode_frame(BOX_COMMAND, body, encoder, out)
     }
 
     fn encode_frame(
@@ -572,7 +597,7 @@ impl CurveCodec {
         // the authenticator, then flags and payload, encrypted where they
         // were copied.
         let boxed = 1 + payload.len();
-        encoder.encode_frame_header(MESSAGE.len() + 8 + TAG + boxed, out);
+        encoder.encode_frame_header(MESSAGE.len() + SHORT_NONCE + TAG + boxed, out);
         out.extend_from_slice(MESSAGE);
         out.extend_from_slice(&nonce.to_be_bytes());
         let tag = out.len();
@@ -604,10 +629,10 @@ impl CurveCodec {
             Incoming::Message(message) => message.into_iter().next().expect("one frame"),
         };
         let data = body.strip_prefix(MESSAGE).ok_or(CurveError::NotMessage)?;
-        if data.len() < 8 + TAG + 1 {
+        if data.len() < SHORT_NONCE + TAG + 1 {
             return Err(CurveError::Malformed);
         }
-        let (nonce, sealed) = data.split_at(8);
+        let (nonce, sealed) = data.split_at(SHORT_NONCE);
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         if nonce <= self.peer_nonce {
             return Err(CurveError::StaleNonce);
@@ -629,7 +654,7 @@ impl CurveCodec {
         let mut opened = Bytes::from(opened);
         opened.advance(1);
         let payload = Frame::from_shared(opened);
-        if flags & COMMAND != 0 {
+        if flags & BOX_COMMAND != 0 {
             if self.partial.is_some() {
                 return Err(CurveError::Malformed);
             }
@@ -642,7 +667,7 @@ impl CurveCodec {
             }
             None => Message::new(payload),
         };
-        if flags & MORE != 0 {
+        if flags & BOX_MORE != 0 {
             self.partial = Some(message);
             return Ok(None);
         }
@@ -786,6 +811,14 @@ impl std::error::Error for CurveError {}
 mod tests {
     use super::*;
     use crate::{Decoder, DecoderConfig, ErrorReason, ZapFailure};
+
+    #[test]
+    fn command_sizes_are_rfc_26s() {
+        assert_eq!(HELLO, 194);
+        assert_eq!(WELCOME, 160);
+        assert_eq!(COOKIE, 96);
+        assert_eq!(VOUCH, 80);
+    }
 
     const V3_1: PeerGreeting = PeerGreeting::Zmtp3 {
         major: 3,

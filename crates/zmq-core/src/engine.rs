@@ -1,7 +1,8 @@
-//! One TCP connection: greeting, security handshake, then framed messages.
+//! One stream connection, TCP or IPC: greeting, security handshake, then
+//! framed messages.
 //!
-//! The engine runs on an I/O thread and moves messages between the TCP
-//! stream and the session's pipes. mio is edge-triggered, so every read and
+//! The engine runs on an I/O thread and moves messages between the stream
+//! and the session's pipes. mio is edge-triggered, so every read and
 //! write continues until the OS reports `WouldBlock`; when a full receive
 //! pipe stops reading early, the pipe's waker brings the engine back.
 

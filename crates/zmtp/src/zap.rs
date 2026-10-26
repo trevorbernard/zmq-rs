@@ -9,6 +9,7 @@ use std::fmt;
 
 use zeroize::Zeroizing;
 
+use crate::command::MAX_SHORT;
 use crate::{Frame, Metadata, PublicKey, TooLong};
 
 /// What a server asks its authenticator about a connecting peer.
@@ -75,8 +76,6 @@ pub struct PlainCredentials {
     pub password: Credential,
 }
 
-const MAX_CREDENTIAL: usize = u8::MAX as usize;
-
 /// A secret of at most 255 octets, zeroed when dropped and never printed.
 #[derive(Clone, PartialEq, Eq, Default)]
 pub struct Credential(Zeroizing<Vec<u8>>);
@@ -96,10 +95,9 @@ impl Credential {
     /// Validates `value`: at most 255 octets.
     pub fn new(value: impl Into<Vec<u8>>) -> Result<Self, TooLong> {
         let value = Zeroizing::new(value.into());
-        if value.len() > MAX_CREDENTIAL {
-            return Err(TooLong {
-                max: MAX_CREDENTIAL,
-            });
+        // PLAIN's HELLO sends each as a short string.
+        if value.len() > MAX_SHORT {
+            return Err(TooLong { max: MAX_SHORT });
         }
         Ok(Self(value))
     }
