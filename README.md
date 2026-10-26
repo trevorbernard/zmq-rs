@@ -1,14 +1,20 @@
 # zmq-rs
 
+[![CI](https://github.com/trevorbernard/zmq-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/trevorbernard/zmq-rs/actions/workflows/ci.yml)
+
 An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
 
 - Wire-compatible with libzmq: ZMTP 3.1/3.0 with downgrade to 2.0/1.0, NULL/PLAIN/CURVE.
 - Own I/O threads (no async runtime required); blocking and executor-agnostic async APIs.
 - Invalid states are compile errors: each socket type exposes only the operations
   its pattern allows.
+- Every libzmq socket type but STREAM, the draft ones behind the `draft` feature, over
+  tcp, ipc and inproc, with libzmq's proxies, monitor events, `zmq_poll`
+  and message properties (`zmq_msg_gets`).
 
 See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
 [docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
+Requires Rust 1.99.
 
 ## Quick start
 
@@ -212,6 +218,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ## Performance
 
+On the two machines in [docs/benchmarks.md](docs/benchmarks.md), measured
+as libzmq's own `perf/` tools measure, throughput is ahead of libzmq's or
+level everywhere but ipc at 64 KiB on an M1 (0.82), and latency is lower
+everywhere but tcp at 256 B on a Xeon (0.90). Small messages gain most:
+[why](docs/benchmarks.md#why-we-are-ahead-at-8-b-over-tcp), profiled.
+
 The library can't choose its own optimization settings: the application's
 profile builds it. Fat LTO with one codegen unit is not a clear win; measure
 your own workload before adopting it. In
@@ -253,8 +265,25 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
   the last.
 - The PEER socket ignores `IMMEDIATE`; libzmq refuses `connect_peer` with it.
 
-Not yet: STREAM sockets, and polling plain file descriptors beside sockets,
-which `zmq_poll` also does.
+Not yet: STREAM sockets, polling plain file descriptors beside sockets,
+WebSockets, `ROUTER_NOTIFY`, `CONNECT_ROUTING_ID`, PEER's hello and
+disconnect messages, and a few other options. The full list is in
+[the libzmq test port](crates/zmq/tests/libzmq/README.md#not-ported).
+
+## Testing
+
+- **Against libzmq 4.3.5:** every pattern and security mechanism, over
+  tcp and ipc, with zmq-rs on either side (`tests/interop`).
+- **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
+  separate processes the Nix dev shell builds (`just test-legacy`).
+- **libzmq's own regression tests,** 65 of its 139 ported, the rest listed
+  with why (`crates/zmq/tests/libzmq`).
+- **Property tests against models:** subscription matching, XPUB events,
+  ROUTER routing, pipes, the codec and handshakes.
+- **Fuzzing** of every handshake and the framing, seeded with libzmq's
+  corpora and its security advisories' reproducers, in CI and weekly
+  ([fuzz/README.md](fuzz/README.md)).
+- **The ZeroMQ Guide's examples,** 76 of them, in [examples](examples).
 
 ## Development
 
@@ -262,7 +291,9 @@ which `zmq_poll` also does.
 nix develop        # or `direnv allow`
 just               # lists the workflows
 just ci            # rustfmt, clippy, tests, as CI runs them
+just test-legacy   # against libzmq 2.2 and 3.2
 just perf          # throughput and latency next to libzmq
+just fuzz-all      # every fuzz target, a minute each
 nix flake check    # tests, clippy, rustfmt, as Nix builds them
 ```
 
@@ -275,3 +306,5 @@ nix flake check    # tests, clippy, rustfmt, as Nix builds them
 | `zmq-core` | I/O threads, transports, sessions, socket patterns |
 | `zmq` | Public, type-safe API |
 | `tests/interop` | Interoperability tests and benchmarks against the reference libzmq |
+| `examples` | The ZeroMQ Guide's examples (`cargo run -p zguide --bin hwserver`) |
+| `fuzz` | cargo-fuzz targets for `zmtp`, outside the workspace (nightly) |
