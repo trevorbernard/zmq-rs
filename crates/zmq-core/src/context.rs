@@ -216,10 +216,11 @@ pub enum Linger {
 
 impl Linger {
     /// When a connection that starts lingering at `now` must stop, if ever.
+    /// A linger too long for an `Instant` to reach lasts forever.
     pub(crate) fn deadline(self, now: Instant) -> Option<Instant> {
         match self {
             Self::Forever => None,
-            Self::For(linger) => Some(now + linger),
+            Self::For(linger) => now.checked_add(linger),
         }
     }
 }

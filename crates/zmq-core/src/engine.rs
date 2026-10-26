@@ -291,10 +291,13 @@ impl Engine {
         let mut body = Vec::new();
         ping.encode(&mut body);
         if self.write_command(encoder, &body)? {
-            self.deadlines.next_ping = Some(now + heartbeat.interval.max(MIN_PING_INTERVAL));
-            self.deadlines
+            // An interval or timeout too long for an `Instant` to reach
+            // never comes.
+            self.deadlines.next_ping = now.checked_add(heartbeat.interval.max(MIN_PING_INTERVAL));
+            self.deadlines.ping_timeout = self
+                .deadlines
                 .ping_timeout
-                .get_or_insert(now + heartbeat.timeout);
+                .or_else(|| now.checked_add(heartbeat.timeout));
         }
         Ok(())
     }
@@ -381,7 +384,7 @@ impl Engine {
                     .config
                     .handshake_timeout
                     .filter(|timeout| !timeout.is_zero())
-                    .map(|timeout| Instant::now() + timeout);
+                    .and_then(|timeout| Instant::now().checked_add(timeout));
                 Ok(true)
             }
             Ok(false) => Ok(false),
@@ -671,7 +674,7 @@ impl Engine {
                     self.deadlines.next_ping = self
                         .config
                         .heartbeat
-                        .map(|heartbeat| Instant::now() + heartbeat.interval);
+                        .and_then(|heartbeat| Instant::now().checked_add(heartbeat.interval));
                 }
                 // A ZMTP 1.0 subscriber filters for itself and never says
                 // what it wants, so, as libzmq's engine does, it is

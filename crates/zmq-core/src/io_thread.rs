@@ -627,13 +627,17 @@ impl EventLoop {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        match session.retry.next_delay() {
-            Some(delay) => {
+        // A delay too long for an `Instant` to reach is never: give up.
+        let retry = session
+            .retry
+            .next_delay()
+            .and_then(|delay| Some((delay, Instant::now().checked_add(delay)?)));
+        match retry {
+            Some((delay, at)) => {
                 session.config.monitor.emit(
                     &session.endpoint,
                     EventKind::ConnectRetried { interval: delay },
                 );
-                let at = Instant::now() + delay;
                 session.reconnect_at = Some(at);
                 self.timers.push(Reverse((at, id)));
             }

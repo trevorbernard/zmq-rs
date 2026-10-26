@@ -48,7 +48,7 @@ impl Retry {
         match self.policy {
             Reconnect::Never => None,
             // libzmq: the base interval plus `random % interval`.
-            Reconnect::Fixed { interval } => Some(interval + jitter(interval)),
+            Reconnect::Fixed { interval } => Some(interval.saturating_add(jitter(interval))),
             Reconnect::Backoff { initial, max } => {
                 let next = match self.current {
                     None => initial,
@@ -57,7 +57,7 @@ impl Retry {
                 self.current = Some(next);
                 // libzmq bounds the jitter by the base interval, not the
                 // current one.
-                Some(next + jitter(initial))
+                Some(next.saturating_add(jitter(initial)))
             }
         }
     }
