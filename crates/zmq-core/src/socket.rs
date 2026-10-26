@@ -835,7 +835,7 @@ enum Route {
 pub enum RouteOutcome {
     Sent,
     /// The requester is gone. The reply was dropped.
-    NoSuchPeer,
+    UnknownPeer,
     /// The requester's queue is full. The reply was dropped.
     PeerFull,
 }
@@ -844,7 +844,7 @@ pub enum RouteOutcome {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RouterSendError {
     /// No peer has that routing id, or it has gone.
-    UnknownRoutingId(Message),
+    UnknownPeer(Message),
     /// The peer's queue is full.
     Full(Message),
 }
@@ -852,7 +852,7 @@ pub enum RouterSendError {
 impl fmt::Display for RouterSendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::UnknownRoutingId(_) => "no peer has that routing id",
+            Self::UnknownPeer(_) => "no peer has that routing id",
             Self::Full(_) => "the peer's queue is full",
         })
     }
@@ -948,14 +948,14 @@ impl RouterTable {
             .get(routing_id)
             .and_then(|&key| peers.get_mut(key))
         else {
-            return Err(RouterSendError::UnknownRoutingId(message));
+            return Err(RouterSendError::UnknownPeer(message));
         };
         peer.connection
             .tx
             .try_send(message)
             .map_err(|err| match err {
                 TrySendError::Full(message) => RouterSendError::Full(message),
-                TrySendError::Closed(message) => RouterSendError::UnknownRoutingId(message),
+                TrySendError::Closed(message) => RouterSendError::UnknownPeer(message),
             })
     }
 
@@ -1011,7 +1011,7 @@ pub struct ServerTable {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ServerSendError {
     /// No client has that id, or it has gone. The frame is handed back.
-    NoSuchClient(Frame),
+    UnknownPeer(Frame),
     /// The client's queue is full. The frame is handed back.
     Full(Frame),
 }
@@ -1020,7 +1020,7 @@ pub enum ServerSendError {
 impl fmt::Display for ServerSendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NoSuchClient(_) => "no client has that id",
+            Self::UnknownPeer(_) => "no client has that id",
             Self::Full(_) => "the client's queue is full",
         })
     }
@@ -1101,13 +1101,13 @@ impl ServerTable {
     ) -> Result<(), ServerSendError> {
         self.sync(peers);
         let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
-            return Err(ServerSendError::NoSuchClient(frame));
+            return Err(ServerSendError::UnknownPeer(frame));
         };
         peer.poll_send(Message::new(frame), cx)
             .map_err(|err| match err {
                 TrySendError::Full(message) => ServerSendError::Full(only_frame(message)),
                 // The client's session has ended.
-                TrySendError::Closed(message) => ServerSendError::NoSuchClient(only_frame(message)),
+                TrySendError::Closed(message) => ServerSendError::UnknownPeer(only_frame(message)),
             })
     }
 
@@ -1418,7 +1418,7 @@ mod tests {
         table.sync(&mut peers);
         assert_eq!(
             table.try_send(&mut peers, b"nobody", msg("x")),
-            Err(RouterSendError::UnknownRoutingId(msg("x")))
+            Err(RouterSendError::UnknownPeer(msg("x")))
         );
         assert_eq!(table.try_send(&mut peers, b"alice", msg("1")), Ok(()));
         assert_eq!(
@@ -1505,14 +1505,14 @@ mod tests {
         drop(sa);
         assert_eq!(
             table.try_send(&mut peers, b"gone", msg("w")),
-            Err(RouterSendError::UnknownRoutingId(msg("w"))),
+            Err(RouterSendError::UnknownPeer(msg("w"))),
             "gone but not yet forgotten"
         );
         peers.retain_mut(|peer| !peer.connection.tx.is_closed());
         table.sync(&mut peers);
         assert_eq!(
             table.try_send(&mut peers, b"gone", msg("x")),
-            Err(RouterSendError::UnknownRoutingId(msg("x")))
+            Err(RouterSendError::UnknownPeer(msg("x")))
         );
         // A new peer may now take the identity.
         let (b, mut sb) = connection(10);

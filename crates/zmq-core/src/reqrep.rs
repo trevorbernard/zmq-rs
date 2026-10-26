@@ -171,7 +171,7 @@ impl Replier {
         reply: Message,
     ) -> RouteOutcome {
         let Some(peer) = peers.get_mut(peer) else {
-            return RouteOutcome::NoSuchPeer;
+            return RouteOutcome::UnknownPeer;
         };
         let mut message = match Message::try_from(envelope.frames) {
             Ok(message) => message,
@@ -181,7 +181,7 @@ impl Replier {
         match peer.connection.tx.try_send(message) {
             Ok(()) => RouteOutcome::Sent,
             Err(TrySendError::Full(_)) => RouteOutcome::PeerFull,
-            Err(TrySendError::Closed(_)) => RouteOutcome::NoSuchPeer,
+            Err(TrySendError::Closed(_)) => RouteOutcome::UnknownPeer,
         }
     }
 }
@@ -472,6 +472,6 @@ mod tests {
         };
         drop(sa);
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
-        assert_eq!(outcome, RouteOutcome::NoSuchPeer);
+        assert_eq!(outcome, RouteOutcome::UnknownPeer);
     }
 }

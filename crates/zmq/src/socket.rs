@@ -1511,18 +1511,19 @@ impl fmt::Debug for Request<'_> {
     }
 }
 
-/// A ROUTER could not send: no peer has that routing id, or it went away
-/// while the message waited. The message is handed back.
+/// A send to one peer failed: no peer has that routing id, client id or
+/// peer id, or it went away while the message waited (libzmq's
+/// `EHOSTUNREACH`). What was being sent is handed back.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnknownRoutingId(pub Message);
+pub struct UnknownPeer<T>(pub T);
 
-impl fmt::Display for UnknownRoutingId {
+impl<T> fmt::Display for UnknownPeer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("no peer has that routing id")
+        f.write_str("no peer has that id")
     }
 }
 
-impl std::error::Error for UnknownRoutingId {}
+impl<T: fmt::Debug> std::error::Error for UnknownPeer<T> {}
 
 /// Why [`Socket::request_timeout`] got no reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1566,9 +1567,9 @@ impl Socket<Router> {
         &mut self,
         to: &RoutingId,
         message: impl Into<Message>,
-    ) -> Result<(), UnknownRoutingId> {
+    ) -> Result<(), UnknownPeer<Message>> {
         let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send(to, &mut slot, cx)).map_err(UnknownRoutingId)
+        wait::block_on(|cx| self.poll_send(to, &mut slot, cx)).map_err(UnknownPeer)
     }
 
     /// Sends `message` to the peer with routing id `to`, blocking for at
@@ -1585,7 +1586,7 @@ impl Socket<Router> {
             self.poll_send(to, &mut slot, cx)
         }) {
             Some(Ok(())) => Ok(()),
-            Some(Err(message)) => Err(RouterSendError::UnknownRoutingId(message)),
+            Some(Err(message)) => Err(RouterSendError::UnknownPeer(message)),
             None => Err(RouterSendError::Full(
                 slot.take().expect("kept while pending"),
             )),
@@ -1599,11 +1600,11 @@ impl Socket<Router> {
         &mut self,
         to: &RoutingId,
         message: impl Into<Message>,
-    ) -> Result<(), UnknownRoutingId> {
+    ) -> Result<(), UnknownPeer<Message>> {
         let mut slot = Some(message.into());
         future::poll_fn(|cx| self.poll_send(to, &mut slot, cx))
             .await
-            .map_err(UnknownRoutingId)
+            .map_err(UnknownPeer)
     }
 
     fn poll_send(

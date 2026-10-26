@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Identity, Message, Router, RoutingId, SocketOptions, UnknownRoutingId,
+    Context, Dealer, Frame, Identity, Message, Router, RoutingId, SocketOptions, UnknownPeer,
 };
 use zmq_interop::libzmq::{Kind, Socket};
 
@@ -137,7 +137,7 @@ fn router_drops_what_it_cannot_route_without_blocking() {
     router.bind("tcp://127.0.0.1:*").unwrap();
     assert_eq!(
         router.send(&id("nobody"), "lost"),
-        Err(UnknownRoutingId(Message::from("lost")))
+        Err(UnknownPeer(Message::from("lost")))
     );
 }
 

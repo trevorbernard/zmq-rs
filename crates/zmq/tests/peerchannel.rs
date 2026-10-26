@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Channel, Context, Frame, NoSuchPeer, Peer, PeerId, PeerSendError};
+use zmq::{Channel, Context, Frame, Peer, PeerId, PeerSendError, UnknownPeer};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -68,10 +68,10 @@ fn sending_to_an_unknown_peer_fails() {
     let context = Context::new().unwrap();
     let mut peer = context.socket::<Peer>();
     let nobody = PeerId::new(7).unwrap();
-    assert_eq!(peer.send(nobody, "hi"), Err(NoSuchPeer(Frame::from("hi"))));
+    assert_eq!(peer.send(nobody, "hi"), Err(UnknownPeer(Frame::from("hi"))));
     assert_eq!(
         peer.try_send(nobody, "hi"),
-        Err(PeerSendError::NoSuchPeer(Frame::from("hi")))
+        Err(PeerSendError::UnknownPeer(Frame::from("hi")))
     );
 }
 
@@ -84,7 +84,7 @@ fn a_disconnected_peer_is_forgotten() {
     let id = near.connect_peer("inproc://far").unwrap();
     assert!(near.disconnect_peer(id));
     assert!(!near.disconnect_peer(id));
-    assert_eq!(near.send(id, "gone"), Err(NoSuchPeer(Frame::from("gone"))));
+    assert_eq!(near.send(id, "gone"), Err(UnknownPeer(Frame::from("gone"))));
 }
 
 #[test]

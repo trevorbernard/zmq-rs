@@ -416,7 +416,7 @@ GitHub CI, which installs Ubuntu's.
 
 **Done (CLIENT and SERVER):**
 - `Socket<Client>` and `Socket<Server>` send and receive `Frame`s, not `Message`s, so sending a multipart message does not compile. Received multipart messages are dropped.
-- SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `NoSuchClient` for an unknown or departed one; `try_send` reports `Full` or `NoSuchClient` and hands the frame back. `disconnect_client(id)` closes a client's connection.
+- SERVER gives each peer a `ClientId`: non-zero, from a counter that starts at a random value, as libzmq does. `send(id, frame)` waits while that client is full and fails with `UnknownPeer` for an unknown or departed one; `try_send` reports `Full` or `UnknownPeer` and hands the frame back. `disconnect_client(id)` closes a client's connection.
 - Verified against libzmq's CLIENT and SERVER both ways, a libzmq SERVER replying included, through its draft routing-id API looked up at run time.
 
 **Done (RADIO and DISH):**

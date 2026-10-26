@@ -12,7 +12,7 @@ use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
 use crate::socket::{DealerRouting, Receives, Routing, SocketType, WaitsForRoom, noop, sealed};
-use crate::{Socket, wait};
+use crate::{Socket, UnknownPeer, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
 /// receives from them fairly (RFC 41). Waits while no peer has room.
@@ -39,11 +39,6 @@ pub enum Server {}
 /// server's current clients. libzmq's routing id for SERVER.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClientId(NonZeroU32);
-
-/// A SERVER could not send to a client: no client has that id, or it has
-/// gone. The frame is handed back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NoSuchClient(pub Frame);
 
 impl Routing for ServerTable {}
 impl Routing for zmq_core::Radio {}
@@ -367,9 +362,13 @@ impl Socket<Server> {
 
     /// Sends `frame` to the client `to`, blocking while its queue is full.
     /// Fails if no client has that id, or it goes away meanwhile.
-    pub fn send(&mut self, to: ClientId, frame: impl Into<Frame>) -> Result<(), NoSuchClient> {
+    pub fn send(
+        &mut self,
+        to: ClientId,
+        frame: impl Into<Frame>,
+    ) -> Result<(), UnknownPeer<Frame>> {
         let mut slot = Some(frame.into());
-        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchClient)
+        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(UnknownPeer)
     }
 
     /// Sends `frame` to the client `to`, blocking for at most `timeout`
@@ -390,11 +389,11 @@ impl Socket<Server> {
         &mut self,
         to: ClientId,
         frame: impl Into<Frame>,
-    ) -> Result<(), NoSuchClient> {
+    ) -> Result<(), UnknownPeer<Frame>> {
         let mut slot = Some(frame.into());
         future::poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
             .await
-            .map_err(NoSuchClient)
+            .map_err(UnknownPeer)
     }
 
     /// Closes the connection to the client `to`. Returns whether there was
@@ -416,16 +415,11 @@ pub enum Peer {}
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerId(NonZeroU32);
 
-/// A PEER could not send: no peer has that id, or it has gone. The frame
-/// is handed back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct NoSuchPeer(pub Frame);
-
 /// Why a PEER could not send without waiting.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PeerSendError {
     /// No peer has that id, or it has gone. The frame is handed back.
-    NoSuchPeer(Frame),
+    UnknownPeer(Frame),
     /// The peer's queue is full. The frame is handed back.
     Full(Frame),
 }
@@ -489,16 +483,16 @@ impl Socket<Peer> {
     /// Sends `frame` to the peer `to` without waiting.
     pub fn try_send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), PeerSendError> {
         try_send_routed(self, to.0, frame.into()).map_err(|err| match err {
-            ServerSendError::NoSuchClient(frame) => PeerSendError::NoSuchPeer(frame),
+            ServerSendError::UnknownPeer(frame) => PeerSendError::UnknownPeer(frame),
             ServerSendError::Full(frame) => PeerSendError::Full(frame),
         })
     }
 
     /// Sends `frame` to the peer `to`, blocking while its queue is full.
     /// Fails if no peer has that id, or it goes away meanwhile.
-    pub fn send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), NoSuchPeer> {
+    pub fn send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), UnknownPeer<Frame>> {
         let mut slot = Some(frame.into());
-        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(NoSuchPeer)
+        wait::block_on(|cx| poll_send_routed(self, to.0, &mut slot, cx)).map_err(UnknownPeer)
     }
 
     /// Sends `frame` to the peer `to`, blocking for at most `timeout` while
@@ -511,7 +505,7 @@ impl Socket<Peer> {
         timeout: Duration,
     ) -> Result<(), PeerSendError> {
         send_routed_timeout(self, to.0, frame.into(), timeout).map_err(|err| match err {
-            ServerSendError::NoSuchClient(frame) => PeerSendError::NoSuchPeer(frame),
+            ServerSendError::UnknownPeer(frame) => PeerSendError::UnknownPeer(frame),
             ServerSendError::Full(frame) => PeerSendError::Full(frame),
         })
     }
@@ -522,11 +516,11 @@ impl Socket<Peer> {
         &mut self,
         to: PeerId,
         frame: impl Into<Frame>,
-    ) -> Result<(), NoSuchPeer> {
+    ) -> Result<(), UnknownPeer<Frame>> {
         let mut slot = Some(frame.into());
         future::poll_fn(|cx| poll_send_routed(self, to.0, &mut slot, cx))
             .await
-            .map_err(NoSuchPeer)
+            .map_err(UnknownPeer)
     }
 
     /// Closes the connection to the peer `to`, as libzmq's
@@ -568,7 +562,7 @@ fn poll_send_routed<T: SocketType<Routing = ServerTable>>(
     let (peers, table) = socket.parts_accepting(cx);
     match table.try_send(peers, to, frame, cx) {
         Ok(()) => Poll::Ready(Ok(())),
-        Err(ServerSendError::NoSuchClient(frame)) => Poll::Ready(Err(frame)),
+        Err(ServerSendError::UnknownPeer(frame)) => Poll::Ready(Err(frame)),
         Err(ServerSendError::Full(frame)) => {
             *slot = Some(frame);
             Poll::Pending
@@ -588,7 +582,7 @@ fn send_routed_timeout<T: SocketType<Routing = ServerTable>>(
         poll_send_routed(socket, to, &mut slot, cx)
     }) {
         Some(Ok(())) => Ok(()),
-        Some(Err(frame)) => Err(ServerSendError::NoSuchClient(frame)),
+        Some(Err(frame)) => Err(ServerSendError::UnknownPeer(frame)),
         None => Err(ServerSendError::Full(
             slot.take().expect("kept while pending"),
         )),
@@ -685,32 +679,16 @@ impl fmt::Display for PeerId {
     }
 }
 
-impl fmt::Display for NoSuchPeer {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("no peer has that id")
-    }
-}
-
-impl std::error::Error for NoSuchPeer {}
-
 impl fmt::Display for PeerSendError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::NoSuchPeer(_) => "no peer has that id",
+            Self::UnknownPeer(_) => "no peer has that id",
             Self::Full(_) => "the peer's queue is full",
         })
     }
 }
 
 impl std::error::Error for PeerSendError {}
-
-impl fmt::Display for NoSuchClient {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("no client has that id")
-    }
-}
-
-impl std::error::Error for NoSuchClient {}
 
 impl Receives for Dish {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {

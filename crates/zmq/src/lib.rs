@@ -114,8 +114,7 @@ use std::num::NonZeroUsize;
 
 #[cfg(feature = "draft")]
 pub use draft::{
-    Channel, Client, ClientId, Dish, Gather, NoSuchClient, NoSuchPeer, Peer, PeerId, PeerSendError,
-    Radio, Scatter, Server,
+    Channel, Client, ClientId, Dish, Gather, Peer, PeerId, PeerSendError, Radio, Scatter, Server,
 };
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
@@ -125,8 +124,8 @@ pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, 
 pub use socket::Routing;
 pub use socket::{
     Conflatable, Dealer, ManualXPub, Pair, Pub, Publishes, Pull, Push, Receives, Rep, Req, Request,
-    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownRoutingId,
-    WaitsForRoom, XPub, XSub,
+    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownPeer, WaitsForRoom,
+    XPub, XSub,
 };
 #[cfg(feature = "draft")]
 pub use zmq_core::ServerSendError;

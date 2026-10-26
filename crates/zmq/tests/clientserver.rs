@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Client, ClientId, Context, Dealer, Frame, Hwm, NoSuchClient, Server, ServerSendError,
-    SocketOptions,
+    Client, ClientId, Context, Dealer, Frame, Hwm, Server, ServerSendError, SocketOptions,
+    UnknownPeer,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -82,12 +82,12 @@ fn sending_to_an_unknown_or_departed_client_fails() {
     let stranger = ClientId::new(id.get().wrapping_add(1000).max(1)).unwrap();
     assert_eq!(
         server.send(stranger, "who?"),
-        Err(NoSuchClient(Frame::from("who?")))
+        Err(UnknownPeer(Frame::from("who?")))
     );
     drop(client);
     assert_eq!(
         server.send(id, "gone"),
-        Err(NoSuchClient(Frame::from("gone")))
+        Err(UnknownPeer(Frame::from("gone")))
     );
 }
 
@@ -139,7 +139,7 @@ fn a_disconnected_client_is_forgotten() {
     assert!(!server.disconnect_client(id), "already gone");
     assert_eq!(
         server.try_send(id, "after"),
-        Err(ServerSendError::NoSuchClient(Frame::from("after")))
+        Err(ServerSendError::UnknownPeer(Frame::from("after")))
     );
     assert!(
         client.try_send("anyone?").is_err(),

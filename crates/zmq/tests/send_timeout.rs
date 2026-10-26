@@ -157,7 +157,7 @@ fn router_reports_an_unknown_peer_at_once() {
     let start = Instant::now();
     assert_eq!(
         router.send_timeout(&RoutingId::new("nobody").unwrap(), "x", FIVE),
-        Err(RouterSendError::UnknownRoutingId(Message::from("x")))
+        Err(RouterSendError::UnknownPeer(Message::from("x")))
     );
     assert!(start.elapsed() < SLACK);
 }
@@ -312,7 +312,7 @@ mod draft {
         let start = Instant::now();
         assert_eq!(
             peer.send_timeout(nobody, "x", FIVE),
-            Err(PeerSendError::NoSuchPeer(Frame::from("x")))
+            Err(PeerSendError::UnknownPeer(Frame::from("x")))
         );
         assert!(start.elapsed() < SLACK);
     }

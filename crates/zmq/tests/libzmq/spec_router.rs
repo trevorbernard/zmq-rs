@@ -99,7 +99,7 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // as libzmq delivers it (docs/rfc-compliance.md, "Socket patterns").
     assert!(matches!(
         a.try_send(&to_b, ""),
-        Err(RouterSendError::UnknownRoutingId(_))
+        Err(RouterSendError::UnknownPeer(_))
     ));
     assert_eq!(
         a.try_recv(),
