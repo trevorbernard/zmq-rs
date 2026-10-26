@@ -371,8 +371,12 @@ impl EventLoop {
             self.poll
                 .registry()
                 .register(&mut listener, Token(id), Interest::READABLE);
-        if registered.is_err() {
-            // The monitor has seen it listening: it closes at once.
+        if let Err(err) = registered {
+            // The bind returned before this, and the monitor has seen it
+            // listening: say why it closes at once.
+            config
+                .monitor
+                .emit(&endpoint, EventKind::BindFailed(err.kind()));
             config.monitor.emit(&endpoint, EventKind::Closed);
             return None;
         }
@@ -553,17 +557,15 @@ impl EventLoop {
         let engine = Stream::connect(&address)
             .ok()
             .and_then(|stream| self.start_engine(id, stream, &config));
-        match (engine, self.sessions.get_mut(&id)) {
-            (Some(engine), Some(session)) => {
-                session.engine = Some(engine);
-                true
-            }
-            (Some(_), None) => false,
-            (None, _) => {
-                self.retry_later(id);
-                false
-            }
-        }
+        let Some(engine) = engine else {
+            self.retry_later(id);
+            return false;
+        };
+        self.sessions
+            .get_mut(&id)
+            .expect("nothing closes the session while it connects")
+            .engine = Some(engine);
+        true
     }
 
     /// Ends a session's connection after its engine failed: it reconnects
