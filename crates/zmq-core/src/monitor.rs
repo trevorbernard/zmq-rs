@@ -150,7 +150,7 @@ impl Monitor {
     }
 
     /// The next event, blocking the thread for at most `timeout`. Fails
-    /// with `Disconnected` once the socket and all its connections are gone.
+    /// with `Closed` once the socket and all its connections are gone.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Event, RecvTimeoutError> {
         self.events.recv_timeout(timeout)
     }

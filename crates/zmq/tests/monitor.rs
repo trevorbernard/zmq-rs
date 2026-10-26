@@ -323,7 +323,7 @@ fn assert_closes(mut monitor: Monitor) {
     }
     assert_eq!(
         monitor.recv_timeout(Duration::ZERO),
-        Err(zmq::RecvTimeoutError::Disconnected)
+        Err(zmq::RecvTimeoutError::Closed)
     );
 }
 

@@ -24,7 +24,7 @@ use crate::support::{FIVE, bounce_dealer, within};
 fn next_event(monitor: &mut Monitor) -> Option<Event> {
     match monitor.recv_timeout(FIVE) {
         Ok(event) => Some(event),
-        Err(RecvTimeoutError::Disconnected) => None,
+        Err(RecvTimeoutError::Closed) => None,
         Err(RecvTimeoutError::Timeout) => panic!("no event within {FIVE:?}"),
     }
 }

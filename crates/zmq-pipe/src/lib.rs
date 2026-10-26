@@ -228,13 +228,14 @@ pub enum TryRecvError {
 }
 
 /// Why [`Reader::recv_timeout`] returned nothing, as std's
-/// `mpsc::RecvTimeoutError`.
+/// `mpsc::RecvTimeoutError`, though named `Closed` like the other pipe
+/// errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RecvTimeoutError {
     /// Nothing arrived in time.
     Timeout,
     /// The writer is gone and everything it sent has been received.
-    Disconnected,
+    Closed,
 }
 
 impl<T> Writer<T> {
@@ -496,7 +497,7 @@ impl<T> Reader<T> {
     pub fn recv_timeout(&mut self, timeout: Duration) -> Result<T, RecvTimeoutError> {
         match block_on_poll_until(Instant::now().checked_add(timeout), |cx| self.poll_recv(cx)) {
             Some(Some(item)) => Ok(item),
-            Some(None) => Err(RecvTimeoutError::Disconnected),
+            Some(None) => Err(RecvTimeoutError::Closed),
             None => Err(RecvTimeoutError::Timeout),
         }
     }
@@ -589,7 +590,7 @@ impl fmt::Display for RecvTimeoutError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
             Self::Timeout => "timed out waiting on the pipe",
-            Self::Disconnected => "pipe is closed",
+            Self::Closed => "pipe is closed",
         })
     }
 }
@@ -1013,7 +1014,7 @@ mod tests {
         late.join().unwrap();
         assert_eq!(
             reader.recv_timeout(Duration::MAX),
-            Err(RecvTimeoutError::Disconnected)
+            Err(RecvTimeoutError::Closed)
         );
     }
 

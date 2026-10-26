@@ -284,7 +284,7 @@ fn a_monitor_times_out_then_sees_events_then_the_end() {
             other => break other,
         }
     };
-    assert_eq!(end.map(|e| e.kind), Err(RecvTimeoutError::Disconnected));
+    assert_eq!(end.map(|e| e.kind), Err(RecvTimeoutError::Closed));
 }
 
 #[cfg(feature = "draft")]
