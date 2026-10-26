@@ -444,6 +444,26 @@ fn shutdown_reports_what_it_had_to_abandon() {
 }
 
 #[test]
+fn concurrent_shutdowns_each_report_what_was_abandoned() {
+    let context = Context::new().unwrap();
+    let mut connection = context.connect(free_port(), eager("stuck"));
+    connection
+        .tx
+        .send_blocking(message(&[b"undeliverable"]))
+        .unwrap();
+    let other = context.clone();
+    let first = thread::spawn(move || other.shutdown(Duration::from_millis(200)));
+    let second = within(Duration::from_secs(5), move || {
+        context.shutdown(Duration::from_millis(200))
+    });
+    assert_eq!(second, Err(ShutdownTimedOut { abandoned: 1 }));
+    assert_eq!(
+        first.join().unwrap(),
+        Err(ShutdownTimedOut { abandoned: 1 })
+    );
+}
+
+#[test]
 fn shutdown_closes_listeners_and_later_work() {
     let context = Context::new().unwrap();
     let listener = context
