@@ -75,6 +75,34 @@ impl Peer {
     pub fn connection(&self) -> &Connection {
         &self.connection
     }
+
+    /// Sends `message` if the peer has room. `Full` hands it back with
+    /// `cx` registered to hear when there is room; `Closed`, once the
+    /// peer's session has ended.
+    pub(crate) fn poll_send(
+        &mut self,
+        message: Message,
+        cx: &mut TaskContext<'_>,
+    ) -> Result<(), TrySendError<Message>> {
+        let tx = &mut self.connection.tx;
+        match tx.poll_ready(cx) {
+            Poll::Ready(Ok(())) => tx.try_send(message),
+            Poll::Ready(Err(())) => Err(TrySendError::Closed(message)),
+            Poll::Pending => Err(TrySendError::Full(message)),
+        }
+    }
+
+    /// Discards everything the peer has sent. Returns whether its session
+    /// is still there, for patterns that never receive from it.
+    pub(crate) fn discard_input(&mut self) -> bool {
+        loop {
+            match self.connection.rx.try_recv() {
+                Ok(_) => {}
+                Err(TryRecvError::Empty) => return true,
+                Err(TryRecvError::Closed) => return false,
+            }
+        }
+    }
 }
 
 /// A socket's peers, in the order they arrived.
@@ -148,6 +176,66 @@ impl PeerList {
         if self.peers.len() != before {
             self.removals += 1;
         }
+    }
+
+    /// Removes the peer with `key`. Returns whether it was here.
+    pub(crate) fn remove_key(&mut self, key: PeerKey) -> bool {
+        match self.peers.binary_search_by_key(&key, Peer::key) {
+            Ok(index) => {
+                self.remove(index);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
+    /// Sends a copy of `message` to every peer, skipping those that are
+    /// full or gone.
+    pub(crate) fn broadcast(&mut self, message: &Message) {
+        for peer in &mut self.peers {
+            let _ = peer.connection.tx.try_send(message.clone());
+        }
+    }
+}
+
+/// How far something kept beside a [`PeerList`], such as a table keyed by
+/// peer, has followed it: which peers it has seen arrive, and how many
+/// removals it has caught up with.
+#[derive(Debug, Default)]
+pub(crate) struct PeerCursor {
+    /// Peers with keys below this have been seen. Keys only grow.
+    seen_below: u64,
+    /// `PeerList::removals` when last looked at.
+    removals: u64,
+}
+
+impl PeerCursor {
+    /// Whether peers have been removed since the last call, so entries for
+    /// peers no longer in the list should go.
+    pub(crate) fn removed_since(&mut self, peers: &PeerList) -> bool {
+        let removed = peers.removals != self.removals;
+        self.removals = peers.removals;
+        removed
+    }
+
+    /// Notes removals the caller made and accounted for itself, so
+    /// [`removed_since`](Self::removed_since) does not report them.
+    pub(crate) fn skip_removals(&mut self, peers: &PeerList) {
+        self.removals = peers.removals;
+    }
+
+    /// The peers added since the last call, oldest first.
+    pub(crate) fn added_since<'a>(&mut self, peers: &'a mut PeerList) -> &'a mut [Peer] {
+        // Called on every receive, where usually nothing is new: the search
+        // below touches a cache line per step of a list of large peers.
+        if self.seen_below == peers.next_key {
+            return &mut [];
+        }
+        let first_new = peers
+            .peers
+            .partition_point(|peer| peer.key.0 < self.seen_below);
+        self.seen_below = peers.next_key;
+        &mut peers.peers[first_new..]
     }
 }
 
@@ -375,15 +463,7 @@ impl Peers {
     /// Drops peers whose sessions are gone, discarding anything they sent.
     /// For patterns that never receive, such as PUSH.
     pub fn prune_send_only(&mut self) {
-        self.list.retain_mut(|peer| {
-            loop {
-                match peer.connection.rx.try_recv() {
-                    Ok(_) => {}
-                    Err(TryRecvError::Empty) => break true,
-                    Err(TryRecvError::Closed) => break false,
-                }
-            }
-        });
+        self.list.retain_mut(Peer::discard_input);
     }
 
     /// The peers, for a routing strategy.
@@ -450,16 +530,13 @@ impl LoadBalancer {
         for offset in 0..count {
             let index = (self.next + offset) % count;
             let peer = &mut peers.peers[index];
-            let tx = &mut peer.connection.tx;
             // Closed peers are skipped; full ones register `cx`.
-            if let Poll::Ready(Ok(())) = tx.poll_ready(cx) {
-                match tx.try_send(message) {
-                    Ok(()) => {
-                        self.next = (index + 1) % count;
-                        return Ok(peer.key);
-                    }
-                    Err(TrySendError::Full(back) | TrySendError::Closed(back)) => message = back,
+            match peer.poll_send(message, cx) {
+                Ok(()) => {
+                    self.next = (index + 1) % count;
+                    return Ok(peer.key);
                 }
+                Err(TrySendError::Full(back) | TrySendError::Closed(back)) => message = back,
             }
         }
         Err(message)
@@ -497,8 +574,7 @@ pub struct FairQueue {
     ready: Arc<Ready>,
     /// Keys taken from `ready`, kept for its allocation.
     woken: Vec<PeerKey>,
-    /// `PeerList::removals` when last synced.
-    removals: u64,
+    cursor: PeerCursor,
 }
 
 /// A peer's waker, and whether the peer is in the turn.
@@ -574,7 +650,7 @@ impl FairQueue {
                     // Session gone and everything it delivered has been read.
                     Poll::Ready(None) => {
                         peers.remove(index);
-                        self.removals = peers.removals;
+                        self.cursor.skip_removals(peers);
                         self.waiting.remove(index);
                         for position in &mut self.turn {
                             if *position > index {
@@ -596,9 +672,8 @@ impl FairQueue {
 
     /// Takes in peers added to the list since the last call, and forgets
     /// those removed.
-    fn sync(&mut self, peers: &PeerList) {
-        if peers.removals != self.removals {
-            self.removals = peers.removals;
+    fn sync(&mut self, peers: &mut PeerList) {
+        if self.cursor.removed_since(peers) {
             let turn: Vec<PeerKey> = self.turn.iter().map(|&i| self.waiting[i].key).collect();
             // Both are in key order, so the survivors keep their order.
             let mut list = peers.peers.iter().peekable();
@@ -611,7 +686,10 @@ impl FairQueue {
                 .filter_map(|key| self.position(key))
                 .collect();
         }
-        for (index, peer) in peers.peers.iter().enumerate().skip(self.waiting.len()) {
+        // `waiting` lines up with the list, so each new peer's position is
+        // the next entry's.
+        for peer in self.cursor.added_since(peers) {
+            let index = self.waiting.len();
             let wake = Arc::new(PeerWake {
                 key: peer.key,
                 queued: AtomicBool::new(false),
@@ -681,10 +759,7 @@ pub struct RouterTable {
     by_peer: HashMap<PeerKey, Route>,
     /// Peers whose handshake had not completed when last looked at.
     waiting: Vec<PeerKey>,
-    /// Peers with keys below this have been seen.
-    seen_below: u64,
-    /// `PeerList::removals` when last synced.
-    removals: u64,
+    cursor: PeerCursor,
     next_generated: u32,
     handover: bool,
 }
@@ -722,8 +797,7 @@ impl Default for RouterTable {
             by_identity: HashMap::new(),
             by_peer: HashMap::new(),
             waiting: Vec::new(),
-            seen_below: 0,
-            removals: 0,
+            cursor: PeerCursor::default(),
             // libzmq starts the generated ids at a random value.
             next_generated: RandomState::new().hash_one(()) as u32,
             handover: false,
@@ -742,20 +816,15 @@ impl RouterTable {
     /// Identifies peers whose handshake has completed and forgets peers that
     /// are gone.
     pub fn sync(&mut self, peers: &mut PeerList) {
-        if peers.removals != self.removals {
-            self.removals = peers.removals;
-            let live: HashSet<PeerKey> = peers.iter().map(Peer::key).collect();
-            self.by_peer.retain(|key, _| live.contains(key));
-            self.by_identity.retain(|_, key| live.contains(key));
-            self.waiting.retain(|key| live.contains(key));
+        if self.cursor.removed_since(peers) {
+            let live = |key: &PeerKey| peers.get(*key).is_some();
+            self.by_peer.retain(|key, _| live(key));
+            self.by_identity.retain(|_, key| live(key));
+            self.waiting.retain(live);
         }
-        let first_new = peers
-            .peers
-            .partition_point(|peer| peer.key.0 < self.seen_below);
-        self.waiting
-            .extend(peers.peers[first_new..].iter().map(Peer::key));
-        self.seen_below = peers.next_key;
-        for key in std::mem::take(&mut self.waiting) {
+        let added = self.cursor.added_since(peers);
+        self.waiting.extend(added.iter().map(Peer::key));
+        for key in mem::take(&mut self.waiting) {
             let Some(peer) = peers.get(key) else {
                 continue;
             };
@@ -781,9 +850,7 @@ impl RouterTable {
                 return;
             }
             self.by_peer.remove(&holder);
-            if let Ok(index) = peers.peers.binary_search_by_key(&holder, Peer::key) {
-                peers.remove(index);
-            }
+            peers.remove_key(holder);
         }
         self.by_identity.insert(routing_id.as_slice().into(), key);
         self.by_peer.insert(key, Route::Routable(routing_id));
@@ -846,16 +913,7 @@ impl RouterTable {
         else {
             return Poll::Ready(Err(message));
         };
-        let tx = &mut peer.connection.tx;
-        match tx.poll_ready(cx) {
-            Poll::Ready(Ok(())) => {}
-            Poll::Ready(Err(_)) => return Poll::Ready(Err(message)),
-            Poll::Pending => {
-                *slot = Some(message);
-                return Poll::Pending;
-            }
-        }
-        match tx.try_send(message) {
+        match peer.poll_send(message, cx) {
             Ok(()) => Poll::Ready(Ok(())),
             Err(TrySendError::Closed(message)) => Poll::Ready(Err(message)),
             Err(TrySendError::Full(message)) => {
@@ -874,10 +932,7 @@ impl RouterTable {
 pub struct ServerTable {
     by_id: HashMap<std::num::NonZeroU32, PeerKey>,
     by_peer: HashMap<PeerKey, std::num::NonZeroU32>,
-    /// Peers with keys below this have ids.
-    seen_below: u64,
-    /// `PeerList::removals` when last synced.
-    removals: u64,
+    cursor: PeerCursor,
     next_id: u32,
     recv: FairQueue,
 }
@@ -898,8 +953,7 @@ impl Default for ServerTable {
         Self {
             by_id: HashMap::new(),
             by_peer: HashMap::new(),
-            seen_below: 0,
-            removals: 0,
+            cursor: PeerCursor::default(),
             recv: FairQueue::default(),
             // libzmq starts its ids at a random value.
             next_id: RandomState::new().hash_one(()) as u32,
@@ -910,17 +964,12 @@ impl Default for ServerTable {
 #[cfg(feature = "draft")]
 impl ServerTable {
     /// Gives new peers their ids and forgets peers that are gone.
-    pub fn sync(&mut self, peers: &PeerList) {
-        if peers.removals != self.removals {
-            self.removals = peers.removals;
-            let live: HashSet<PeerKey> = peers.iter().map(Peer::key).collect();
-            self.by_peer.retain(|key, _| live.contains(key));
-            self.by_id.retain(|_, key| live.contains(key));
+    pub fn sync(&mut self, peers: &mut PeerList) {
+        if self.cursor.removed_since(peers) {
+            self.by_peer.retain(|key, _| peers.get(*key).is_some());
+            self.by_id.retain(|_, key| peers.get(*key).is_some());
         }
-        let first_new = peers
-            .peers
-            .partition_point(|peer| peer.key.0 < self.seen_below);
-        for peer in &peers.peers[first_new..] {
+        for peer in self.cursor.added_since(peers) {
             let id = loop {
                 let candidate = self.next_id;
                 self.next_id = self.next_id.wrapping_add(1);
@@ -934,7 +983,6 @@ impl ServerTable {
             self.by_id.insert(id, peer.key);
             self.by_peer.insert(peer.key, id);
         }
-        self.seen_below = peers.next_key;
     }
 
     /// The next single-part message and the id of the client that sent it,
@@ -973,23 +1021,16 @@ impl ServerTable {
         let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
             return Err(ServerSendError::NoSuchClient(frame));
         };
-        let tx = &mut peer.connection.tx;
-        match tx.poll_ready(cx) {
-            Poll::Ready(Ok(())) => match tx.try_send(Message::new(frame)) {
-                Ok(()) => Ok(()),
-                Err(TrySendError::Full(message)) => Err(ServerSendError::Full(only_frame(message))),
-                Err(TrySendError::Closed(message)) => {
-                    Err(ServerSendError::NoSuchClient(only_frame(message)))
-                }
-            },
-            // The client's session has ended.
-            Poll::Ready(Err(())) => Err(ServerSendError::NoSuchClient(frame)),
-            Poll::Pending => Err(ServerSendError::Full(frame)),
-        }
+        peer.poll_send(Message::new(frame), cx)
+            .map_err(|err| match err {
+                TrySendError::Full(message) => ServerSendError::Full(only_frame(message)),
+                // The client's session has ended.
+                TrySendError::Closed(message) => ServerSendError::NoSuchClient(only_frame(message)),
+            })
     }
 
     /// The id of the peer with `key`, once it is in the list.
-    pub fn id_of(&mut self, peers: &PeerList, key: PeerKey) -> Option<std::num::NonZeroU32> {
+    pub fn id_of(&mut self, peers: &mut PeerList, key: PeerKey) -> Option<std::num::NonZeroU32> {
         self.sync(peers);
         self.by_peer.get(&key).copied()
     }
@@ -1002,7 +1043,7 @@ impl ServerTable {
             return false;
         };
         self.by_peer.remove(&key);
-        peers.retain_mut(|peer| peer.key != key);
+        peers.remove_key(key);
         true
     }
 }
@@ -1010,7 +1051,7 @@ impl ServerTable {
 /// The frame of a message built from one.
 #[cfg(feature = "draft")]
 fn only_frame(message: Message) -> Frame {
-    message.into_iter().next().expect("a message has a frame")
+    message.into_parts().0
 }
 
 #[cfg(test)]

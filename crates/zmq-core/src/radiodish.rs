@@ -10,7 +10,7 @@ use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Group, Membership, Message};
 
 use crate::FairQueue;
-use crate::socket::{PeerKey, PeerList};
+use crate::socket::{PeerCursor, PeerKey, PeerList};
 
 /// RADIO's routing: the groups each peer joined, and fan-out to them.
 #[derive(Debug, Default)]
@@ -24,8 +24,8 @@ pub struct Radio {
 pub struct Dish {
     groups: HashSet<Group>,
     recv: FairQueue,
-    /// The newest peer that has been told the groups. Keys only grow.
-    greeted: Option<PeerKey>,
+    /// The peers that have been told the groups.
+    greeted: PeerCursor,
 }
 
 impl Radio {
@@ -86,7 +86,7 @@ impl Dish {
         if !self.groups.insert(group.clone()) {
             return false;
         }
-        tell_all(peers, &Membership::Join(group.clone()));
+        peers.broadcast(&Membership::Join(group.clone()).to_message());
         true
     }
 
@@ -96,17 +96,13 @@ impl Dish {
         if !self.groups.remove(group) {
             return false;
         }
-        tell_all(peers, &Membership::Leave(group.clone()));
+        peers.broadcast(&Membership::Leave(group.clone()).to_message());
         true
     }
 
     /// Tells peers that arrived since the last call which groups we joined.
     pub fn greet(&mut self, peers: &mut PeerList) {
-        for peer in peers.iter_mut() {
-            if self.greeted.is_some_and(|greeted| peer.key() <= greeted) {
-                continue;
-            }
-            self.greeted = Some(peer.key());
+        for peer in self.greeted.added_since(peers) {
             for group in &self.groups {
                 let join = Membership::Join(group.clone()).to_message();
                 let _ = peer.connection.tx.try_send(join);
@@ -138,14 +134,5 @@ impl Dish {
                 return Poll::Ready((group, body));
             }
         }
-    }
-}
-
-/// Sends a membership change to every peer. A DISH's queues towards its
-/// peers are unbounded, so nothing is dropped.
-fn tell_all(peers: &mut PeerList, change: &Membership) {
-    let message = change.to_message();
-    for peer in peers.iter_mut() {
-        let _ = peer.connection.tx.try_send(message.clone());
     }
 }

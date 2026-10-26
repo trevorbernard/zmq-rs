@@ -13,7 +13,7 @@ use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
-use crate::socket::{Peer, PeerKey, PeerList, PeerMap, PeerSet};
+use crate::socket::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, PeerSet};
 
 /// Topics and how many times each was subscribed, matched by prefix.
 #[derive(Debug, Clone, Default)]
@@ -649,8 +649,8 @@ pub struct Subscriber {
     /// XSUB does: only SUB filters.
     deliver_all: bool,
     recv: FairQueue,
-    /// The newest peer that has been sent the topics. Keys only grow.
-    greeted: Option<PeerKey>,
+    /// The peers that have been sent the topics.
+    greeted: PeerCursor,
 }
 
 impl Subscriber {
@@ -660,10 +660,7 @@ impl Subscriber {
         self.greet(peers);
         self.topics.add(topic);
         // Sent every time, as libzmq does: publishers keep one per topic.
-        tell_all(
-            peers,
-            &Subscription::Subscribe(Frame::copy_from_slice(topic)),
-        );
+        peers.broadcast(&Subscription::Subscribe(Frame::copy_from_slice(topic)).to_message());
     }
 
     /// Removes one subscription to `topic`. Returns whether there was one.
@@ -673,7 +670,7 @@ impl Subscriber {
             return false;
         }
         if self.topics.remove(topic) {
-            tell_all(peers, &Subscription::Cancel(Frame::copy_from_slice(topic)));
+            peers.broadcast(&Subscription::Cancel(Frame::copy_from_slice(topic)).to_message());
         }
         true
     }
@@ -690,20 +687,14 @@ impl Subscriber {
             }
             None => {
                 self.greet(peers);
-                for peer in peers.iter_mut() {
-                    let _ = peer.connection.tx.try_send(message.clone());
-                }
+                peers.broadcast(&message);
             }
         }
     }
 
     /// Sends the topics to peers that arrived since the last call.
     pub fn greet(&mut self, peers: &mut PeerList) {
-        for peer in peers.iter_mut() {
-            if self.greeted.is_some_and(|greeted| peer.key() <= greeted) {
-                continue;
-            }
-            self.greeted = Some(peer.key());
+        for peer in self.greeted.added_since(peers) {
             for topic in self.topics.iter() {
                 let subscription = Subscription::Subscribe(Frame::copy_from_slice(topic));
                 let _ = peer.connection.tx.try_send(subscription.to_message());
@@ -740,15 +731,6 @@ impl Subscriber {
     /// The subscribed topics.
     pub fn topics(&self) -> &Topics {
         &self.topics
-    }
-}
-
-/// Sends `subscription` to every peer. A SUB socket's queues towards its
-/// peers are unbounded, so nothing is dropped.
-fn tell_all(peers: &mut PeerList, subscription: &Subscription) {
-    let message = subscription.to_message();
-    for peer in peers.iter_mut() {
-        let _ = peer.connection.tx.try_send(message.clone());
     }
 }
 

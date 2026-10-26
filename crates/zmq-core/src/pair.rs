@@ -66,15 +66,10 @@ impl Pair {
             let Some(peer) = self.active.and_then(|key| peers.get_mut(key)) else {
                 return Err(message);
             };
-            let tx = &mut peer.connection.tx;
-            match tx.poll_ready(cx) {
-                Poll::Ready(Ok(())) => match tx.try_send(message) {
-                    Ok(()) => return Ok(()),
-                    Err(TrySendError::Full(back)) => return Err(back),
-                    Err(TrySendError::Closed(back)) => message = back,
-                },
-                Poll::Ready(Err(())) => {}
-                Poll::Pending => return Err(message),
+            match peer.poll_send(message, cx) {
+                Ok(()) => return Ok(()),
+                Err(TrySendError::Full(back)) => return Err(back),
+                Err(TrySendError::Closed(back)) => message = back,
             }
         }
         Err(message)
