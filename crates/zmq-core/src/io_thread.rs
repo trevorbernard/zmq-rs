@@ -277,12 +277,11 @@ impl EventLoop {
         for (&id, session) in &mut self.sessions {
             // Sessions still open at the shutdown deadline count as cut off,
             // so only a shorter linger gets a deadline of its own.
-            let linger = match session.config.linger {
-                Linger::Forever => None,
-                Linger::For(linger) => {
-                    Some(now + linger).filter(|&at| deadline.is_none_or(|deadline| at < deadline))
-                }
-            };
+            let linger = session
+                .config
+                .linger
+                .deadline(now)
+                .filter(|&at| deadline.is_none_or(|deadline| at < deadline));
             let at = match session.closing {
                 Some(Closing {
                     deadline: Some(existing),
@@ -462,14 +461,11 @@ impl EventLoop {
             // The socket dropped its sender: deliver what is queued, within
             // the linger, then close.
             if session.outbound.poll_closed(&mut cx).is_ready() {
-                let deadline = match session.config.linger {
-                    Linger::For(linger) if linger.is_zero() => {
-                        self.close_session(id);
-                        return;
-                    }
-                    Linger::For(linger) => Some(now + linger),
-                    Linger::Forever => None,
-                };
+                if session.config.linger == Linger::For(Duration::ZERO) {
+                    self.close_session(id);
+                    return;
+                }
+                let deadline = session.config.linger.deadline(now);
                 if let Some(at) = deadline {
                     self.timers.push(Reverse((at, id)));
                 }
@@ -493,31 +489,8 @@ impl EventLoop {
             self.close_session(id);
             return;
         }
-        if session.engine.is_none() {
-            if session.reconnect_at.is_some_and(|at| at > now) {
-                return;
-            }
-            session.reconnect_at = None;
-            let Origin::Connect(address) = &session.origin else {
-                // Accepted sessions always have an engine until they end.
-                self.close_session(id);
-                return;
-            };
-            let address = address.clone();
-            let config = session.config.clone();
-            let engine = Stream::connect(&address)
-                .ok()
-                .and_then(|stream| self.start_engine(id, stream, &config));
-            let Some(session) = self.sessions.get_mut(&id) else {
-                return;
-            };
-            match engine {
-                Some(engine) => session.engine = Some(engine),
-                None => {
-                    self.retry_later(id);
-                    return;
-                }
-            }
+        if session.engine.is_none() && !self.start_connecting(id, now) {
+            return;
         }
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
@@ -525,30 +498,10 @@ impl EventLoop {
         let result = session.drive();
         session.report_progress();
         match result {
-            Ok(busy) => {
-                if busy {
-                    self.busy.push(id);
-                }
-            }
+            Ok(true) => self.busy.push(id),
+            Ok(false) => {}
             Err(err) => {
-                session.report_failure(&err);
-                if let Some(mut engine) = session.engine.take() {
-                    let _ = self.poll.registry().deregister(engine.stream());
-                }
-                // libzmq reconnects after connection errors but not after
-                // protocol errors such as a failed handshake.
-                let reconnects =
-                    matches!(session.origin, Origin::Connect(_)) && err.is_connection_error();
-                if reconnects {
-                    if session.immediate.is_some() {
-                        // The socket's pipes close, discarding what it
-                        // queued; the next connection gets new ones.
-                        session.renew_pipes();
-                    }
-                    self.retry_later(id);
-                } else {
-                    self.close_session(id);
-                }
+                self.engine_failed(id, &err);
                 return;
             }
         }
@@ -567,10 +520,74 @@ impl EventLoop {
             self.close_session(id);
             return;
         }
-        let established = session.engine.as_ref().is_some_and(Engine::is_established);
-        if !established {
+        if session.engine.as_ref().is_some_and(Engine::is_established) {
+            self.established(id);
+        }
+    }
+
+    /// Starts a connection attempt for a session with no engine, once its
+    /// retry delay is up. Returns whether it now has an engine to drive.
+    fn start_connecting(&mut self, id: usize, now: Instant) -> bool {
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return false;
+        };
+        if session.reconnect_at.is_some_and(|at| at > now) {
+            return false;
+        }
+        session.reconnect_at = None;
+        let Origin::Connect(address) = &session.origin else {
+            // Accepted sessions always have an engine until they end.
+            self.close_session(id);
+            return false;
+        };
+        let address = address.clone();
+        let config = session.config.clone();
+        let engine = Stream::connect(&address)
+            .ok()
+            .and_then(|stream| self.start_engine(id, stream, &config));
+        match (engine, self.sessions.get_mut(&id)) {
+            (Some(engine), Some(session)) => {
+                session.engine = Some(engine);
+                true
+            }
+            (Some(_), None) => false,
+            (None, _) => {
+                self.retry_later(id);
+                false
+            }
+        }
+    }
+
+    /// Ends a session's connection after its engine failed: it reconnects
+    /// after a connection error, as libzmq does, but closes after a protocol
+    /// error such as a failed handshake.
+    fn engine_failed(&mut self, id: usize, err: &EngineError) {
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
+        session.report_failure(err);
+        if let Some(mut engine) = session.engine.take() {
+            let _ = self.poll.registry().deregister(engine.stream());
+        }
+        let reconnects = matches!(session.origin, Origin::Connect(_)) && err.is_connection_error();
+        if !reconnects {
+            self.close_session(id);
             return;
         }
+        if session.immediate.is_some() {
+            // The socket's pipes close, discarding what it queued; the next
+            // connection gets new ones.
+            session.renew_pipes();
+        }
+        self.retry_later(id);
+    }
+
+    /// Once a session's handshake has completed: its retries start over,
+    /// and the connection is handed to the socket, if it waits for one.
+    fn established(&mut self, id: usize) {
+        let Some(session) = self.sessions.get_mut(&id) else {
+            return;
+        };
         session.retry.reset();
         if let Some(immediate) = &mut session.immediate
             && let Some(connection) = immediate.pending.take()

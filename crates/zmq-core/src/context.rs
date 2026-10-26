@@ -186,6 +186,16 @@ pub enum Linger {
     For(Duration),
 }
 
+impl Linger {
+    /// When a connection that starts lingering at `now` must stop, if ever.
+    pub(crate) fn deadline(self, now: Instant) -> Option<Instant> {
+        match self {
+            Self::Forever => None,
+            Self::For(linger) => Some(now + linger),
+        }
+    }
+}
+
 /// [`Context::shutdown`] gave up on connections that were still delivering,
 /// or still disconnected, when its timeout ran out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
