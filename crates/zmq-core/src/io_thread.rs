@@ -586,13 +586,12 @@ impl EventLoop {
         self.retry_later(id);
     }
 
-    /// Once a session's handshake has completed: its retries start over,
-    /// and the connection is handed to the socket, if it waits for one.
+    /// Once a session's handshake has completed: the connection is handed
+    /// to the socket, if it waits for one.
     fn established(&mut self, id: usize) {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
-        session.retry.reset();
         if let Some(immediate) = &mut session.immediate
             && let Some(connection) = immediate.pending.take()
             && immediate.connections.try_send(connection).is_err()
@@ -832,7 +831,10 @@ impl Session {
         timers.push(Reverse((deadline, id)));
     }
 
-    /// Tells monitors what the engine has newly achieved.
+    /// Tells monitors what the engine has newly achieved. Once connected,
+    /// retries start over, as libzmq makes a new connecter for each
+    /// connection: a peer that accepts and then drops us before the
+    /// handshake does not push the delay up to its cap.
     fn report_progress(&mut self) {
         let Some(engine) = &self.engine else {
             return;
@@ -840,6 +842,7 @@ impl Session {
         let monitor = &self.config.monitor;
         if !self.progress.connected && engine.is_connected() {
             self.progress.connected = true;
+            self.retry.reset();
             // Accepted connections were reported by their listener.
             if matches!(self.origin, Origin::Connect(_)) {
                 monitor.emit(&self.endpoint, EventKind::Connected);

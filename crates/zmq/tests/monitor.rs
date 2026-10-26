@@ -194,6 +194,38 @@ fn a_silent_server_fails_the_handshake_without_detail() {
 }
 
 #[test]
+fn backoff_starts_over_once_a_connection_is_made() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    // Accepts each connection and drops it before any handshake.
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            drop(stream);
+        }
+    });
+    let initial = Duration::from_millis(20);
+    let context = Context::new().unwrap();
+    let mut push = context.socket_with::<Push>(SocketOptions {
+        reconnect: Reconnect::Backoff {
+            initial,
+            max: Duration::from_secs(1),
+        },
+        ..SocketOptions::default()
+    });
+    let mut monitor = push.monitor();
+    push.connect(&format!("tcp://{address}")).unwrap();
+    for _ in 0..4 {
+        let event = expect(&mut monitor, |kind| {
+            matches!(kind, EventKind::ConnectRetried { .. })
+        });
+        let EventKind::ConnectRetried { interval } = event.kind else {
+            unreachable!("matched above");
+        };
+        assert!(interval < 2 * initial, "{interval:?} grew past the first");
+    }
+}
+
+#[test]
 fn a_zero_handshake_timeout_means_none() {
     let no_limit = || SocketOptions {
         handshake_timeout: Some(Duration::ZERO),

@@ -14,7 +14,8 @@ pub enum Reconnect {
     Fixed { interval: Duration },
     /// Wait `initial`, then double up to `max`, each time plus a random
     /// fraction of `initial`, like libzmq's `ZMQ_RECONNECT_IVL` with
-    /// `ZMQ_RECONNECT_IVL_MAX`. Resets once a connection succeeds.
+    /// `ZMQ_RECONNECT_IVL_MAX`. Resets once a connection is made, before
+    /// its handshake, as in libzmq.
     Backoff { initial: Duration, max: Duration },
 }
 
