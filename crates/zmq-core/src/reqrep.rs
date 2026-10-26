@@ -7,6 +7,7 @@
 //! `identity... "" body...`. It keeps everything up to the delimiter as the
 //! envelope and sends it back in front of the reply.
 
+use std::collections::VecDeque;
 use std::fmt;
 use std::task::{Context as TaskContext, Poll};
 
@@ -20,6 +21,11 @@ use crate::socket::{FairQueue, LoadBalancer, PeerKey, PeerList, RouteOutcome, ra
 #[derive(Debug)]
 pub struct Requester {
     balancer: LoadBalancer,
+    /// Reads only peers that sent something, as libzmq's REQ reads through
+    /// its fair queue, so waiting for a reply does not look at every peer.
+    replies: FairQueue,
+    /// What the peer asked has sent, read along with the other peers'.
+    from_asked: VecDeque<Message>,
     correlate: bool,
     next_id: u32,
 }
@@ -65,6 +71,8 @@ impl Default for Requester {
     fn default() -> Self {
         Self {
             balancer: LoadBalancer::default(),
+            replies: FairQueue::default(),
+            from_asked: VecDeque::new(),
             correlate: false,
             // libzmq starts request ids at a random value.
             next_id: random_u32(),
@@ -87,6 +95,8 @@ impl Requester {
         body: Message,
         cx: &mut TaskContext<'_>,
     ) -> Result<Outstanding, Message> {
+        // Left from the last request's peer: none of it answers this one.
+        self.from_asked.clear();
         let id = self
             .correlate
             .then(|| self.next_id.wrapping_add(1).to_be_bytes());
@@ -121,26 +131,28 @@ impl Requester {
         outstanding: &Outstanding,
         cx: &mut TaskContext<'_>,
     ) -> Poll<Result<Message, PeerGone>> {
-        // RFC 28: messages from other peers are silently discarded. Peers
-        // whose sessions are gone are dropped along the way.
-        peers.retain_mut(|peer| peer.key() == outstanding.peer || peer.discard_input());
-        let Some(peer) = peers.get_mut(outstanding.peer) else {
-            return Poll::Ready(Err(PeerGone));
-        };
-        loop {
-            match peer.connection.rx.poll_recv(cx) {
-                Poll::Ready(Some(reply)) => {
-                    if let Some(body) = unwrap_reply(reply, outstanding.id) {
-                        return Poll::Ready(Ok(body));
-                    }
-                }
-                Poll::Ready(None) => {
-                    peers.remove_key(outstanding.peer);
-                    return Poll::Ready(Err(PeerGone));
-                }
-                Poll::Pending => return Poll::Pending,
+        let from_asked = &mut self.from_asked;
+        let mut gone = false;
+        self.replies.poll_drain(peers, cx, |peer, message| {
+            // RFC 28: messages from other peers are silently discarded, even
+            // those that arrived before this request.
+            if peer != outstanding.peer {
+                return;
+            }
+            match message {
+                Some(message) => from_asked.push_back(message),
+                None => gone = true,
+            }
+        });
+        while let Some(reply) = self.from_asked.pop_front() {
+            if let Some(body) = unwrap_reply(reply, outstanding.id) {
+                return Poll::Ready(Ok(body));
             }
         }
+        if gone || peers.get(outstanding.peer).is_none() {
+            return Poll::Ready(Err(PeerGone));
+        }
+        Poll::Pending
     }
 }
 
