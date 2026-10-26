@@ -227,6 +227,10 @@ impl EventLoop {
                 waker.queued.store(false, Ordering::Release);
                 due.push(id);
             }
+            // An id can be due several ways at once: busy, readable, timed
+            // out and woken. One drive serves them all.
+            due.sort_unstable();
+            due.dedup();
             for id in due.drain(..) {
                 if self.sessions.contains_key(&id) {
                     self.drive_session(id);
