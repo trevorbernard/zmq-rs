@@ -502,7 +502,13 @@ impl Publisher {
     /// Finds the peers subscribed to a prefix of `message`, for
     /// [`for_each_wanted`](Self::for_each_wanted).
     fn match_peers(&mut self, message: &Message) {
-        self.matched.clear();
+        // Kept for its allocation, unless a broadcast to many peers left it
+        // far larger than publishes need: clearing costs its capacity.
+        if oversized(&self.matched) {
+            self.matched = PeerSet::default();
+        } else {
+            self.matched.clear();
+        }
         let topic = message.split_first().0.as_slice();
         for peers in self.index.prefixes_of(topic) {
             self.matched.extend(peers);
@@ -555,10 +561,21 @@ fn leave(index: &mut PeerIndex, topic: &[u8], key: PeerKey) -> bool {
     };
     peers.remove(&key);
     if !peers.is_empty() {
+        // Walked on every publish to the topic, at the cost of its
+        // capacity, which cancels alone never give back.
+        if oversized(peers) {
+            peers.shrink_to_fit();
+        }
         return false;
     }
     index.remove(topic);
     true
+}
+
+/// Whether `peers` has far more room than it uses: clearing a set or
+/// walking it costs its capacity, not its size.
+fn oversized(peers: &PeerSet) -> bool {
+    peers.capacity() > 64 && peers.capacity() > 4 * peers.len()
 }
 
 /// Applies what one peer sent to the topics of all peers, noting events.
@@ -967,6 +984,34 @@ mod tests {
         assert_eq!(peers.len(), 1);
         assert_eq!(publisher.send(&mut peers, msg("shared")), 1);
         assert_eq!(drain(&mut sb), [msg("shared")]);
+    }
+
+    #[test]
+    fn peer_sets_give_back_room_a_broadcast_or_cancels_left() {
+        let (connections, mut sessions): (Vec<_>, Vec<_>) =
+            (0..300).map(|_| connection(10)).unzip();
+        let mut peers = list(connections);
+        let mut publisher = Publisher::default();
+        for session in &mut sessions {
+            session.to_socket.try_send(subscribe("all")).unwrap();
+        }
+        sessions[0].to_socket.try_send(subscribe("one")).unwrap();
+        assert_eq!(publisher.send(&mut peers, msg("all")), 300);
+        for _ in 0..2 {
+            assert_eq!(publisher.send(&mut peers, msg("one")), 1);
+        }
+        assert!(
+            publisher.matched.capacity() < 64,
+            "{}",
+            publisher.matched.capacity()
+        );
+        for session in &mut sessions[1..] {
+            session.to_socket.try_send(cancel("all")).unwrap();
+        }
+        publisher.sync(&mut peers);
+        let all = publisher.index.get_mut(b"all").unwrap();
+        assert_eq!(all.len(), 1);
+        assert!(all.capacity() < 64, "{}", all.capacity());
     }
 
     #[test]
