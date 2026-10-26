@@ -20,13 +20,16 @@ use zmtp::{
     Message, MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
     PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
     PlainServer, ReadInto, Role, ServerConfig, ServerStep, SocketType, Subscription, Ttl, Version,
-    ZapFailure, ZapReply,
+    ZapFailure, ZapReply, ZapRequest,
 };
 
 use crate::context::PeerSlot;
 use crate::output::Output;
 use crate::transport::Stream;
-use crate::{ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics, ZapResponder};
+use crate::{
+    Authenticator, ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics,
+    ZapResponder,
+};
 
 /// The shortest PING interval, so a zero interval cannot spin.
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
@@ -504,6 +507,17 @@ impl Engine {
         Ok(true)
     }
 
+    /// What the configured security asks about peers, if anything: a CURVE
+    /// server may have no authenticator, and clients have none.
+    fn authenticator(&self) -> Option<&dyn Authenticator> {
+        match &self.config.security {
+            Security::NullAuthenticated { authenticator, .. }
+            | Security::PlainServer { authenticator, .. } => Some(&**authenticator),
+            Security::CurveServer { authenticator, .. } => authenticator.as_deref(),
+            Security::Null | Security::PlainClient(_) | Security::CurveClient { .. } => None,
+        }
+    }
+
     /// Starts the configured mechanism once the greeting is done.
     fn start_mechanism(
         &mut self,
@@ -528,13 +542,7 @@ impl Engine {
                 );
                 // READY waits for the authenticator; nothing is read meanwhile.
                 started.map(|(pending, request)| {
-                    let (answer, reply) = mpsc::channel();
-                    authenticator
-                        .authenticate(request, ZapResponder::new(answer, cx.waker().clone()));
-                    Mechanism::Authenticating {
-                        pending: Pending::Null(pending),
-                        reply,
-                    }
+                    ask(&**authenticator, request, Pending::Null(pending), cx)
                 })
             }
             Security::Null => NullHandshake::start(
@@ -709,17 +717,10 @@ impl Engine {
                 let result = server.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     ServerStep::Authenticate(pending, request) => {
-                        let (answer, reply) = mpsc::channel();
-                        let respond = ZapResponder::new(answer, cx.waker().clone());
-                        if let Security::PlainServer { authenticator, .. } = &self.config.security {
-                            authenticator.authenticate(request, respond);
-                        }
-                        // Without an authenticator the responder is dropped
-                        // unanswered, rejecting the client.
-                        Step::Continue(Mechanism::Authenticating {
-                            pending: Pending::Plain(pending),
-                            reply,
-                        })
+                        let authenticator = self
+                            .authenticator()
+                            .expect("a PLAIN server is configured with an authenticator");
+                        Step::Continue(ask(authenticator, request, Pending::Plain(pending), cx))
                     }
                     ServerStep::Established(established) => Step::Established(established, None),
                 }
@@ -742,20 +743,13 @@ impl Engine {
                         Step::Continue(Mechanism::CurveServer(Box::new(server)))
                     }
                     CurveServerStep::Authenticate(pending, request) => {
-                        let authenticator = match &self.config.security {
-                            Security::CurveServer { authenticator, .. } => authenticator.clone(),
-                            _ => None,
-                        };
-                        match authenticator {
-                            Some(authenticator) => {
-                                let (answer, reply) = mpsc::channel();
-                                let respond = ZapResponder::new(answer, cx.waker().clone());
-                                authenticator.authenticate(request, respond);
-                                Step::Continue(Mechanism::Authenticating {
-                                    pending: Pending::Curve(Box::new(pending)),
-                                    reply,
-                                })
-                            }
+                        match self.authenticator() {
+                            Some(authenticator) => Step::Continue(ask(
+                                authenticator,
+                                request,
+                                Pending::Curve(Box::new(pending)),
+                                cx,
+                            )),
                             // No authenticator: any client that knows our
                             // key is welcome, and nobody vouched for it.
                             None => {
@@ -974,6 +968,19 @@ fn remember_membership(groups: &mut Topics, change: &Membership) {
             groups.remove(group.as_slice());
         }
     }
+}
+
+/// Asks `authenticator` about `request`, the handshake waiting in `pending`
+/// until the answer arrives and wakes the engine.
+fn ask(
+    authenticator: &dyn Authenticator,
+    request: ZapRequest,
+    pending: Pending,
+    cx: &Context<'_>,
+) -> Mechanism {
+    let (answer, reply) = mpsc::channel();
+    authenticator.authenticate(request, ZapResponder::new(answer, cx.waker().clone()));
+    Mechanism::Authenticating { pending, reply }
 }
 
 /// Offers `message` to the socket. Returns it if the pipe is full, in which
