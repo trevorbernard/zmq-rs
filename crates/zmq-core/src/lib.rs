@@ -46,4 +46,5 @@ pub use socket::{
 };
 #[cfg(feature = "draft")]
 pub use socket::{ServerSendError, ServerTable};
+pub use transport::resolve_tcp;
 pub use zmq_pipe::{RecvTimeoutError, TryRecvError};

@@ -612,8 +612,8 @@ pub struct Socket<T: SocketType> {
     routing: T::Routing,
     /// Where it is bound, as `bind` reported it, for `unbind`.
     bound: Vec<(Endpoint, EndpointId)>,
-    /// What it connected to, as written and as resolved, for `disconnect`.
-    connected: Vec<(String, Endpoint, EndpointId)>,
+    /// What it connected to, as written and as parsed, for `disconnect`.
+    connected: Vec<(String, Target, EndpointId)>,
     /// What a poll for readability received, which the next receive
     /// returns.
     pub(crate) pending: Option<T::Received>,
@@ -704,6 +704,7 @@ impl<T: SocketType> Socket<T> {
                 .peers
                 .bind(addr)
                 .map(|(id, addr)| (id, Endpoint::Tcp(addr))),
+            Target::TcpHost { .. } => unreachable!("a bind resolves its host at once"),
             #[cfg(unix)]
             Target::Ipc(path) => self
                 .peers
@@ -783,25 +784,22 @@ impl<T: SocketType> Socket<T> {
         endpoint: &str,
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
         let target = endpoint::connect_target(endpoint)?;
-        let resolved = target
-            .clone()
-            .into_endpoint()
-            .expect("ipc://* is refused when parsing");
-        let (id, key) = match target {
-            Target::Tcp(addr) => self.peers.connect(addr),
+        let (id, key) = match &target {
+            Target::Tcp(addr) => self.peers.connect(*addr),
+            Target::TcpHost { host, port } => self.peers.connect_host(host, *port),
             #[cfg(unix)]
-            Target::Ipc(path) => self.peers.connect_ipc(&path),
+            Target::Ipc(path) => self.peers.connect_ipc(path),
             #[cfg(not(unix))]
             Target::Ipc(_) => unreachable!("ipc is refused when parsing"),
             Target::IpcAnywhere => unreachable!("refused when parsing"),
             #[cfg(any(target_os = "linux", target_os = "android"))]
-            Target::IpcAbstract(name) => self.peers.connect_ipc_abstract(&name),
+            Target::IpcAbstract(name) => self.peers.connect_ipc_abstract(name),
             Target::Inproc(name) => {
-                let (id, key) = self.peers.connect_inproc(&name);
+                let (id, key) = self.peers.connect_inproc(name);
                 (id, Some(key))
             }
         };
-        self.connected.push((endpoint.to_owned(), resolved, id));
+        self.connected.push((endpoint.to_owned(), target, id));
         self.routing.connected(self.peers.list_mut());
         Ok(key)
     }
@@ -819,18 +817,19 @@ impl<T: SocketType> Socket<T> {
             .connected
             .iter()
             .any(|(written, ..)| written == endpoint);
-        // Resolved only when not given as written, sparing a lookup.
-        let resolved = if as_written {
+        // Parsed and resolved only when not given as written, sparing a
+        // lookup.
+        let wanted = if as_written {
             None
         } else {
-            endpoint::connect_target(endpoint)?.into_endpoint()
+            Some(endpoint::connect_target(endpoint)?)
         };
+        let wanted_addr = wanted.as_ref().and_then(Target::resolve);
         let mut found = Vec::new();
         self.connected.retain(|(written, connected, id)| {
-            let keep = if as_written {
-                written != endpoint
-            } else {
-                Some(connected) != resolved.as_ref()
+            let keep = match &wanted {
+                None => written != endpoint,
+                Some(wanted) => !connected.names(wanted, wanted_addr),
             };
             if !keep {
                 found.push(*id);

@@ -366,6 +366,16 @@ impl Peers {
         self.connect_to(Address::Tcp(addr))
     }
 
+    /// Connects to `host`, resolving the name for each attempt, as libzmq
+    /// does: one that does not resolve yet is retried like a refused
+    /// connection. Otherwise as [`connect`](Self::connect).
+    pub fn connect_host(&mut self, host: &str, port: u16) -> (EndpointId, Option<PeerKey>) {
+        self.connect_to(Address::TcpHost {
+            host: host.to_owned(),
+            port,
+        })
+    }
+
     fn connect_to(&mut self, addr: Address) -> (EndpointId, Option<PeerKey>) {
         if self.config.immediate {
             let connections = self.context.connect_immediate(addr, self.config.clone());

@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, ToSocketAddrs};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
 /// Why binding or connecting failed.
@@ -68,9 +68,15 @@ impl fmt::Display for Endpoint {
 }
 
 /// What a bind or connect is aimed at.
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Target {
     Tcp(SocketAddr),
+    /// A host name to connect to, resolved for each connection attempt, as
+    /// libzmq resolves it.
+    TcpHost {
+        host: String,
+        port: u16,
+    },
     Ipc(PathBuf),
     /// `ipc://*`: a fresh path in a new temporary directory.
     IpcAnywhere,
@@ -86,12 +92,29 @@ impl Target {
     pub(crate) fn into_endpoint(self) -> Option<Endpoint> {
         match self {
             Self::Tcp(addr) => Some(Endpoint::Tcp(addr)),
+            Self::TcpHost { .. } => None,
             Self::Ipc(path) => Some(Endpoint::Ipc(path)),
             Self::IpcAnywhere => None,
             #[cfg(any(target_os = "linux", target_os = "android"))]
             Self::IpcAbstract(name) => Some(Endpoint::IpcAbstract(name)),
             Self::Inproc(name) => Some(Endpoint::Inproc(name)),
         }
+    }
+
+    /// The address a TCP target resolves to now, looking a host name up.
+    pub(crate) fn resolve(&self) -> Option<SocketAddr> {
+        match self {
+            Self::Tcp(addr) => Some(*addr),
+            Self::TcpHost { host, port } => zmq_core::resolve_tcp(host, *port).ok(),
+            _ => None,
+        }
+    }
+
+    /// Whether a connection made to `self` is one `wanted`, as given to
+    /// `disconnect`, names: the same target, or one that resolves to the
+    /// same address, `wanted_addr` being what `wanted` resolves to.
+    pub(crate) fn names(&self, wanted: &Self, wanted_addr: Option<SocketAddr>) -> bool {
+        self == wanted || (wanted_addr.is_some() && self.resolve() == wanted_addr)
     }
 }
 
@@ -108,7 +131,7 @@ pub(crate) fn connect_target(endpoint: &str) -> Result<Target, Error> {
     match local_target(endpoint)? {
         Some(Target::IpcAnywhere) => Err(invalid(endpoint)),
         Some(target) => Ok(target),
-        None => connect_addr(endpoint).map(Target::Tcp),
+        None => connect_addr(endpoint),
     }
 }
 
@@ -154,16 +177,47 @@ fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
     if host == "*" {
         return Ok(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)));
     }
-    resolve(host, port, endpoint)
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(SocketAddr::new(ip, port));
+    }
+    // As libzmq's bind, which resolves at once and fails with EINVAL.
+    zmq_core::resolve_tcp(host, port).map_err(|_| invalid(endpoint))
 }
 
-/// The address to connect to for `endpoint`, resolving host names.
-fn connect_addr(endpoint: &str) -> Result<SocketAddr, Error> {
+/// What to connect to for `endpoint`. A host name is resolved only when
+/// connecting, as libzmq defers it, so it must only look like one.
+fn connect_addr(endpoint: &str) -> Result<Target, Error> {
     let (host, port) = tcp_host_port(endpoint)?;
     if host == "*" || port == "*" {
         return Err(invalid(endpoint));
     }
-    resolve(host, parse_port(port, endpoint)?, endpoint)
+    let port = parse_port(port, endpoint)?;
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Ok(Target::Tcp(SocketAddr::new(ip, port)));
+    }
+    // An IPv6 address with a scope, such as `fe80::1%eth0`, which only the
+    // system resolver parses. It is numeric, so nothing is looked up.
+    if host.contains(':') {
+        return zmq_core::resolve_tcp(host, port)
+            .map(Target::Tcp)
+            .map_err(|_| invalid(endpoint));
+    }
+    if !is_host_name(host) {
+        return Err(invalid(endpoint));
+    }
+    Ok(Target::TcpHost {
+        host: host.to_owned(),
+        port,
+    })
+}
+
+/// Whether `host` looks like a host name: letters, digits, `.`, `-` and
+/// `_`, starting with a letter or digit, as libzmq checks a connect's.
+fn is_host_name(host: &str) -> bool {
+    host.starts_with(|c: char| c.is_ascii_alphanumeric())
+        && host
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 /// Splits `tcp://host:port`, removing brackets around an IPv6 host.
@@ -187,22 +241,6 @@ fn tcp_host_port(endpoint: &str) -> Result<(&str, &str), Error> {
 
 fn parse_port(port: &str, endpoint: &str) -> Result<u16, Error> {
     port.parse().map_err(|_| invalid(endpoint))
-}
-
-/// Resolves `host`, preferring an IPv4 address as libzmq does with
-/// `ZMQ_IPV6` off, its default. Otherwise `localhost` may resolve to `::1`
-/// and never reach a `tcp://*:port` listener, which binds IPv4 only.
-fn resolve(host: &str, port: u16, endpoint: &str) -> Result<SocketAddr, Error> {
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, port));
-    }
-    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs().map_err(Error::Io)?.collect();
-    addrs
-        .iter()
-        .find(|addr| addr.is_ipv4())
-        .or_else(|| addrs.first())
-        .copied()
-        .ok_or_else(|| invalid(endpoint))
 }
 
 fn invalid(endpoint: &str) -> Error {
@@ -258,16 +296,45 @@ mod tests {
     fn connect_addresses() {
         assert_eq!(
             connect_addr("tcp://127.0.0.1:5555").unwrap(),
-            addr("127.0.0.1:5555")
+            Target::Tcp(addr("127.0.0.1:5555"))
         );
         assert_eq!(
             connect_addr("tcp://[::1]:5555").unwrap(),
-            addr("[::1]:5555")
+            Target::Tcp(addr("[::1]:5555"))
         );
+        // Resolved only when connecting, as libzmq does.
         assert_eq!(
-            connect_addr("tcp://localhost:5555").unwrap(),
-            addr("127.0.0.1:5555")
+            connect_addr("tcp://no-such-host.invalid:5555").unwrap(),
+            Target::TcpHost {
+                host: "no-such-host.invalid".into(),
+                port: 5555
+            }
         );
+    }
+
+    #[test]
+    fn connect_host_names_must_look_like_one() {
+        for endpoint in [
+            "tcp://-lead:1",
+            "tcp://sp ace:1",
+            "tcp://a/b:1",
+            "tcp://a!b:1",
+        ] {
+            assert!(
+                matches!(connect_addr(endpoint), Err(Error::InvalidEndpoint(_))),
+                "{endpoint}"
+            );
+        }
+        assert!(connect_addr("tcp://under_score-1.example:1").is_ok());
+    }
+
+    #[test]
+    fn binding_a_host_that_does_not_resolve_is_invalid() {
+        assert!(matches!(
+            bind_addr("tcp://no-such-host.invalid:5555"),
+            Err(Error::InvalidEndpoint(_))
+        ));
+        assert_eq!(bind_addr("tcp://localhost:7").unwrap(), addr("127.0.0.1:7"));
     }
 
     #[test]

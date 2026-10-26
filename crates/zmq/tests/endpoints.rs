@@ -213,3 +213,20 @@ fn an_inproc_connection_can_be_disconnected() {
     push.disconnect("inproc://pipeline").unwrap();
     assert!(push.send_timeout("lost", BRIEFLY).is_err(), "no peer left");
 }
+
+#[test]
+fn a_host_name_is_resolved_when_connecting_not_before() {
+    let context = Context::new().unwrap();
+    let mut push = context.socket_with::<Push>(fast_reconnect());
+    let mut monitor = push.monitor();
+    let endpoint = "tcp://no-such-host.invalid:5555";
+    push.connect(endpoint).unwrap();
+    // Each attempt looks the name up again, and retries when it fails.
+    let retried = monitor.recv_timeout(FIVE).unwrap();
+    assert_eq!(retried.endpoint, endpoint);
+    assert!(matches!(
+        retried.kind,
+        zmq::EventKind::ConnectRetried { .. }
+    ));
+    push.disconnect(endpoint).unwrap();
+}

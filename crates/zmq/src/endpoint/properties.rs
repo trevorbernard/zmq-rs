@@ -65,6 +65,7 @@ fn reported(target: Target) -> Option<Endpoint> {
             addr.scope_id(),
         ))),
         Target::Tcp(addr) => Endpoint::Tcp(addr),
+        Target::TcpHost { host, .. } => panic!("{host} is reported as an address"),
         Target::Ipc(path) => Endpoint::Ipc(path),
         Target::IpcAnywhere => return None,
         #[cfg(any(target_os = "linux", target_os = "android"))]

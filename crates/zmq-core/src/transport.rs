@@ -8,7 +8,7 @@
 //! mio's streams are used as they are.
 
 use std::io::{self, Read, Write};
-use std::net::SocketAddr;
+use std::net::{SocketAddr, ToSocketAddrs};
 
 use mio::event::Source;
 use mio::net::TcpListener;
@@ -38,6 +38,20 @@ type TcpStream = mio::net::TcpStream;
 #[cfg(unix)]
 type UnixStream = std::os::unix::net::UnixStream;
 
+/// Resolves `host`, preferring an IPv4 address as libzmq does with
+/// `ZMQ_IPV6` off, its default. Otherwise `localhost` may resolve to `::1`
+/// and never reach a `tcp://*:port` listener, which binds IPv4 only. Blocks
+/// while the name is looked up.
+pub fn resolve_tcp(host: &str, port: u16) -> io::Result<SocketAddr> {
+    let addrs: Vec<SocketAddr> = (host, port).to_socket_addrs()?.collect();
+    addrs
+        .iter()
+        .find(|addr| addr.is_ipv4())
+        .or_else(|| addrs.first())
+        .copied()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{host} has no address")))
+}
+
 /// Nothing to clean up without `ipc://`.
 #[cfg(not(unix))]
 #[derive(Debug)]
@@ -47,6 +61,12 @@ pub(crate) enum IpcCleanup {}
 #[derive(Debug, Clone)]
 pub(crate) enum Address {
     Tcp(SocketAddr),
+    /// A host name, resolved for each attempt as libzmq resolves it, so a
+    /// reconnect follows the name to a new address.
+    TcpHost {
+        host: String,
+        port: u16,
+    },
     #[cfg(unix)]
     Ipc(PathBuf),
     /// A name in Linux's abstract socket namespace, for `ipc://@name`.
@@ -59,6 +79,7 @@ impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
+            Self::TcpHost { host, port } => write!(f, "tcp://{host}:{port}"),
             #[cfg(unix)]
             Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -99,6 +120,9 @@ impl Stream {
     pub(crate) fn connect(address: &Address) -> io::Result<Self> {
         match address {
             Address::Tcp(addr) => mio::net::TcpStream::connect(*addr).map(|s| Self::Tcp(s.into())),
+            Address::TcpHost { host, port } => {
+                mio::net::TcpStream::connect(resolve_tcp(host, *port)?).map(|s| Self::Tcp(s.into()))
+            }
             #[cfg(unix)]
             Address::Ipc(path) => mio::net::UnixStream::connect(path).map(|s| Self::Unix(s.into())),
             #[cfg(any(target_os = "linux", target_os = "android"))]
