@@ -253,7 +253,9 @@ impl<T> Writer<T> {
         let reader_waiting = match &mut self.sender {
             Sender::Queue(producer) => producer.push(item),
             Sender::Latest(latest) => {
-                *lock(latest) = Some(item);
+                // The item replaced is dropped after the lock is released,
+                // so the reader never waits on a free.
+                let _replaced = lock(latest).replace(item);
                 // Pairs with the fence in `Reader::poll_recv`: either the
                 // reader's last check sees this item, or this load sees its
                 // flag.
