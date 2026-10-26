@@ -74,7 +74,7 @@ impl InprocRegistry {
 /// A bound `inproc` name. Free again once its listener is dropped.
 #[derive(Debug)]
 struct InprocBinding {
-    config: ConnectionConfig,
+    end: InprocEnd,
     connections: Writer<Connection>,
 }
 
@@ -82,9 +82,36 @@ struct InprocBinding {
 /// the connector's messages; binding hands `server` to the listener.
 #[derive(Debug)]
 struct PendingConnect {
-    config: ConnectionConfig,
+    end: InprocEnd,
     server: Connection,
     client: PeerSlot,
+}
+
+/// What one end of an `inproc` connection tells the other: what a
+/// handshake would, and how much it buffers. Not its whole config, which
+/// holds the socket's monitors and authenticator and would keep them alive
+/// as long as the name.
+#[derive(Debug)]
+struct InprocEnd {
+    socket_type: SocketType,
+    identity: Identity,
+    send_hwm: Hwm,
+    recv_hwm: Hwm,
+    conflate_inbound: bool,
+    conflate_outbound: bool,
+}
+
+impl From<&ConnectionConfig> for InprocEnd {
+    fn from(config: &ConnectionConfig) -> Self {
+        Self {
+            socket_type: config.socket_type,
+            identity: config.identity.clone(),
+            send_hwm: config.send_hwm,
+            recv_hwm: config.recv_hwm,
+            conflate_inbound: config.conflate_inbound,
+            conflate_outbound: config.conflate_outbound,
+        }
+    }
 }
 
 /// How a connection presents itself and buffers messages.
@@ -532,30 +559,30 @@ pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader
 /// handshake would, and returns the server's end. Incompatible socket types
 /// are never paired: dropping the server's end closes the connection.
 fn pair(
-    server_config: &ConnectionConfig,
-    client_config: &ConnectionConfig,
+    server_end: &InprocEnd,
+    client_end: &InprocEnd,
     server: Connection,
     client: &PeerSlot,
 ) -> Option<Connection> {
-    if !server_config.socket_type.accepts(client_config.socket_type)
-        || !client_config.socket_type.accepts(server_config.socket_type)
+    if !server_end.socket_type.accepts(client_end.socket_type)
+        || !client_end.socket_type.accepts(server_end.socket_type)
     {
         return None;
     }
     // Poisoning is ignored: each lock only stores a value, which a panic
     // cannot leave half done.
-    *server.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(client_config));
-    *client.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(server_config));
+    *server.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(client_end));
+    *client.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(server_end));
     Some(server)
 }
 
-/// What a handshake with a peer configured as `config` would establish.
-fn introduce(config: &ConnectionConfig) -> Established {
+/// What a handshake with the peer at `end` would establish.
+fn introduce(end: &InprocEnd) -> Established {
     Established {
         version: Version::V3_1,
-        peer_socket_type: Some(config.socket_type),
-        peer_identity: if config.socket_type.sends_identity() {
-            Frame::copy_from_slice(config.identity.as_bytes())
+        peer_socket_type: Some(end.socket_type),
+        peer_identity: if end.socket_type.sends_identity() {
+            Frame::copy_from_slice(end.identity.as_bytes())
         } else {
             Frame::new()
         },
@@ -752,6 +779,7 @@ impl Context {
                 format!("inproc://{name} is already bound"),
             ));
         }
+        let end = InprocEnd::from(&config);
         let (mut writer, connections) = pipe(Hwm::Unlimited);
         for pending in registry.pending.remove(name).unwrap_or_default() {
             let mut server = pending.server;
@@ -760,18 +788,18 @@ impl Context {
             // for a connect to a bound name.
             server
                 .rx
-                .raise_hwm(hwm_sum(pending.config.send_hwm, config.recv_hwm));
+                .raise_hwm(hwm_sum(pending.end.send_hwm, end.recv_hwm));
             server
                 .tx
-                .raise_hwm(hwm_sum(config.send_hwm, pending.config.recv_hwm));
-            if let Some(server) = pair(&config, &pending.config, server, &pending.client) {
+                .raise_hwm(hwm_sum(end.send_hwm, pending.end.recv_hwm));
+            if let Some(server) = pair(&end, &pending.end, server, &pending.client) {
                 let _ = writer.try_send(server);
             }
         }
         registry.bound.insert(
             name.to_owned(),
             InprocBinding {
-                config,
+                end,
                 connections: writer,
             },
         );
@@ -784,6 +812,7 @@ impl Context {
     /// Connects to the `inproc` `name` in this context. If nothing is bound
     /// yet, the connection waits for a bind; messages sent meanwhile queue.
     pub fn connect_inproc(&self, name: &str, config: ConnectionConfig) -> Connection {
+        let end = InprocEnd::from(&config);
         let mut registry = self.inproc();
         registry.prune();
         let binding = registry
@@ -795,17 +824,17 @@ impl Context {
         // is known.
         let (send_hwm, recv_hwm) = match &binding {
             Some(binding) => (
-                hwm_sum(config.send_hwm, binding.config.recv_hwm),
-                hwm_sum(config.recv_hwm, binding.config.send_hwm),
+                hwm_sum(end.send_hwm, binding.end.recv_hwm),
+                hwm_sum(end.recv_hwm, binding.end.send_hwm),
             ),
-            None => (config.send_hwm, config.recv_hwm),
+            None => (end.send_hwm, end.recv_hwm),
         };
         let (conflate_out, conflate_in) = match &binding {
             Some(binding) => (
-                config.conflate_outbound || binding.config.conflate_inbound,
-                config.conflate_inbound || binding.config.conflate_outbound,
+                end.conflate_outbound || binding.end.conflate_inbound,
+                end.conflate_inbound || binding.end.conflate_outbound,
             ),
-            None => (config.conflate_outbound, config.conflate_inbound),
+            None => (end.conflate_outbound, end.conflate_inbound),
         };
         let (tx, server_rx) = message_pipe(send_hwm, conflate_out);
         let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
@@ -821,14 +850,14 @@ impl Context {
         };
         match binding {
             Some(binding) => {
-                if let Some(server) = pair(&binding.config, &config, server, &client.peer) {
+                if let Some(server) = pair(&binding.end, &end, server, &client.peer) {
                     let _ = binding.connections.try_send(server);
                 }
             }
             None => {
                 let pending = registry.pending.entry(name.to_owned()).or_default();
                 pending.push(PendingConnect {
-                    config,
+                    end,
                     server,
                     client: client.peer.clone(),
                 });

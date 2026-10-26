@@ -265,3 +265,35 @@ fn an_attempt_that_never_connects_only_retries() {
         "{seen:?}"
     );
 }
+
+/// Waits for `monitor` to report its socket gone, past any events.
+fn assert_closes(mut monitor: Monitor) {
+    let started = Instant::now();
+    while monitor.recv_timeout(FIVE).is_ok() {
+        assert!(started.elapsed() < FIVE, "still open");
+    }
+    assert_eq!(
+        monitor.recv_timeout(Duration::ZERO),
+        Err(zmq::RecvTimeoutError::Disconnected)
+    );
+}
+
+#[test]
+fn a_monitor_closes_with_its_socket_after_an_inproc_bind() {
+    let context = Context::new().unwrap();
+    let mut socket = context.socket::<Pull>();
+    let monitor = socket.monitor();
+    socket.bind("inproc://bound-then-dropped").unwrap();
+    drop(socket);
+    assert_closes(monitor);
+}
+
+#[test]
+fn a_monitor_closes_with_its_socket_after_an_inproc_connect() {
+    let context = Context::new().unwrap();
+    let mut socket = context.socket::<Pull>();
+    let monitor = socket.monitor();
+    socket.connect("inproc://never-bound").unwrap();
+    drop(socket);
+    assert_closes(monitor);
+}
