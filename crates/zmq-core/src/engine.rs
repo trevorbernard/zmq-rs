@@ -658,7 +658,10 @@ impl Engine {
             Step::Established(established, codec) => {
                 let version = established.version;
                 let metadata = Some(connection_metadata(&self.stream, &established));
-                self.curve = codec;
+                self.curve = codec.map(|mut codec| {
+                    codec.set_max_message_size(self.config.max_message_size);
+                    codec
+                });
                 self.deadlines.handshake = None;
                 // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
                 if matches!(version, Version::V3_0 | Version::V3_1) {

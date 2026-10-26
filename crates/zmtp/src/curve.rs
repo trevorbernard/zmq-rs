@@ -30,6 +30,7 @@ use dryoc::classic::crypto_box::{
 };
 use zeroize::Zeroizing;
 
+use crate::codec::counted_size;
 use crate::command::{encode_metadata, parse_metadata};
 use crate::handshake::{
     Rejection, ServerConfig, accept_peer, command_body, local_metadata, malformed, require_zmtp_3,
@@ -199,6 +200,11 @@ pub struct CurveCodec {
     peer_nonce: u64,
     /// A multipart message whose last frame has yet to arrive.
     partial: Option<Message>,
+    /// The size `partial` counts towards `max_message_size`, as the
+    /// decoder counts it: each boxed frame reaches the decoder alone, so
+    /// only the codec sees a multipart message whole.
+    partial_size: u64,
+    max_message_size: Option<u64>,
 }
 
 /// Why a frame could not be boxed or unboxed. The connection must close.
@@ -215,6 +221,9 @@ pub enum CurveError {
     Cryptographic,
     /// We have sent 2^64 - 1 frames; RFC 26 forbids reusing a nonce.
     NonceExhausted,
+    /// A multipart message larger than the limit set with
+    /// [`CurveCodec::set_max_message_size`].
+    MessageTooLarge,
 }
 
 impl CurveClient {
@@ -343,6 +352,8 @@ impl CurveClient {
             next_nonce: 3,
             peer_nonce: nonce,
             partial: None,
+            partial_size: 0,
+            max_message_size: None,
         };
         Ok(CurveClientStep::Established(established, codec))
     }
@@ -532,6 +543,8 @@ impl PendingCurveAuthentication {
             next_nonce: 2,
             peer_nonce: self.peer_nonce,
             partial: None,
+            partial_size: 0,
+            max_message_size: None,
         };
         Ok((established, codec))
     }
@@ -597,6 +610,15 @@ impl CurveCodec {
         Ok(())
     }
 
+    /// Fails a message once its frames total more than `max` octets,
+    /// counted as [`DecoderConfig::max_message_size`] counts them. The
+    /// decoder only sees boxed frames one at a time.
+    ///
+    /// [`DecoderConfig::max_message_size`]: crate::DecoderConfig::max_message_size
+    pub fn set_max_message_size(&mut self, max: Option<u64>) {
+        self.max_message_size = max;
+    }
+
     /// Unboxes one item from the decoder. Returns a whole message once its
     /// last frame arrives, or a command the peer boxed.
     pub fn decode(&mut self, incoming: Incoming) -> Result<Option<Incoming>, CurveError> {
@@ -642,6 +664,15 @@ impl CurveCodec {
             }
             return Ok(Some(Incoming::Command(payload)));
         }
+        self.partial_size = self
+            .partial_size
+            .saturating_add(counted_size(payload.len() as u64));
+        if self
+            .max_message_size
+            .is_some_and(|max| self.partial_size > max)
+        {
+            return Err(CurveError::MessageTooLarge);
+        }
         let message = match self.partial.take() {
             Some(mut message) => {
                 message.push(payload);
@@ -653,6 +684,7 @@ impl CurveCodec {
             self.partial = Some(message);
             return Ok(None);
         }
+        self.partial_size = 0;
         Ok(Some(Incoming::Message(message)))
     }
 }
@@ -772,6 +804,7 @@ impl fmt::Display for CurveError {
             Self::StaleNonce => "CURVE nonce did not increase",
             Self::Cryptographic => "CURVE box did not open",
             Self::NonceExhausted => "CURVE nonces exhausted",
+            Self::MessageTooLarge => "CURVE message too large",
         })
     }
 }
@@ -1003,6 +1036,31 @@ mod tests {
             unbox(&mut client, frames),
             [Incoming::Command(Frame::from(&b"\x04PING\x00\x00"[..]))]
         );
+    }
+
+    #[test]
+    fn a_multipart_message_over_the_limit_is_refused() {
+        let (mut client, mut server) = established();
+        server.set_max_message_size(Some(10));
+        let at_limit = Message::try_from(vec![
+            Frame::from("12345"),
+            Frame::from("1234"),
+            Frame::new(),
+        ])
+        .unwrap();
+        for _ in 0..2 {
+            let frames = boxed(&mut client, &at_limit);
+            assert_eq!(
+                unbox(&mut server, frames),
+                [Incoming::Message(at_limit.clone())]
+            );
+        }
+        let over = Message::try_from(vec![Frame::from("12345"), Frame::from("123456")]).unwrap();
+        let mut frames = boxed(&mut client, &over).into_iter();
+        let first = Incoming::Message(Message::new(frames.next().unwrap()));
+        assert_eq!(server.decode(first), Ok(None));
+        let last = Incoming::Message(Message::new(frames.next().unwrap()));
+        assert_eq!(server.decode(last), Err(CurveError::MessageTooLarge));
     }
 
     #[test]

@@ -51,6 +51,34 @@ fn push_and_pull_over_curve() {
 }
 
 #[test]
+fn max_message_size_counts_every_frame_of_a_curve_message() {
+    let server = Keypair::generate();
+    let server_key = server.public();
+    let context = Context::new().unwrap();
+    let mut pull = context.socket_with::<Pull>(SocketOptions {
+        max_message_size: Some(1000),
+        ..secured(Security::curve_server(server))
+    });
+    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
+        Keypair::generate(),
+        server_key,
+    )));
+    push.connect(&bound.to_string()).unwrap();
+    let within_limit =
+        Message::try_from(vec![Frame::from(vec![1; 400]), Frame::from(vec![2; 400])]).unwrap();
+    let over_limit =
+        Message::try_from(vec![Frame::from(vec![3; 600]), Frame::from(vec![4; 600])]).unwrap();
+    push.send(within_limit.clone());
+    push.send(over_limit);
+    let received = within(FIVE, move || {
+        let first = pull.recv();
+        (first, pull.recv_timeout(Duration::from_millis(500)))
+    });
+    assert_eq!(received, (within_limit, None));
+}
+
+#[test]
 fn the_authenticator_sees_the_clients_public_key() {
     let server = Keypair::generate();
     let server_key = server.public();

@@ -474,7 +474,7 @@ fn read_u64(buf: &[u8]) -> Option<u64> {
 }
 
 /// A frame's size towards [`DecoderConfig::max_message_size`].
-fn counted_size(size: u64) -> u64 {
+pub(crate) fn counted_size(size: u64) -> u64 {
     size.max(1)
 }
 
