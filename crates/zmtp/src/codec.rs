@@ -191,10 +191,10 @@ impl Encoder {
         }
     }
 
-    /// Writes the header of a data frame of `size` octets, with MORE if
-    /// `more`, for a caller that writes or sends the body itself.
-    pub fn encode_frame_header(&self, more: bool, size: usize, out: &mut Vec<u8>) {
-        self.encode_header(if more { MORE } else { 0 }, size as u64, out);
+    /// Writes the header of a last data frame of `size` octets, for a
+    /// caller that writes the body itself.
+    pub(crate) fn encode_frame_header(&self, size: usize, out: &mut Vec<u8>) {
+        self.encode_header(0, size as u64, out);
     }
 
     fn encode_frame(&self, flags: u8, body: &[u8], out: &mut Vec<u8>) {

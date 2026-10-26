@@ -33,7 +33,8 @@ pub use context::{
 };
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
 pub use pair::Pair;
-pub use pubsub::{Publisher, Subscriber, Topics, Verbosity, XPubEvent};
+pub(crate) use pubsub::Topics;
+pub use pubsub::{Publisher, Subscriber, Verbosity, XPubEvent};
 #[cfg(feature = "draft")]
 pub use radiodish::{Dish, Radio};
 pub use reconnect::Reconnect;

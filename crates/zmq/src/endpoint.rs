@@ -145,7 +145,7 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
 
 /// The address to bind for `endpoint`. `*` means every interface or, as the
 /// port, any free port.
-pub(crate) fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
+fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
     let (host, port) = tcp_host_port(endpoint)?;
     let port = match port {
         "*" => 0,
@@ -158,7 +158,7 @@ pub(crate) fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
 }
 
 /// The address to connect to for `endpoint`, resolving host names.
-pub(crate) fn connect_addr(endpoint: &str) -> Result<SocketAddr, Error> {
+fn connect_addr(endpoint: &str) -> Result<SocketAddr, Error> {
     let (host, port) = tcp_host_port(endpoint)?;
     if host == "*" || port == "*" {
         return Err(invalid(endpoint));

@@ -37,12 +37,6 @@ impl Identity {
     pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
-
-    /// The identity octets.
-    #[deprecated(note = "renamed to `as_bytes`, as `RoutingId::as_bytes`")]
-    pub fn as_slice(&self) -> &[u8] {
-        self.as_bytes()
-    }
 }
 
 impl fmt::Display for InvalidIdentity {

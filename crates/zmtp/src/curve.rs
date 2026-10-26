@@ -572,7 +572,7 @@ impl CurveCodec {
         // the authenticator, then flags and payload, encrypted where they
         // were copied.
         let boxed = 1 + payload.len();
-        encoder.encode_frame_header(false, MESSAGE.len() + 8 + TAG + boxed, out);
+        encoder.encode_frame_header(MESSAGE.len() + 8 + TAG + boxed, out);
         out.extend_from_slice(MESSAGE);
         out.extend_from_slice(&nonce.to_be_bytes());
         let tag = out.len();

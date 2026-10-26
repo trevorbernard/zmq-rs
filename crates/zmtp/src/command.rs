@@ -117,16 +117,6 @@ const MAX_PING_CONTEXT: usize = 16;
 const MAX_PROPERTY_VALUE: usize = i32::MAX as usize;
 const DECISECOND_NANOS: u128 = 100_000_000;
 
-/// The wire length of a metadata value, which RFC 37 limits to 2^31 - 1.
-fn property_value_len(len: usize) -> Result<u32, TooLong> {
-    if len > MAX_PROPERTY_VALUE {
-        return Err(TooLong {
-            max: MAX_PROPERTY_VALUE,
-        });
-    }
-    Ok(len as u32)
-}
-
 impl Command {
     /// Parses a command frame body.
     pub fn parse(body: &[u8]) -> Result<Self, CommandError> {
@@ -417,7 +407,8 @@ impl Metadata {
     /// Sets `name` to `value`, replacing any property with the same name.
     pub fn insert(&mut self, name: PropertyName, value: impl Into<Frame>) -> Result<(), TooLong> {
         let value = value.into();
-        property_value_len(value.len())?;
+        // RFC 37 limits a value to 2^31 - 1 octets.
+        check_len(&value, MAX_PROPERTY_VALUE)?;
         match self.properties.iter_mut().find(|(n, _)| *n == name) {
             Some((_, slot)) => *slot = value,
             None => self.properties.push((name, value)),
@@ -642,7 +633,7 @@ mod tests {
                 "cut at {cut}"
             );
         }
-        let mut trailing = full.clone();
+        let mut trailing = full;
         trailing.push(0x01);
         assert_eq!(
             Command::parse(&trailing),
@@ -770,13 +761,9 @@ mod tests {
 
     #[test]
     fn property_value_limit() {
-        assert_eq!(property_value_len(MAX_PROPERTY_VALUE), Ok(i32::MAX as u32));
-        assert_eq!(
-            property_value_len(MAX_PROPERTY_VALUE + 1),
-            Err(TooLong {
-                max: MAX_PROPERTY_VALUE
-            })
-        );
+        // RFC 37: a value's length is a 31-bit count, so it fits the
+        // 4-octet length encode_metadata writes.
+        assert_eq!(MAX_PROPERTY_VALUE, i32::MAX as usize);
     }
 
     #[test]

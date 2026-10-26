@@ -71,11 +71,6 @@ impl Peer {
         self.key
     }
 
-    /// The connection to this peer.
-    pub fn connection(&self) -> &Connection {
-        &self.connection
-    }
-
     /// Sends `message` if the peer has room. `Full` hands it back with
     /// `cx` registered to hear when there is room; `Closed`, once the
     /// peer's session has ended.

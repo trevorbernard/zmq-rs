@@ -160,10 +160,7 @@ impl From<Bytes> for Frame {
 #[cfg(feature = "bytes")]
 impl From<Frame> for Bytes {
     fn from(frame: Frame) -> Self {
-        match frame.0 {
-            Repr::Inline { .. } => Bytes::copy_from_slice(frame.as_slice()),
-            Repr::Shared(bytes) => bytes,
-        }
+        frame.into_bytes()
     }
 }
 

@@ -41,7 +41,7 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         ..Shared::default()
     });
     let writer = Writer {
-        sender: Some(Sender::Queue(producer)),
+        sender: Sender::Queue(producer),
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
@@ -69,7 +69,7 @@ pub fn pipe_conflated<T>() -> (Writer<T>, Reader<T>) {
     let latest = Arc::new(Mutex::new(None));
     let shared = Arc::new(Shared::default());
     let writer = Writer {
-        sender: Some(Sender::Latest(latest.clone())),
+        sender: Sender::Latest(latest.clone()),
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
@@ -181,8 +181,7 @@ impl<T> Deref for CachePadded<T> {
 /// The sending end of a pipe.
 #[derive(Debug)]
 pub struct Writer<T> {
-    /// `None` only while dropping, so the reader can see the disconnect.
-    sender: Option<Sender<T>>,
+    sender: Sender<T>,
     shared: Arc<Shared>,
     written: u64,
     /// The reader's progress as last loaded from `Shared::read`. It only
@@ -251,8 +250,8 @@ impl<T> Writer<T> {
             return Err(TrySendError::Full(item));
         }
         let reader_waiting = match &mut self.sender {
-            Some(Sender::Queue(producer)) => producer.push(item),
-            Some(Sender::Latest(latest)) => {
+            Sender::Queue(producer) => producer.push(item),
+            Sender::Latest(latest) => {
                 *lock(latest) = Some(item);
                 // Pairs with the fence in `Reader::poll_recv`: either the
                 // reader's last check sees this item, or this load sees its
@@ -261,7 +260,6 @@ impl<T> Writer<T> {
                 self.shared.reader.waiting.load(Ordering::Relaxed)
                     && self.shared.reader.waiting.swap(false, Ordering::Acquire)
             }
-            None => return Err(TrySendError::Closed(item)),
         };
         self.written += 1;
         if reader_waiting {
@@ -279,20 +277,6 @@ impl<T> Writer<T> {
         // Register, then check again so a read in between is not missed.
         self.shared.writer_waker.register(cx.waker());
         self.ready()
-    }
-
-    /// Queues `item`, waiting while the pipe is full.
-    pub async fn send(&mut self, mut item: T) -> Result<(), Closed<T>> {
-        loop {
-            if future::poll_fn(|cx| self.poll_ready(cx)).await.is_err() {
-                return Err(Closed(item));
-            }
-            match self.try_send(item) {
-                Ok(()) => return Ok(()),
-                Err(TrySendError::Full(rejected)) => item = rejected,
-                Err(TrySendError::Closed(rejected)) => return Err(Closed(rejected)),
-            }
-        }
     }
 
     /// Queues `item`, blocking the thread while the pipe is full.
@@ -322,11 +306,6 @@ impl<T> Writer<T> {
         } else {
             Poll::Pending
         }
-    }
-
-    /// Waits until the reader is gone.
-    pub async fn closed(&mut self) {
-        future::poll_fn(|cx| self.poll_closed(cx)).await;
     }
 
     /// Whether the reader is gone.
@@ -369,8 +348,6 @@ impl<T> Writer<T> {
 
 impl<T> Drop for Writer<T> {
     fn drop(&mut self) {
-        // Disconnect first, so a reader woken here sees the pipe closed.
-        drop(self.sender.take());
         self.shared
             .final_written
             .store(self.written, Ordering::Relaxed);
@@ -837,7 +814,6 @@ mod tests {
         drop(reader);
         assert_eq!(wakes(&count), 1);
         assert_eq!(writer.poll_closed(&mut cx), Poll::Ready(()));
-        block_on(writer.closed());
     }
 
     #[test]
@@ -919,9 +895,13 @@ mod tests {
                 received
             })
         });
+        // As zmq-core sends: wait for room, then queue.
         block_on(async {
             for i in 0..1_000 {
-                writer.send(i).await.unwrap();
+                std::future::poll_fn(|cx| writer.poll_ready(cx))
+                    .await
+                    .unwrap();
+                writer.try_send(i).unwrap();
             }
         });
         drop(writer);

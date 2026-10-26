@@ -51,6 +51,7 @@ pub struct Envelope {
     frames: Vec<Frame>,
 }
 
+#[cfg(test)]
 static DELIMITER: [Frame; 1] = [Frame::new()];
 
 /// A request received by a REP: the peer, the envelope and the body.
@@ -231,7 +232,8 @@ fn collect(mut frames: impl Iterator<Item = Frame>) -> Option<Message> {
 
 impl Envelope {
     /// The envelope's frames, ending with the empty delimiter.
-    pub fn frames(&self) -> &[Frame] {
+    #[cfg(test)]
+    pub(crate) fn frames(&self) -> &[Frame] {
         if self.frames.is_empty() {
             &DELIMITER
         } else {

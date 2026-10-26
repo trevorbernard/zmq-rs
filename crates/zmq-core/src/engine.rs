@@ -592,7 +592,7 @@ impl Engine {
         &mut self,
         mechanism: Mechanism,
         mut decoder: Decoder,
-        pipes: &mut Pipes<'_>,
+        pipes: &Pipes<'_>,
         cx: &mut Context<'_>,
     ) -> Result<bool, EngineError> {
         let step = match mechanism {
@@ -793,7 +793,7 @@ impl Engine {
     ) -> Result<bool, EngineError> {
         let mut progressed = false;
         if let Some(message) = pending.take() {
-            if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+            if let Some(refused) = deliver(pipes.inbound, message, cx) {
                 *pending = Some(refused);
                 return Ok(false);
             }
@@ -819,7 +819,7 @@ impl Engine {
             match item {
                 Some(Incoming::Message(mut message)) => {
                     announce(&mut message, metadata, self.config.conflate_inbound);
-                    if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+                    if let Some(refused) = deliver(pipes.inbound, message, cx) {
                         *pending = Some(refused);
                         return Ok(progressed);
                     }
@@ -828,7 +828,7 @@ impl Engine {
                 Some(Incoming::Command(body)) => {
                     if let Some(mut message) = self.handle_command(&body, encoder)? {
                         announce(&mut message, metadata, self.config.conflate_inbound);
-                        if let Some(refused) = deliver(pipes.inbound, message, cx)? {
+                        if let Some(refused) = deliver(pipes.inbound, message, cx) {
                             *pending = Some(refused);
                             return Ok(true);
                         }
@@ -975,14 +975,14 @@ fn deliver(
     inbound: &mut Writer<Message>,
     message: Message,
     cx: &mut Context<'_>,
-) -> Result<Option<Message>, EngineError> {
+) -> Option<Message> {
     match inbound.poll_ready(cx) {
         Poll::Ready(Ok(())) => match inbound.try_send(message) {
-            Ok(()) | Err(TrySendError::Closed(_)) => Ok(None),
-            Err(TrySendError::Full(message)) => Ok(Some(message)),
+            Ok(()) | Err(TrySendError::Closed(_)) => None,
+            Err(TrySendError::Full(message)) => Some(message),
         },
-        Poll::Ready(Err(())) => Ok(None),
-        Poll::Pending => Ok(Some(message)),
+        Poll::Ready(Err(())) => None,
+        Poll::Pending => Some(message),
     }
 }
 

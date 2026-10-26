@@ -17,11 +17,11 @@ use crate::socket::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, PeerSet};
 
 /// Topics and how many times each was subscribed, matched by prefix.
 #[derive(Debug, Clone, Default)]
-pub struct Topics(PrefixMap<usize>);
+pub(crate) struct Topics(PrefixMap<usize>);
 
 impl Topics {
     /// Adds a subscription to `topic`. Returns whether it is new.
-    pub fn add(&mut self, topic: &[u8]) -> bool {
+    pub(crate) fn add(&mut self, topic: &[u8]) -> bool {
         if let Some(count) = self.0.get_mut(topic) {
             *count += 1;
             return false;
@@ -32,7 +32,7 @@ impl Topics {
 
     /// Removes one subscription to `topic`. Returns whether that was the
     /// last, so the topic is gone.
-    pub fn remove(&mut self, topic: &[u8]) -> bool {
+    pub(crate) fn remove(&mut self, topic: &[u8]) -> bool {
         let Some(count) = self.0.get_mut(topic) else {
             return false;
         };
@@ -46,25 +46,25 @@ impl Topics {
 
     /// Whether `topic` is subscribed.
     #[must_use]
-    pub fn contains(&self, topic: &[u8]) -> bool {
+    pub(crate) fn contains(&self, topic: &[u8]) -> bool {
         self.0.get(topic).is_some()
     }
 
     /// Whether a message whose first frame is `data` is wanted: some topic
     /// is a prefix of it.
     #[must_use]
-    pub fn matches(&self, data: &[u8]) -> bool {
+    pub(crate) fn matches(&self, data: &[u8]) -> bool {
         self.0.prefixes_of(data).next().is_some()
     }
 
     /// The subscribed topics, in no particular order.
-    pub fn iter(&self) -> impl Iterator<Item = &[u8]> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &[u8]> {
         self.0.iter().map(|(topic, _)| topic)
     }
 
     /// Whether nothing is subscribed.
-    #[must_use]
-    pub fn is_empty(&self) -> bool {
+    #[cfg(test)]
+    pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 }
@@ -182,6 +182,7 @@ impl<V> PrefixMap<V> {
             .map(|(topic, value)| (&**topic, value))
     }
 
+    #[cfg(test)]
     fn is_empty(&self) -> bool {
         self.buckets.is_empty()
     }
@@ -428,7 +429,7 @@ impl Publisher {
     /// Sends `message` to the peers [`match_peers`](Self::match_peers)
     /// found, without reading subscriptions first, so the peers are those
     /// the caller checked.
-    fn send_matched(&mut self, peers: &mut PeerList, message: Message) -> usize {
+    fn send_matched(&self, peers: &mut PeerList, message: Message) -> usize {
         let mut sent = 0;
         if self.invert {
             self.for_each_wanted(peers, |peer| {
@@ -729,7 +730,8 @@ impl Subscriber {
     }
 
     /// The subscribed topics.
-    pub fn topics(&self) -> &Topics {
+    #[cfg(test)]
+    pub(crate) fn topics(&self) -> &Topics {
         &self.topics
     }
 }
