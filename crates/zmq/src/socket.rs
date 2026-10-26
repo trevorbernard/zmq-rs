@@ -321,7 +321,8 @@ impl WaitsForRoom for Push {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        poll_load_balanced(&mut socket.peers, &mut socket.routing, slot, cx)
+        socket.peers.accept(cx);
+        poll_load_balanced(socket.peers.list_mut(), &mut socket.routing, slot, cx)
     }
 }
 
@@ -364,7 +365,8 @@ impl WaitsForRoom for Dealer {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        poll_load_balanced(&mut socket.peers, &mut socket.routing.send, slot, cx)
+        socket.peers.accept(cx);
+        poll_load_balanced(socket.peers.list_mut(), &mut socket.routing.send, slot, cx)
     }
 }
 
@@ -1643,9 +1645,10 @@ impl Socket<Router> {
 }
 
 /// Sends the message in `slot` to the next peer with room, putting it back
-/// and returning `Pending` if none has room. Shared by PUSH and DEALER.
-fn poll_load_balanced(
-    peers: &mut Peers,
+/// and returning `Pending` if none has room. Shared by the load-balancing
+/// sockets: PUSH, DEALER, CLIENT and SCATTER.
+pub(crate) fn poll_load_balanced(
+    peers: &mut PeerList,
     balancer: &mut LoadBalancer,
     slot: &mut Option<Message>,
     cx: &mut TaskContext<'_>,
@@ -1653,8 +1656,7 @@ fn poll_load_balanced(
     let Some(message) = slot.take() else {
         return Poll::Ready(());
     };
-    peers.accept(cx);
-    match balancer.poll_send(peers.list_mut(), message, cx) {
+    match balancer.poll_send(peers, message, cx) {
         Ok(_) => Poll::Ready(()),
         Err(message) => {
             *slot = Some(message);

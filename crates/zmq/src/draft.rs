@@ -11,7 +11,9 @@ use std::time::Duration;
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
-use crate::socket::{DealerRouting, Receives, Routing, SocketType, WaitsForRoom, noop, sealed};
+use crate::socket::{
+    DealerRouting, Receives, Routing, SocketType, WaitsForRoom, noop, poll_load_balanced, sealed,
+};
 use crate::{Socket, UnknownPeer, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
@@ -204,26 +206,6 @@ impl Socket<Client> {
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
         self.recv_next_async().await
-    }
-}
-
-/// Sends the message in `slot` to the next peer with room, putting it back
-/// and returning `Pending` if none has room.
-fn poll_load_balanced(
-    peers: &mut zmq_core::PeerList,
-    balancer: &mut LoadBalancer,
-    slot: &mut Option<Message>,
-    cx: &mut TaskContext<'_>,
-) -> Poll<()> {
-    let Some(message) = slot.take() else {
-        return Poll::Ready(());
-    };
-    match balancer.poll_send(peers, message, cx) {
-        Ok(_) => Poll::Ready(()),
-        Err(message) => {
-            *slot = Some(message);
-            Poll::Pending
-        }
     }
 }
 
