@@ -1460,9 +1460,7 @@ impl Socket<Req> {
         loop {
             match state {
                 RequestState::Sending(slot) => {
-                    let Some(body) = slot.take() else {
-                        return Poll::Ready(Err(PeerGone));
-                    };
+                    let body = slot.take().expect("a send put back its message to retry");
                     match self.routing.poll_send(peers, body, cx) {
                         Ok(outstanding) => *state = RequestState::Waiting(outstanding),
                         Err(body) => {
@@ -1481,6 +1479,8 @@ impl Socket<Req> {
 
 /// Where a request is: waiting for a peer with room, then for the reply.
 enum RequestState {
+    /// Always `Some` between polls: taken only to send, and put back if no
+    /// peer has room.
     Sending(Option<Message>),
     Waiting(Outstanding),
 }

@@ -112,6 +112,13 @@ impl NullHandshake {
     ) -> Result<Self, HandshakeError> {
         let version = peer.version();
         let legacy_peer_type = match *peer {
+            PeerGreeting::Zmtp3 { .. } => {
+                let ready = Command::Ready(local_metadata(socket_type, identity));
+                write_command(version, &ready, out);
+                None
+            }
+            // The greeting already sent our identity frame.
+            PeerGreeting::Zmtp1Unversioned { .. } => None,
             PeerGreeting::Zmtp1 { socket_type: code }
             | PeerGreeting::Zmtp2 { socket_type: code } => {
                 let peer_type = SocketType::from_legacy_code(code)
@@ -119,22 +126,11 @@ impl NullHandshake {
                 if !socket_type.accepts(peer_type) {
                     return Err(HandshakeError::IncompatiblePeer { peer: peer_type });
                 }
-                Some(peer_type)
-            }
-            PeerGreeting::Zmtp1Unversioned { .. } | PeerGreeting::Zmtp3 { .. } => None,
-        };
-        match peer {
-            PeerGreeting::Zmtp3 { .. } => {
-                let ready = Command::Ready(local_metadata(socket_type, identity));
-                write_command(version, &ready, out);
-            }
-            // The greeting already sent our identity frame.
-            PeerGreeting::Zmtp1Unversioned { .. } => {}
-            PeerGreeting::Zmtp1 { .. } | PeerGreeting::Zmtp2 { .. } => {
                 let identity = Frame::copy_from_slice(identity.as_bytes());
                 Encoder::new(version).encode(&Message::new(identity), out);
+                Some(peer_type)
             }
-        }
+        };
         let implicit_subscription = matches!(peer, PeerGreeting::Zmtp1Unversioned { .. })
             && matches!(socket_type, SocketType::Pub | SocketType::XPub);
         Ok(Self {

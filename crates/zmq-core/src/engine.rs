@@ -161,7 +161,13 @@ impl EngineError {
     /// it: authentication with a ZAP status, a protocol error, or no
     /// detail for a broken connection or a timeout.
     pub(crate) fn handshake_failure(&self) -> HandshakeFailure {
-        let protocol = |error| HandshakeFailure::Protocol(error);
+        // A client learns why from the server's ERROR, whose reason is the
+        // ZAP status when authentication refused it.
+        if let Self::Handshake(HandshakeError::PeerError(reason)) = self
+            && let Some(status) = zap_status(reason.as_slice())
+        {
+            return HandshakeFailure::Authentication { status };
+        }
         match self {
             Self::Handshake(HandshakeError::Authentication(failure)) => {
                 HandshakeFailure::Authentication {
@@ -172,21 +178,12 @@ impl EngineError {
                     },
                 }
             }
-            // A client learns why from the server's ERROR, whose reason is
-            // the ZAP status when authentication refused it.
-            Self::Handshake(HandshakeError::PeerError(reason))
-                if matches!(reason.as_slice(), b"300" | b"400" | b"500") =>
-            {
-                let status = std::str::from_utf8(reason.as_slice())
-                    .ok()
-                    .and_then(|digits| digits.parse().ok())
-                    .expect("three ASCII digits");
-                HandshakeFailure::Authentication { status }
+            Self::Handshake(err) => {
+                HandshakeFailure::Protocol(ProtocolError::Handshake(err.clone()))
             }
-            Self::Handshake(err) => protocol(ProtocolError::Handshake(err.clone())),
-            Self::Greeting(err) => protocol(ProtocolError::Greeting(err.clone())),
-            Self::Decode(err) => protocol(ProtocolError::Decode(err.clone())),
-            Self::Curve(err) => protocol(ProtocolError::Curve(*err)),
+            Self::Greeting(err) => HandshakeFailure::Protocol(ProtocolError::Greeting(err.clone())),
+            Self::Decode(err) => HandshakeFailure::Protocol(ProtocolError::Decode(err.clone())),
+            Self::Curve(err) => HandshakeFailure::Protocol(ProtocolError::Curve(*err)),
             Self::Io(_) | Self::PeerClosed | Self::Timeout => HandshakeFailure::NoDetail,
         }
     }
@@ -195,6 +192,16 @@ impl EngineError {
     /// libzmq reconnects after the former but not the latter.
     pub(crate) fn is_connection_error(&self) -> bool {
         matches!(self, Self::Io(_) | Self::PeerClosed | Self::Timeout)
+    }
+}
+
+/// The ZAP status an ERROR reason carries, if it is one (RFC 27).
+fn zap_status(reason: &[u8]) -> Option<u16> {
+    match reason {
+        b"300" => Some(300),
+        b"400" => Some(400),
+        b"500" => Some(500),
+        _ => None,
     }
 }
 

@@ -56,6 +56,21 @@ struct InprocRegistry {
     pending: HashMap<String, Vec<PendingConnect>>,
 }
 
+impl InprocRegistry {
+    /// Forgets names whose listener was dropped, and connections given up
+    /// on while waiting for a bind once nothing they sent is left (libzmq
+    /// delivers what a connection queued before its socket was closed), so
+    /// names a program has stopped using do not pile up.
+    fn prune(&mut self) {
+        self.bound
+            .retain(|_, binding| !binding.connections.is_closed());
+        self.pending.retain(|_, waiting| {
+            waiting.retain(|pending| !pending.server.rx.is_drained());
+            !waiting.is_empty()
+        });
+    }
+}
+
 /// A bound `inproc` name. Free again once its listener is dropped.
 #[derive(Debug)]
 struct InprocBinding {
@@ -711,6 +726,7 @@ impl Context {
     /// waiting for the name are paired at once.
     pub fn bind_inproc(&self, name: &str, config: ConnectionConfig) -> io::Result<InprocListener> {
         let mut registry = self.inproc();
+        registry.prune();
         if registry
             .bound
             .get(name)
@@ -754,6 +770,7 @@ impl Context {
     /// yet, the connection waits for a bind; messages sent meanwhile queue.
     pub fn connect_inproc(&self, name: &str, config: ConnectionConfig) -> Connection {
         let mut registry = self.inproc();
+        registry.prune();
         let binding = registry
             .bound
             .get_mut(name)
@@ -795,10 +812,6 @@ impl Context {
             }
             None => {
                 let pending = registry.pending.entry(name.to_owned()).or_default();
-                // Forget connections given up on while waiting, once nothing
-                // they sent is left: libzmq delivers what a connection queued
-                // before its socket was closed.
-                pending.retain(|pending| !pending.server.rx.is_drained());
                 pending.push(PendingConnect {
                     config,
                     server,
@@ -959,6 +972,24 @@ mod tests {
         assert_eq!(seen.peer_identity, Frame::from("me"));
         let seen = client.peer().unwrap();
         assert_eq!(seen.peer_socket_type, Some(SocketType::Router));
+    }
+
+    #[test]
+    fn inproc_names_no_longer_used_are_forgotten() {
+        let context = Context::new().unwrap();
+        for name in ["a", "b", "c"] {
+            drop(context.bind_inproc(name, config(SocketType::Pull)).unwrap());
+            drop(context.connect_inproc(&format!("never-{name}"), config(SocketType::Push)));
+        }
+        // Prunes before adding its own pending connect.
+        let _last = context.connect_inproc("last", config(SocketType::Push));
+        let registry = context.inproc();
+        assert!(registry.bound.is_empty(), "dropped listeners are forgotten");
+        assert_eq!(
+            registry.pending.keys().collect::<Vec<_>>(),
+            ["last"],
+            "abandoned connects are forgotten"
+        );
     }
 
     #[test]

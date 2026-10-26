@@ -234,6 +234,14 @@ impl PeerCursor {
     }
 }
 
+/// A random starting point for the ids libzmq counts up from a random
+/// value: ROUTER's generated routing ids, SERVER's client ids, REQ's
+/// request ids. Each `RandomState` gets a new key.
+pub(crate) fn random_u32() -> u32 {
+    // Truncated on purpose: any 32 of the hash's bits will do.
+    RandomState::new().hash_one(()) as u32
+}
+
 /// The waker non-blocking calls poll with, through [`noop_context`]. One
 /// static, recognised by its address: `Waker::noop` may not compare equal
 /// across crates.
@@ -794,7 +802,7 @@ impl Default for RouterTable {
             waiting: Vec::new(),
             cursor: PeerCursor::default(),
             // libzmq starts the generated ids at a random value.
-            next_generated: RandomState::new().hash_one(()) as u32,
+            next_generated: random_u32(),
             handover: false,
         }
     }
@@ -951,7 +959,7 @@ impl Default for ServerTable {
             cursor: PeerCursor::default(),
             recv: FairQueue::default(),
             // libzmq starts its ids at a random value.
-            next_id: RandomState::new().hash_one(()) as u32,
+            next_id: random_u32(),
         }
     }
 }

@@ -8,13 +8,12 @@
 //! envelope and sends it back in front of the reply.
 
 use std::fmt;
-use std::hash::{BuildHasher, RandomState};
 use std::task::{Context as TaskContext, Poll};
 
 use zmq_pipe::TrySendError;
 use zmtp::{Frame, Message};
 
-use crate::socket::{FairQueue, LoadBalancer, PeerKey, PeerList, RouteOutcome};
+use crate::socket::{FairQueue, LoadBalancer, PeerKey, PeerList, RouteOutcome, random_u32};
 
 /// REQ's side: sends each request to the next peer with room and accepts a
 /// reply only from that peer.
@@ -68,7 +67,7 @@ impl Default for Requester {
             balancer: LoadBalancer::default(),
             correlate: false,
             // libzmq starts request ids at a random value.
-            next_id: RandomState::new().hash_one(()) as u32,
+            next_id: random_u32(),
         }
     }
 }

@@ -282,18 +282,15 @@ impl Decoder {
             debug_assert!(body.len() - before <= limit, "read past the frame");
             return result;
         }
-        let wanted = match self.state {
-            State::Header => READ_SIZE,
-            State::Body { size, .. } => size
-                .saturating_sub(self.filled)
-                .clamp(READ_SIZE, MAX_RESERVE),
+        // What the frame being read still lacks; nothing yet for a header.
+        let remaining = match self.state {
+            State::Header => 0,
+            State::Body { size, .. } => size.saturating_sub(self.filled),
         };
+        let wanted = remaining.clamp(READ_SIZE, MAX_RESERVE);
         let target = wanted.min(MAX_READ);
         let spare = self.buf.len() - self.filled;
-        let needed = match self.state {
-            State::Header => MIN_READ,
-            State::Body { size, .. } => size.saturating_sub(self.filled).max(MIN_READ),
-        };
+        let needed = remaining.max(MIN_READ);
         if spare < target.min(needed) {
             // Zero only space no read has been offered yet. `reserve` keeps
             // the initialized prefix, including zeroed spare space.
