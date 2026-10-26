@@ -63,10 +63,14 @@ fn unbinding_closes_accepted_connections() {
     let mut first = context.socket::<Pull>();
     let bound = first.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let mut push = context.socket_with::<Push>(fast_reconnect());
+    let mut monitor = push.monitor();
     push.connect(&bound).unwrap();
     push.send("before");
     assert_eq!(first.recv_timeout(FIVE), Some(Message::from("before")));
     first.unbind(&bound).unwrap();
+    // Sent before the push sees its connection end, a message would go
+    // down that connection and be lost, as in libzmq.
+    while monitor.recv_timeout(FIVE).unwrap().kind != zmq::EventKind::Disconnected {}
     // The push reconnects to whoever binds the port next.
     let mut second = context.socket::<Pull>();
     second.bind(&bound).unwrap();
