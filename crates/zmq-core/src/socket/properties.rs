@@ -239,12 +239,19 @@ proptest! {
                             let session = model.peers[i].session.as_mut().unwrap();
                             prop_assert_eq!(drain(session), [message]);
                         }
-                        None => prop_assert_eq!(
-                            result,
-                            Err(RouterSendError::UnknownPeer(message)),
-                            "to {:?}",
-                            id
-                        ),
+                        None => {
+                            prop_assert_eq!(
+                                result,
+                                Err(RouterSendError::UnknownPeer(message)),
+                                "to {:?}",
+                                id
+                            );
+                            // A send to a peer that is gone drops it: these
+                            // peers send nothing, so nothing is left unread.
+                            if let Some(i) = model.holder(&id) {
+                                model.peers[i].listed = false;
+                            }
+                        }
                     }
                 }
             }

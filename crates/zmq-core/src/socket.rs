@@ -185,6 +185,21 @@ impl PeerList {
         }
     }
 
+    /// Removes the peers with `keys` whose sessions are gone and whose
+    /// messages have all been read, as libzmq drops a pipe once read to its
+    /// end. Sends that find peers gone call this, so a socket that never
+    /// receives does not keep its departed peers.
+    pub(crate) fn remove_finished(&mut self, keys: impl IntoIterator<Item = PeerKey>) {
+        for key in keys {
+            if self
+                .get(key)
+                .is_some_and(|peer| peer.connection.rx.is_drained())
+            {
+                self.remove_key(key);
+            }
+        }
+    }
+
     /// Sends a copy of `message` to every peer, skipping those that are
     /// full or gone.
     pub(crate) fn broadcast(&mut self, message: &Message) {
@@ -531,6 +546,7 @@ impl LoadBalancer {
     ) -> Result<PeerKey, Message> {
         message.set_metadata(None);
         let count = peers.peers.len();
+        let mut gone = Vec::new();
         for offset in 0..count {
             let index = (self.next + offset) % count;
             let peer = &mut peers.peers[index];
@@ -538,11 +554,18 @@ impl LoadBalancer {
             match peer.poll_send(message, cx) {
                 Ok(()) => {
                     self.next = (index + 1) % count;
-                    return Ok(peer.key);
+                    let key = peer.key;
+                    peers.remove_finished(gone);
+                    return Ok(key);
                 }
-                Err(TrySendError::Full(back) | TrySendError::Closed(back)) => message = back,
+                Err(TrySendError::Full(back)) => message = back,
+                Err(TrySendError::Closed(back)) => {
+                    gone.push(peer.key);
+                    message = back;
+                }
             }
         }
+        peers.remove_finished(gone);
         Err(message)
     }
 
@@ -974,20 +997,20 @@ impl RouterTable {
         mut message: Message,
     ) -> Result<(), RouterSendError> {
         message.set_metadata(None);
-        let Some(peer) = self
-            .by_identity
-            .get(routing_id)
-            .and_then(|&key| peers.get_mut(key))
-        else {
+        let Some(&key) = self.by_identity.get(routing_id) else {
             return Err(RouterSendError::UnknownPeer(message));
         };
-        peer.connection
-            .tx
-            .try_send(message)
-            .map_err(|err| match err {
-                TrySendError::Full(message) => RouterSendError::Full(message),
-                TrySendError::Closed(message) => RouterSendError::UnknownPeer(message),
-            })
+        let Some(peer) = peers.get_mut(key) else {
+            return Err(RouterSendError::UnknownPeer(message));
+        };
+        match peer.connection.tx.try_send(message) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(message)) => Err(RouterSendError::Full(message)),
+            Err(TrySendError::Closed(message)) => {
+                peers.remove_finished([key]);
+                Err(RouterSendError::UnknownPeer(message))
+            }
+        }
     }
 
     /// Sends the message in `slot` to the peer with `routing_id`, or
@@ -1006,16 +1029,18 @@ impl RouterTable {
         let Some(message) = slot.take() else {
             return Poll::Ready(Ok(()));
         };
-        let Some(peer) = self
-            .by_identity
-            .get(routing_id)
-            .and_then(|&key| peers.get_mut(key))
-        else {
+        let Some(&key) = self.by_identity.get(routing_id) else {
+            return Poll::Ready(Err(message));
+        };
+        let Some(peer) = peers.get_mut(key) else {
             return Poll::Ready(Err(message));
         };
         match peer.poll_send(message, cx) {
             Ok(()) => Poll::Ready(Ok(())),
-            Err(TrySendError::Closed(message)) => Poll::Ready(Err(message)),
+            Err(TrySendError::Closed(message)) => {
+                peers.remove_finished([key]);
+                Poll::Ready(Err(message))
+            }
             Err(TrySendError::Full(message)) => {
                 *slot = Some(message);
                 Poll::Pending
@@ -1257,6 +1282,38 @@ mod tests {
         let mut lb = LoadBalancer::default();
         let mut peers = PeerList::default();
         assert_eq!(lb.poll_send(&mut peers, msg("x"), &mut cx), Err(msg("x")));
+    }
+
+    #[test]
+    fn sending_drops_peers_that_are_gone_once_nothing_they_sent_is_unread() {
+        let (a, sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let (c, mut sc) = connection(10);
+        sb.to_socket.try_send(msg("unread")).unwrap();
+        drop(sa);
+        drop(sb);
+        let mut peers = list(vec![a, b, c]);
+        let (_, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut lb = LoadBalancer::default();
+        assert!(lb.poll_send(&mut peers, msg("x"), &mut cx).is_ok());
+        assert_eq!(drain(&mut sc), [msg("x")]);
+        assert_eq!(peers.len(), 2, "the gone peer with unread input stays");
+    }
+
+    #[test]
+    fn a_router_send_drops_a_peer_that_is_gone() {
+        let (a, sa) = connection(10);
+        sa.establish("alice");
+        let mut peers = list(vec![a]);
+        let mut table = RouterTable::default();
+        table.sync(&mut peers);
+        drop(sa);
+        assert_eq!(
+            table.try_send(&mut peers, b"alice", msg("x")),
+            Err(RouterSendError::UnknownPeer(msg("x")))
+        );
+        assert_eq!(peers.len(), 0);
     }
 
     #[test]
