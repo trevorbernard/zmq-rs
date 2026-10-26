@@ -3,8 +3,8 @@
 use libfuzzer_sys::arbitrary::{self, Arbitrary};
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    CurveClient, CurveClientStep, CurveCodec, CurveServer, CurveServerConfig, CurveServerStep,
-    Decoder, Encoder, Established, Frame, Identity, Incoming, Message, Metadata, PeerGreeting,
+    CurveClient, CurveClientStep, CurveCodec, CurveServer, CurveServerStep, Decoder, Encoder,
+    Established, Frame, Identity, Incoming, Message, Metadata, PeerGreeting, ServerConfig,
     SocketType, Version, ZapReply,
 };
 use zmtp_fuzz::curve;
@@ -105,7 +105,7 @@ fn handshake(
         &mut hello,
     )
     .expect("HELLO");
-    let config = CurveServerConfig {
+    let config = ServerConfig {
         socket_type: server_type,
         identity: Identity::default(),
         domain: Frame::new(),

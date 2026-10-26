@@ -6,10 +6,10 @@
 use proptest::prelude::*;
 use zmtp::{
     Authenticated, ClientStep, Credential, CurveClient, CurveClientStep, CurveCodec, CurveError,
-    CurveServer, CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder,
-    ErrorReason, Established, Frame, HandshakeError, Identity, Incoming, Keypair, Message,
-    Metadata, PeerGreeting, PlainClient, PlainCredentials, PlainServer, PlainServerConfig,
-    PropertyName, SecretKey, ServerStep, SocketType, Version, ZapCredentials, ZapFailure, ZapReply,
+    CurveServer, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, ErrorReason,
+    Established, Frame, HandshakeError, Identity, Incoming, Keypair, Message, Metadata,
+    PeerGreeting, PlainClient, PlainCredentials, PlainServer, PropertyName, SecretKey,
+    ServerConfig, ServerStep, SocketType, Version, ZapCredentials, ZapFailure, ZapReply,
     ZapRequest,
 };
 
@@ -345,7 +345,7 @@ fn start(
                 &mut client.outbox,
             );
             client.handshake = Some(Handshake::PlainClient(start.expect("ZMTP 3 peer")));
-            let config = PlainServerConfig {
+            let config = ServerConfig {
                 socket_type: sides.server_type,
                 identity: sides.server_id.clone(),
                 domain: Frame::from("domain"),
@@ -373,7 +373,7 @@ fn start(
                 &mut client.outbox,
             );
             client.handshake = Some(Handshake::CurveClient(start.expect("ZMTP 3 peer")));
-            let config = CurveServerConfig {
+            let config = ServerConfig {
                 socket_type: sides.server_type,
                 identity: sides.server_id.clone(),
                 domain: Frame::from("domain"),

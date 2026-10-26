@@ -15,13 +15,13 @@ use zeroize::Zeroizing;
 
 use crate::command::{encode_metadata, parse_metadata};
 use crate::handshake::{
-    Rejection, accept_peer, local_metadata, require_zmtp_3, write_command, write_raw_command,
-    zap_verdict,
+    Rejection, ServerConfig, accept_peer, command_body, local_metadata, malformed, require_zmtp_3,
+    unexpected, write_command, write_raw_command, zap_verdict,
 };
 use crate::{
-    Authenticated, Command, CommandError, Credential, ErrorReason, Established, Frame,
-    HandshakeError, Identity, Incoming, PeerGreeting, PlainCredentials, SocketType, Version,
-    ZapCredentials, ZapReply, ZapRequest,
+    Authenticated, Command, Credential, ErrorReason, Established, HandshakeError, Identity,
+    Incoming, PeerGreeting, PlainCredentials, SocketType, Version, ZapCredentials, ZapReply,
+    ZapRequest,
 };
 
 /// The client side of a PLAIN handshake.
@@ -48,22 +48,11 @@ pub enum ClientStep {
     Established(Established),
 }
 
-/// Configuration for a [`PlainServer`].
-#[derive(Debug, Clone)]
-pub struct PlainServerConfig {
-    pub socket_type: SocketType,
-    pub identity: Identity,
-    /// The ZAP domain to authenticate in, possibly empty.
-    pub domain: Frame,
-    /// The peer's address, passed to ZAP.
-    pub peer_address: String,
-}
-
 /// The server side of a PLAIN handshake.
 #[derive(Debug)]
 #[must_use]
 pub struct PlainServer {
-    config: PlainServerConfig,
+    config: ServerConfig,
     version: Version,
     state: ServerState,
 }
@@ -88,7 +77,7 @@ pub enum ServerStep {
 #[derive(Debug)]
 #[must_use]
 pub struct PendingAuthentication {
-    config: PlainServerConfig,
+    config: ServerConfig,
     version: Version,
 }
 
@@ -154,14 +143,14 @@ impl PlainClient {
                 )
                 .map(ClientStep::Established)
             }
-            (_, other) => Err(unexpected(&other)),
+            (_, other) => Err(unexpected(other.name())),
         }
     }
 }
 
 impl PlainServer {
     /// Starts the handshake. The client speaks first, so nothing is written.
-    pub fn start(config: PlainServerConfig, peer: &PeerGreeting) -> Result<Self, HandshakeError> {
+    pub fn start(config: ServerConfig, peer: &PeerGreeting) -> Result<Self, HandshakeError> {
         let version = require_zmtp_3(peer)?;
         Ok(Self {
             config,
@@ -182,12 +171,7 @@ impl PlainServer {
                 if name.as_slice() == HELLO.as_bytes() =>
             {
                 let credentials = parse_hello(&data)?;
-                let request = ZapRequest {
-                    domain: self.config.domain.clone(),
-                    address: self.config.peer_address.clone(),
-                    identity: Frame::copy_from_slice(self.config.identity.as_bytes()),
-                    credentials: ZapCredentials::Plain(credentials),
-                };
+                let request = self.config.zap_request(ZapCredentials::Plain(credentials));
                 let pending = PendingAuthentication {
                     config: self.config,
                     version: self.version,
@@ -212,7 +196,7 @@ impl PlainServer {
                 established.authenticated = Some(authenticated);
                 Ok(ServerStep::Established(established))
             }
-            (_, other) => Err(unexpected(&other)),
+            (_, other) => Err(unexpected(other.name())),
         }
     }
 }
@@ -236,10 +220,7 @@ const WELCOME: &str = "WELCOME";
 const INITIATE: &str = "INITIATE";
 
 fn parse(incoming: Incoming) -> Result<Command, HandshakeError> {
-    match incoming {
-        Incoming::Command(body) => Command::parse(&body).map_err(HandshakeError::MalformedCommand),
-        Incoming::Message(_) => Err(HandshakeError::UnexpectedMessage),
-    }
+    Command::parse(&command_body(incoming)?).map_err(HandshakeError::MalformedCommand)
 }
 
 /// libzmq declares its PLAIN error prefix as the C literal `"\x05ERROR"`, in
@@ -281,18 +262,10 @@ fn parse_hello(data: &[u8]) -> Result<PlainCredentials, HandshakeError> {
     })
 }
 
-fn malformed(command: &'static str) -> HandshakeError {
-    HandshakeError::MalformedCommand(CommandError::Truncated { command })
-}
-
-fn unexpected(command: &Command) -> HandshakeError {
-    HandshakeError::UnexpectedCommand(Frame::copy_from_slice(command.name()))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Encoder, Message, Metadata, PropertyName, ZapFailure};
+    use crate::{CommandError, Encoder, Frame, Message, Metadata, PropertyName, ZapFailure};
 
     const V3_1: PeerGreeting = PeerGreeting::Zmtp3 {
         major: 3,
@@ -531,8 +504,8 @@ mod tests {
 
     // ---- server ----
 
-    fn server_config() -> PlainServerConfig {
-        PlainServerConfig {
+    fn server_config() -> ServerConfig {
+        ServerConfig {
             socket_type: SocketType::Router,
             identity: identity("srv"),
             domain: Frame::from("global"),

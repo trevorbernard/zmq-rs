@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    Frame, GreetingConfig, Identity, Mechanism, Metadata, PlainServer, PlainServerConfig, Role,
+    Frame, GreetingConfig, Identity, Mechanism, Metadata, PlainServer, Role, ServerConfig,
     ServerStep, SocketType, ZapReply,
 };
 
@@ -18,7 +18,7 @@ fuzz_target!(|data: &[u8]| {
     let Some((peer, mut decoder)) = zmtp_fuzz::negotiate(config, data) else {
         return;
     };
-    let config = PlainServerConfig {
+    let config = ServerConfig {
         socket_type: SocketType::Router,
         identity,
         domain: Frame::new(),

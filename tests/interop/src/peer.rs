@@ -7,10 +7,10 @@ use std::time::Duration;
 
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
-    CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    Frame, Greeting, GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, Keypair,
-    LegacyPeers, Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials,
-    PlainServer, PlainServerConfig, PublicKey, Role, ServerStep, SocketType, ZapReply, ZapRequest,
+    CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting,
+    GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, Keypair, LegacyPeers,
+    Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials, PlainServer,
+    PublicKey, Role, ServerConfig, ServerStep, SocketType, ZapReply, ZapRequest,
 };
 
 /// Which security mechanism a [`Peer`] uses, and its side of it.
@@ -151,7 +151,7 @@ impl Peer {
                     .map_err(ConnectError::Io)?
                     .ip()
                     .to_string();
-                let config = PlainServerConfig {
+                let config = ServerConfig {
                     socket_type,
                     identity,
                     domain,
@@ -201,7 +201,7 @@ impl Peer {
                 keypair,
                 authenticate,
             } => {
-                let config = CurveServerConfig {
+                let config = ServerConfig {
                     socket_type,
                     identity,
                     domain: Frame::new(),

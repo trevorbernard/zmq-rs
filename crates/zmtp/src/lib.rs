@@ -31,22 +31,21 @@ pub use command::{
     Ping, PingContext, PropertyName, TooLong, Ttl,
 };
 pub use curve::{
-    CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerConfig,
-    CurveServerStep, PendingCurveAuthentication,
+    CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,
+    PendingCurveAuthentication,
 };
 pub use curve_keys::{KeyError, Keypair, PublicKey, SecretKey};
 pub use frame::Frame;
 pub use greeting::{Feed, Greeting, GreetingConfig, GreetingError, PeerGreeting, Replay, Version};
 pub use handshake::{
     Established, HandshakeError, NullHandshake, NullZapConfig, PendingNullAuthentication,
+    ServerConfig,
 };
 pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use membership::Membership;
 pub use message::{EmptyMessage, IntoIter, Iter, Message, MessageMetadata};
-pub use plain::{
-    ClientStep, PendingAuthentication, PlainClient, PlainServer, PlainServerConfig, ServerStep,
-};
+pub use plain::{ClientStep, PendingAuthentication, PlainClient, PlainServer, ServerStep};
 pub use socket_type::SocketType;
 pub use subscription::Subscription;
 pub use zap::{

@@ -37,6 +37,30 @@ pub struct NullZapConfig {
     pub peer_address: String,
 }
 
+/// The server side of a PLAIN or CURVE handshake: who we are, and what ZAP
+/// is told about the peer.
+#[derive(Debug, Clone)]
+pub struct ServerConfig {
+    pub socket_type: SocketType,
+    pub identity: Identity,
+    /// The ZAP domain to authenticate in, possibly empty.
+    pub domain: Frame,
+    /// The peer's address, passed to ZAP.
+    pub peer_address: String,
+}
+
+impl ServerConfig {
+    /// What ZAP is asked about a peer presenting `credentials`.
+    pub(crate) fn zap_request(&self, credentials: ZapCredentials) -> ZapRequest {
+        ZapRequest {
+            domain: self.domain.clone(),
+            address: self.peer_address.clone(),
+            identity: Frame::copy_from_slice(self.identity.as_bytes()),
+            credentials,
+        }
+    }
+}
+
 /// A NULL handshake waiting for ZAP's verdict before sending READY.
 #[derive(Debug)]
 #[must_use]
@@ -189,9 +213,7 @@ impl NullHandshake {
                         Ok(established)
                     }
                     Command::Error(reason) => Err(HandshakeError::PeerError(reason)),
-                    other => Err(HandshakeError::UnexpectedCommand(Frame::copy_from_slice(
-                        other.name(),
-                    ))),
+                    other => Err(unexpected(other.name())),
                 }
             }
             (Version::V3_0 | Version::V3_1, Incoming::Message(_)) => {
@@ -332,6 +354,25 @@ pub(crate) fn zap_verdict(
         out,
     );
     Err(HandshakeError::Authentication(failure))
+}
+
+/// The body of a command, for mechanisms that take nothing else during the
+/// handshake.
+pub(crate) fn command_body(incoming: Incoming) -> Result<Frame, HandshakeError> {
+    match incoming {
+        Incoming::Command(body) => Ok(body),
+        Incoming::Message(_) => Err(HandshakeError::UnexpectedMessage),
+    }
+}
+
+/// `command`'s body did not have the shape its mechanism requires.
+pub(crate) fn malformed(command: &'static str) -> HandshakeError {
+    HandshakeError::MalformedCommand(CommandError::Truncated { command })
+}
+
+/// The peer sent the command `name` where another was due.
+pub(crate) fn unexpected(name: &[u8]) -> HandshakeError {
+    HandshakeError::UnexpectedCommand(Frame::copy_from_slice(name))
 }
 
 /// The ZMTP 3.x version to speak with `peer`, for mechanisms that need one.

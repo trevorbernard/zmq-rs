@@ -15,12 +15,12 @@ use std::time::{Duration, Instant};
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
     ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
-    CurveServerConfig, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established,
-    Frame, Greeting, GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers,
-    Membership, Message, MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting,
-    PendingAuthentication, PendingCurveAuthentication, PendingNullAuthentication, Ping,
-    PingContext, PlainClient, PlainServer, PlainServerConfig, ReadInto, Role, ServerStep,
-    SocketType, Subscription, Ttl, Version, ZapFailure, ZapReply,
+    CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting,
+    GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers, Membership,
+    Message, MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
+    PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
+    PlainServer, ReadInto, Role, ServerConfig, ServerStep, SocketType, Subscription, Ttl, Version,
+    ZapFailure, ZapReply,
 };
 
 use crate::context::PeerSlot;
@@ -555,7 +555,7 @@ impl Engine {
             Security::PlainServer { domain, .. } => {
                 let peer_address = self.stream.zap_address();
                 PlainServer::start(
-                    PlainServerConfig {
+                    ServerConfig {
                         socket_type: config.socket_type,
                         identity: config.identity.clone(),
                         domain: domain.clone(),
@@ -580,7 +580,7 @@ impl Engine {
             Security::CurveServer {
                 keypair, domain, ..
             } => CurveServer::start(
-                CurveServerConfig {
+                ServerConfig {
                     socket_type: config.socket_type,
                     identity: config.identity.clone(),
                     domain: domain.clone(),

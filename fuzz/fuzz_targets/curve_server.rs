@@ -2,8 +2,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    CurveServer, CurveServerConfig, CurveServerStep, Frame, GreetingConfig, Identity, Mechanism,
-    Metadata, Role, SocketType, ZapReply,
+    CurveServer, CurveServerStep, Frame, GreetingConfig, Identity, Mechanism, Metadata, Role,
+    ServerConfig, SocketType, ZapReply,
 };
 use zmtp_fuzz::curve;
 
@@ -20,7 +20,7 @@ fuzz_target!(|data: &[u8]| {
     let Some((peer, mut decoder)) = zmtp_fuzz::negotiate(config, data) else {
         return;
     };
-    let config = CurveServerConfig {
+    let config = ServerConfig {
         socket_type: SocketType::Router,
         identity: Identity::default(),
         domain: Frame::new(),

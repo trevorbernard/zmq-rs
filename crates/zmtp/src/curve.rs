@@ -32,7 +32,8 @@ use zeroize::Zeroizing;
 
 use crate::command::{encode_metadata, parse_metadata};
 use crate::handshake::{
-    Rejection, accept_peer, local_metadata, require_zmtp_3, write_raw_command, zap_verdict,
+    Rejection, ServerConfig, accept_peer, command_body, local_metadata, malformed, require_zmtp_3,
+    unexpected, write_raw_command, zap_verdict,
 };
 use crate::{
     Command, CommandError, Encoder, Established, Frame, HandshakeError, Identity, Incoming,
@@ -139,21 +140,10 @@ pub enum CurveClientStep {
     Established(Established, CurveCodec),
 }
 
-/// Configuration for a [`CurveServer`].
-#[derive(Debug, Clone)]
-pub struct CurveServerConfig {
-    pub socket_type: SocketType,
-    pub identity: Identity,
-    /// The ZAP domain to authenticate in, possibly empty.
-    pub domain: Frame,
-    /// The peer's address, passed to ZAP.
-    pub peer_address: String,
-}
-
 /// The server side of a CURVE handshake.
 #[must_use]
 pub struct CurveServer {
-    config: CurveServerConfig,
+    config: ServerConfig,
     version: Version,
     public: PublicKey,
     secret: Zeroizing<Key>,
@@ -183,7 +173,7 @@ pub enum CurveServerStep {
 /// A server handshake waiting for its ZAP reply.
 #[must_use]
 pub struct PendingCurveAuthentication {
-    config: CurveServerConfig,
+    config: ServerConfig,
     version: Version,
     metadata: Metadata,
     /// Boxes between the transient keys, READY and MESSAGEs alike.
@@ -278,9 +268,7 @@ impl CurveClient {
                 Ok(CurveClientStep::Continue(self))
             }
             (ClientState::WaitingForReady { .. }, b"READY") => self.ready(data, out),
-            (_, name) => Err(HandshakeError::UnexpectedCommand(Frame::copy_from_slice(
-                name,
-            ))),
+            (_, name) => Err(unexpected(name)),
         }
     }
 
@@ -363,7 +351,7 @@ impl CurveServer {
     /// Starts the handshake with this server's long-term `keypair`. The
     /// client speaks first, so nothing is written.
     pub fn start(
-        config: CurveServerConfig,
+        config: ServerConfig,
         keypair: &Keypair,
         peer: &PeerGreeting,
     ) -> Result<Self, HandshakeError> {
@@ -392,9 +380,7 @@ impl CurveServer {
                 Ok(CurveServerStep::Continue(self))
             }
             (ServerState::WaitingForInitiate { .. }, b"INITIATE") => self.initiate(data),
-            (_, name) => Err(HandshakeError::UnexpectedCommand(Frame::copy_from_slice(
-                name,
-            ))),
+            (_, name) => Err(unexpected(name)),
         }
     }
 
@@ -498,12 +484,7 @@ impl CurveServer {
         let metadata =
             parse_metadata(metadata, "INITIATE").map_err(HandshakeError::MalformedCommand)?;
 
-        let request = ZapRequest {
-            domain: self.config.domain.clone(),
-            address: self.config.peer_address.clone(),
-            identity: Frame::copy_from_slice(self.config.identity.as_bytes()),
-            credentials: ZapCredentials::Curve(client_key),
-        };
+        let request = self.config.zap_request(ZapCredentials::Curve(client_key));
         let pending = PendingCurveAuthentication {
             config: self.config,
             version: self.version,
@@ -728,13 +709,6 @@ fn random<const N: usize>() -> [u8; N] {
     bytes
 }
 
-fn command_body(incoming: Incoming) -> Result<Frame, HandshakeError> {
-    match incoming {
-        Incoming::Command(body) => Ok(body),
-        Incoming::Message(_) => Err(HandshakeError::UnexpectedMessage),
-    }
-}
-
 /// A command body's name and data.
 fn split_command(body: &[u8]) -> Result<(&[u8], &[u8]), HandshakeError> {
     let (&len, rest) = body
@@ -752,10 +726,6 @@ fn peer_error(body: &[u8]) -> HandshakeError {
         Ok(_) => malformed("ERROR"),
         Err(err) => HandshakeError::MalformedCommand(err),
     }
-}
-
-fn malformed(command: &'static str) -> HandshakeError {
-    HandshakeError::MalformedCommand(CommandError::Truncated { command })
 }
 
 impl fmt::Debug for CurveClient {
@@ -850,8 +820,8 @@ mod tests {
         Incoming::Command(bodies.remove(0))
     }
 
-    fn server_config(socket_type: SocketType) -> CurveServerConfig {
-        CurveServerConfig {
+    fn server_config(socket_type: SocketType) -> ServerConfig {
+        ServerConfig {
             socket_type,
             identity: Identity::default(),
             domain: Frame::from("global"),
