@@ -18,7 +18,7 @@ fn events_until(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) -> V
     let started = Instant::now();
     let mut seen = Vec::new();
     loop {
-        if let Some(event) = monitor.try_recv() {
+        if let Ok(event) = monitor.try_recv() {
             let done = wanted(&event.kind);
             seen.push(event.kind);
             if done {
@@ -37,7 +37,7 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) -> Event {
     let started = Instant::now();
     let mut seen = Vec::new();
     loop {
-        if let Some(event) = monitor.try_recv() {
+        if let Ok(event) = monitor.try_recv() {
             if wanted(&event.kind) {
                 return event;
             }

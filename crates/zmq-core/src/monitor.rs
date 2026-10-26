@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use zmq_pipe::{Hwm, Reader, RecvTimeoutError, Writer, pipe};
+use zmq_pipe::{Hwm, Reader, RecvTimeoutError, TryRecvError, Writer, pipe};
 use zmtp::{CurveError, DecodeError, GreetingError, HandshakeError};
 
 /// Events a monitor holds before dropping new ones, as libzmq's monitor
@@ -124,9 +124,10 @@ impl MonitorSink {
 }
 
 impl Monitor {
-    /// The next event, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Event> {
-        self.events.try_recv().ok()
+    /// The next event, if one is waiting. Fails with `Closed` once the
+    /// socket and all its connections are gone and every event is read.
+    pub fn try_recv(&mut self) -> Result<Event, TryRecvError> {
+        self.events.try_recv()
     }
 
     /// The next event, or `None` once the socket and all its connections
@@ -159,5 +160,21 @@ impl fmt::Debug for MonitorSink {
         f.debug_struct("MonitorSink")
             .field("monitors", &self.lock().len())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn try_recv_tells_an_empty_monitor_from_a_closed_one() {
+        let sink = MonitorSink::default();
+        let mut monitor = sink.monitor();
+        assert_eq!(monitor.try_recv(), Err(TryRecvError::Empty));
+        sink.emit("tcp://127.0.0.1:1", EventKind::Closed);
+        drop(sink);
+        assert!(monitor.try_recv().is_ok());
+        assert_eq!(monitor.try_recv(), Err(TryRecvError::Closed));
     }
 }

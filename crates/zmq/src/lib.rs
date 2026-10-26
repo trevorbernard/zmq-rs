@@ -132,7 +132,7 @@ pub use zmq_core::ServerSendError;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
     ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, RouterSendError, Security,
-    TcpKeepalive, Verbosity, XPubEvent, ZapResponder,
+    TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
