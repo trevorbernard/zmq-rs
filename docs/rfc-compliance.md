@@ -378,6 +378,8 @@ Rules shared by every pattern:
 - `unbind` of an `inproc` name also closes the connections accepted on it, as for TCP and IPC; libzmq frees only the name.
 - `disconnect` takes the endpoint as written to `connect`, or any string resolving to the same address; `unbind` takes it as bound or as written, but a wildcard port or `ipc://*` only as bound. Neither matching is `UnknownEndpoint` (libzmq's `ENOENT`).
 
+**IPC bind**: libzmq unlinks whatever is at the path before binding, which deletes a regular file there or takes the name from a socket another process is listening on. Here a bind removes only a stale socket file, one nobody is listening on, as a crashed process leaves behind; a live socket or any other file is `AddrInUse`. This is a deliberate safety exception to matching libzmq.
+
 **TCP options**: every TCP connection, connecting or accepted, has Nagle off, as libzmq's `tune_tcp_socket`. `SocketOptions::tcp_keepalive` turns on keepalive probes with an optional idle time, interval and count (`ZMQ_TCP_KEEPALIVE`, `_IDLE`, `_INTVL`, `_CNT`); `None` leaves the system's setting, as libzmq's default of `-1`. There is no way to force probes off where a system turns them on by default.
 
 ### PIPELINE (RFC 30) and EXPAIR (RFC 31)

@@ -138,11 +138,11 @@ enum Step {
 
 /// Why an engine stopped. The connection is closed.
 #[derive(Debug)]
-#[expect(
-    dead_code,
-    reason = "the details reach the socket once monitor events exist"
-)]
 pub(crate) enum EngineError {
+    #[expect(
+        dead_code,
+        reason = "monitors learn of a broken connection, as libzmq's, without the cause"
+    )]
     Io(io::Error),
     PeerClosed,
     Greeting(GreetingError),
