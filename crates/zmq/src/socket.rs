@@ -146,7 +146,8 @@ impl Routing for XSubRouting {
 /// zmq::poll([req.readable()]);
 /// ```
 pub trait Receives: SocketType + Sized {
-    /// The next item, as the type's receives produce it.
+    /// The next item from the socket's peers, as the type's receives
+    /// produce it. What a poll already holds is the caller's to return.
     #[doc(hidden)]
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Self::Received>;
 }
@@ -165,23 +166,102 @@ pub trait WaitsForRoom: SocketType + Sized {
     /// Whether a send would succeed now; registers `cx` if not.
     #[doc(hidden)]
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()>;
+
+    /// Sends the message in `slot` to a peer with room, or puts it back and
+    /// returns `Pending`, with `cx` registered.
+    #[doc(hidden)]
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()>;
+}
+
+// The receives and waiting sends behind each type's own `try_recv`, `recv`,
+// `recv_timeout` and `recv_async`, and `try_send`, `send`, `send_timeout` and
+// `send_async`. Those are written out per type, so that each documents what
+// it takes and returns.
+
+impl<T: Receives> Socket<T> {
+    /// What a poll for readability received, or else the next.
+    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<T::Received> {
+        if let Some(received) = self.take_pending() {
+            return Poll::Ready(received);
+        }
+        T::poll_next(self, cx)
+    }
+
+    pub(crate) fn try_recv_next(&mut self) -> Option<T::Received> {
+        ready(self.poll_recv(&mut noop()))
+    }
+
+    pub(crate) fn recv_next(&mut self) -> T::Received {
+        wait::block_on(|cx| self.poll_recv(cx))
+    }
+
+    pub(crate) fn recv_next_timeout(&mut self, timeout: Duration) -> Option<T::Received> {
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+    }
+
+    pub(crate) async fn recv_next_async(&mut self) -> T::Received {
+        future::poll_fn(|cx| self.poll_recv(cx)).await
+    }
+}
+
+impl<T: WaitsForRoom> Socket<T> {
+    pub(crate) fn poll_send(
+        &mut self,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        T::poll_send(self, slot, cx)
+    }
+
+    pub(crate) fn try_send_message(&mut self, message: Message) -> Result<(), Message> {
+        let mut slot = Some(message);
+        let _ = self.poll_send(&mut slot, &mut noop());
+        slot.map_or(Ok(()), Err)
+    }
+
+    pub(crate) fn send_message(&mut self, message: Message) {
+        let mut slot = Some(message);
+        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+    }
+
+    pub(crate) fn send_message_timeout(
+        &mut self,
+        message: Message,
+        timeout: Duration,
+    ) -> Result<(), Message> {
+        let mut slot = Some(message);
+        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
+        slot.map_or(Ok(()), Err)
+    }
+
+    pub(crate) async fn send_message_async(&mut self, message: Message) {
+        let mut slot = Some(message);
+        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+    }
 }
 
 impl Receives for Pair {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        socket.poll_recv(cx)
+        socket.peers.accept(cx);
+        socket.routing.poll_recv(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for Sub {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        socket.poll_recv(cx)
+        socket.peers.accept(cx);
+        socket.routing.poll_recv(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for XPub {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
-        socket.poll_recv(cx)
+        socket.peers.accept(cx);
+        socket.routing.0.poll_event(socket.peers.list_mut(), cx)
     }
 }
 
@@ -190,31 +270,34 @@ impl Receives for ManualXPub {
         socket: &mut Socket<Self>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
-        socket.poll_request(cx)
+        socket.peers.accept(cx);
+        socket.routing.0.poll_request(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for XSub {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        socket.poll_recv(cx)
+        socket.peers.accept(cx);
+        socket.routing.0.poll_recv(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for Pull {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        socket.poll_recv(cx)
+        poll_fair_queued(&mut socket.peers, &mut socket.routing, cx)
     }
 }
 
 impl Receives for Rep {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Received> {
-        socket.poll_received(cx)
+        socket.peers.accept(cx);
+        socket.routing.poll_recv(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for Dealer {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        socket.poll_recv(cx)
+        poll_fair_queued(&mut socket.peers, &mut socket.routing.recv, cx)
     }
 }
 
@@ -223,7 +306,23 @@ impl Receives for Router {
         socket: &mut Socket<Self>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<(RoutingId, Message)> {
-        socket.poll_recv(cx)
+        socket.peers.accept(cx);
+        let RouterRouting { recv, table } = &mut socket.routing;
+        let peers = socket.peers.list_mut();
+        table.sync(peers);
+        loop {
+            let Poll::Ready((peer, message)) = recv.poll_recv(peers, cx) else {
+                return Poll::Pending;
+            };
+            if table.routing_id(peer).is_none() {
+                table.sync(peers);
+            }
+            // A peer whose identity duplicates another's is ignored, as in
+            // libzmq: its messages are dropped.
+            if let Some(routing_id) = table.routing_id(peer) {
+                return Poll::Ready((RoutingId::trusted(routing_id.clone()), message));
+            }
+        }
     }
 }
 
@@ -234,6 +333,17 @@ impl WaitsForRoom for Push {
         socket.peers.accept(cx);
         socket.routing.poll_ready(socket.peers.list_mut(), cx)
     }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        // PUSH never receives: discard anything peers send, and drop peers
+        // that are gone.
+        socket.peers.prune_send_only();
+        poll_load_balanced(&mut socket.peers, &mut socket.routing, slot, cx)
+    }
 }
 
 impl WaitsForRoom for Pair {
@@ -241,12 +351,41 @@ impl WaitsForRoom for Pair {
         socket.peers.accept(cx);
         socket.routing.poll_ready(socket.peers.list_mut(), cx)
     }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        socket.peers.accept(cx);
+        let Some(message) = slot.take() else {
+            return Poll::Ready(());
+        };
+        match socket
+            .routing
+            .poll_send(socket.peers.list_mut(), message, cx)
+        {
+            Ok(()) => Poll::Ready(()),
+            Err(message) => {
+                *slot = Some(message);
+                Poll::Pending
+            }
+        }
+    }
 }
 
 impl WaitsForRoom for Dealer {
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
         socket.peers.accept(cx);
         socket.routing.send.poll_ready(socket.peers.list_mut(), cx)
+    }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        poll_load_balanced(&mut socket.peers, &mut socket.routing.send, slot, cx)
     }
 }
 
@@ -744,44 +883,27 @@ impl<T: SocketType> Socket<T> {
 impl Socket<Push> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), Err)
+        self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking while no peer has room.
     pub fn send(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+        self.send_message(message.into());
     }
 
-    /// Sends `message`, blocking for at most `timeout` while no peer has room.
-    /// Hands it back if there is still no room.
+    /// Sends `message`, blocking for at most `timeout` while no peer has
+    /// room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
     ) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
-        slot.map_or(Ok(()), Err)
+        self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
-    }
-
-    pub(crate) fn poll_send(
-        &mut self,
-        slot: &mut Option<Message>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<()> {
-        // PUSH never receives: discard anything peers send, and drop peers
-        // that are gone.
-        self.peers.prune_send_only();
-        poll_load_balanced(&mut self.peers, &mut self.routing, slot, cx)
+        self.send_message_async(message.into()).await;
     }
 }
 
@@ -789,79 +911,48 @@ impl Socket<Pair> {
     /// Sends `message` if there is a peer with room, otherwise hands it
     /// back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), Err)
+        self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking until there is a peer with room.
     pub fn send(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+        self.send_message(message.into());
     }
 
-    /// Sends `message`, blocking for at most `timeout` while there is no peer with room.
-    /// Hands it back if there is still no room.
+    /// Sends `message`, blocking for at most `timeout` while there is no
+    /// peer with room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
     ) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
-        slot.map_or(Ok(()), Err)
+        self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting until there is a peer with room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        self.send_message_async(message.into()).await;
     }
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_send(
-        &mut self,
-        slot: &mut Option<Message>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<()> {
-        self.peers.accept(cx);
-        let Some(message) = slot.take() else {
-            return Poll::Ready(());
-        };
-        match self.routing.poll_send(self.peers.list_mut(), message, cx) {
-            Ok(()) => Poll::Ready(()),
-            Err(message) => {
-                *slot = Some(message);
-                Poll::Pending
-            }
-        }
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.poll_recv(self.peers.list_mut(), cx)
+        self.recv_next_async().await
     }
 }
 
@@ -985,30 +1076,23 @@ impl Socket<Sub> {
 
     /// The next message on a subscribed topic, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message on a subscribed topic, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message on a subscribed topic, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message on a subscribed topic, blocking for at most
+    /// `timeout`; `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message on a subscribed topic, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.poll_recv(self.peers.list_mut(), cx)
+        self.recv_next_async().await
     }
 }
 
@@ -1029,30 +1113,23 @@ impl Socket<XPub> {
 
     /// The next event, if one is waiting.
     pub fn try_recv(&mut self) -> Option<XPubEvent> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next event, blocking until one arrives.
     pub fn recv(&mut self) -> XPubEvent {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next event, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next event, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<XPubEvent> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next event, waiting until one arrives.
     pub async fn recv_async(&mut self) -> XPubEvent {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.0.poll_event(self.peers.list_mut(), cx)
+        self.recv_next_async().await
     }
 }
 
@@ -1065,55 +1142,40 @@ impl Socket<ManualXPub> {
 
     /// The next request, if one is waiting.
     pub fn try_recv(&mut self) -> Option<SubscriptionRequest<'_>> {
-        let (peer, event) = ready(self.poll_request(&mut noop()))?;
-        Some(SubscriptionRequest {
-            socket: self,
-            peer,
-            event,
-        })
+        let (peer, event) = self.try_recv_next()?;
+        Some(self.lend(peer, event))
     }
 
     /// The next request, blocking until one arrives.
     pub fn recv(&mut self) -> SubscriptionRequest<'_> {
-        let (peer, event) = wait::block_on(|cx| self.poll_request(cx));
-        SubscriptionRequest {
-            socket: self,
-            peer,
-            event,
-        }
+        let (peer, event) = self.recv_next();
+        self.lend(peer, event)
     }
 
     /// The next request, blocking for at most `timeout`; `None` if none
     /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<SubscriptionRequest<'_>> {
-        let (peer, event) =
-            wait::block_on_until(wait::deadline(timeout), |cx| self.poll_request(cx))?;
-        Some(SubscriptionRequest {
-            socket: self,
-            peer,
-            event,
-        })
+        let (peer, event) = self.recv_next_timeout(timeout)?;
+        Some(self.lend(peer, event))
     }
 
     /// The next request, waiting until one arrives.
     pub async fn recv_async(&mut self) -> SubscriptionRequest<'_> {
-        let (peer, event) = future::poll_fn(|cx| self.poll_request(cx)).await;
+        let (peer, event) = self.recv_next_async().await;
+        self.lend(peer, event)
+    }
+
+    /// Lends the socket to what a peer sent, to act on it.
+    fn lend(
+        &mut self,
+        peer: Option<zmq_core::PeerKey>,
+        event: XPubEvent,
+    ) -> SubscriptionRequest<'_> {
         SubscriptionRequest {
             socket: self,
             peer,
             event,
         }
-    }
-
-    fn poll_request(
-        &mut self,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.0.poll_request(self.peers.list_mut(), cx)
     }
 }
 
@@ -1235,131 +1297,95 @@ impl Socket<XSub> {
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.0.poll_recv(self.peers.list_mut(), cx)
+        self.recv_next_async().await
     }
 }
 
 impl Socket<Pull> {
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        poll_fair_queued(&mut self.peers, &mut self.routing, cx)
+        self.recv_next_async().await
     }
 }
 
 impl Socket<Dealer> {
     /// Sends `message` if a peer has room, otherwise hands it back.
     pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), Err)
+        self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking while no peer has room.
     pub fn send(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+        self.send_message(message.into());
     }
 
-    /// Sends `message`, blocking for at most `timeout` while no peer has room.
-    /// Hands it back if there is still no room.
+    /// Sends `message`, blocking for at most `timeout` while no peer has
+    /// room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
     ) -> Result<(), Message> {
-        let mut slot = Some(message.into());
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
-        slot.map_or(Ok(()), Err)
+        self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting while no peer has room.
     pub async fn send_async(&mut self, message: impl Into<Message>) {
-        let mut slot = Some(message.into());
-        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        self.send_message_async(message.into()).await;
     }
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Message> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Message {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Message {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
+        self.recv_next_async().await
     }
-
-    pub(crate) fn poll_send(
-        &mut self,
-        slot: &mut Option<Message>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<()> {
-        poll_load_balanced(&mut self.peers, &mut self.routing.send, slot, cx)
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Message> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        poll_fair_queued(&mut self.peers, &mut self.routing.recv, cx)
-    }
-}
-
-impl Socket<Dealer> {
     /// Whether each peer connected or accepted from now on is first sent an
     /// empty message, as libzmq's `ZMQ_PROBE_ROUTER`, so a ROUTER peer
     /// learns our routing id at once. Off by default.
@@ -1462,47 +1488,35 @@ enum RequestState {
 impl Socket<Rep> {
     /// The next request, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Request<'_>> {
-        let received = ready(self.poll_received(&mut noop()))?;
-        Some(Request {
-            socket: self,
-            received,
-        })
+        let received = self.try_recv_next()?;
+        Some(self.lend(received))
     }
 
     /// The next request, blocking until one arrives.
     pub fn recv(&mut self) -> Request<'_> {
-        let received = wait::block_on(|cx| self.poll_received(cx));
-        Request {
-            socket: self,
-            received,
-        }
+        let received = self.recv_next();
+        self.lend(received)
     }
 
     /// The next request, blocking for at most `timeout`; `None` if none
     /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Request<'_>> {
-        let received = wait::block_on_until(wait::deadline(timeout), |cx| self.poll_received(cx))?;
-        Some(Request {
-            socket: self,
-            received,
-        })
+        let received = self.recv_next_timeout(timeout)?;
+        Some(self.lend(received))
     }
 
     /// The next request, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Request<'_> {
-        let received = future::poll_fn(|cx| self.poll_received(cx)).await;
+        let received = self.recv_next_async().await;
+        self.lend(received)
+    }
+
+    /// Lends the socket to a request, to answer it.
+    fn lend(&mut self, received: Received) -> Request<'_> {
         Request {
             socket: self,
             received,
         }
-    }
-
-    fn poll_received(&mut self, cx: &mut TaskContext<'_>) -> Poll<Received> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        self.routing.poll_recv(self.peers.list_mut(), cx)
     }
 }
 
@@ -1664,48 +1678,25 @@ impl Socket<Router> {
     /// The next message and the routing id of the peer that sent it, if
     /// one is waiting.
     pub fn try_recv(&mut self) -> Option<(RoutingId, Message)> {
-        ready(self.poll_recv(&mut noop()))
+        self.try_recv_next()
     }
 
     /// The next message and its sender's routing id, blocking until one
     /// arrives.
     pub fn recv(&mut self) -> (RoutingId, Message) {
-        wait::block_on(|cx| self.poll_recv(cx))
+        self.recv_next()
     }
 
     /// The next message and its sender's routing id, blocking for at most
     /// `timeout`; `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(RoutingId, Message)> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message and its sender's routing id, waiting until one
     /// arrives.
     pub async fn recv_async(&mut self) -> (RoutingId, Message) {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
-    }
-
-    pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<(RoutingId, Message)> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        self.peers.accept(cx);
-        let RouterRouting { recv, table } = &mut self.routing;
-        let peers = self.peers.list_mut();
-        table.sync(peers);
-        loop {
-            let Poll::Ready((peer, message)) = recv.poll_recv(peers, cx) else {
-                return Poll::Pending;
-            };
-            if table.routing_id(peer).is_none() {
-                table.sync(peers);
-            }
-            // A peer whose identity duplicates another's is ignored, as in
-            // libzmq: its messages are dropped.
-            if let Some(routing_id) = table.routing_id(peer) {
-                return Poll::Ready((RoutingId::trusted(routing_id.clone()), message));
-            }
-        }
+        self.recv_next_async().await
     }
 }
 

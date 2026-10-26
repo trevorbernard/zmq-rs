@@ -119,33 +119,23 @@ impl Socket<Dish> {
 
     /// The next message and its group, if one is waiting.
     pub fn try_recv(&mut self) -> Option<(Group, Frame)> {
-        match self.poll_recv_group(&mut noop()) {
-            Poll::Ready(received) => Some(received),
-            Poll::Pending => None,
-        }
+        self.try_recv_next()
     }
 
     /// The next message and its group, blocking until one arrives.
     pub fn recv(&mut self) -> (Group, Frame) {
-        wait::block_on(|cx| self.poll_recv_group(cx))
+        self.recv_next()
     }
 
-    /// The next message and its group, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message and its group, blocking for at most `timeout`;
+    /// `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(Group, Frame)> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv_group(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message and its group, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (Group, Frame) {
-        future::poll_fn(|cx| self.poll_recv_group(cx)).await
-    }
-
-    fn poll_recv_group(&mut self, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        let (peers, dish) = self.parts_accepting(cx);
-        dish.poll_recv(peers, cx)
+        self.recv_next_async().await
     }
 }
 
@@ -160,7 +150,7 @@ impl sealed::Sealed for Server {}
 impl SocketType for Server {
     const KIND: zmtp::SocketType = zmtp::SocketType::Server;
     type Routing = ServerTable;
-    type Received = (NonZeroU32, Frame);
+    type Received = (ClientId, Frame);
 }
 
 impl ClientId {
@@ -178,75 +168,50 @@ impl ClientId {
 impl Socket<Client> {
     /// Sends `frame` if a server has room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_send_frame(&mut slot, &mut noop());
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.try_send_message(Message::new(frame))
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, blocking while no server has room.
     pub fn send(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on(|cx| self.poll_send_frame(&mut slot, cx));
+        self.send_message(Message::new(frame));
     }
 
-    /// Sends `frame`, blocking for at most `timeout` while no server has room. Hands
-    /// it back if there is still no room.
+    /// Sends `frame`, blocking for at most `timeout` while no server has
+    /// room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         frame: impl Into<Frame>,
         timeout: Duration,
     ) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_send_frame(&mut slot, cx)
-        });
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.send_message_timeout(Message::new(frame), timeout)
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, waiting while no server has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        future::poll_fn(|cx| self.poll_send_frame(&mut slot, cx)).await;
+        self.send_message_async(Message::new(frame)).await;
     }
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_recv_frame(&mut noop()) {
-            Poll::Ready(frame) => Some(frame),
-            Poll::Pending => None,
-        }
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Frame {
-        wait::block_on(|cx| self.poll_recv_frame(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv_frame(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        future::poll_fn(|cx| self.poll_recv_frame(cx)).await
-    }
-
-    fn poll_send_frame(
-        &mut self,
-        slot: &mut Option<Message>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<()> {
-        let (peers, routing) = self.parts_accepting(cx);
-        poll_load_balanced(peers, &mut routing.send, slot, cx)
-    }
-
-    fn poll_recv_frame(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        let (peers, routing) = self.parts_accepting(cx);
-        poll_single_part(peers, &mut routing.recv, cx)
+        self.recv_next_async().await
     }
 }
 
@@ -327,76 +292,52 @@ impl SocketType for Gather {
 impl Socket<Scatter> {
     /// Sends `frame` if a gather has room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_scatter(&mut slot, &mut noop());
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.try_send_message(Message::new(frame))
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, blocking while no gather has room.
     pub fn send(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on(|cx| self.poll_scatter(&mut slot, cx));
+        self.send_message(Message::new(frame));
     }
 
-    /// Sends `frame`, blocking for at most `timeout` while no gather has room. Hands
-    /// it back if there is still no room.
+    /// Sends `frame`, blocking for at most `timeout` while no gather has
+    /// room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         frame: impl Into<Frame>,
         timeout: Duration,
     ) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_scatter(&mut slot, cx)
-        });
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.send_message_timeout(Message::new(frame), timeout)
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, waiting while no gather has room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        future::poll_fn(|cx| self.poll_scatter(&mut slot, cx)).await;
-    }
-
-    fn poll_scatter(&mut self, slot: &mut Option<Message>, cx: &mut TaskContext<'_>) -> Poll<()> {
-        // SCATTER never receives: discard anything peers send, and drop
-        // peers that are gone.
-        self.prune_send_only();
-        let (peers, balancer) = self.parts_accepting(cx);
-        poll_load_balanced(peers, balancer, slot, cx)
+        self.send_message_async(Message::new(frame)).await;
     }
 }
 
 impl Socket<Gather> {
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_gather(&mut noop()) {
-            Poll::Ready(frame) => Some(frame),
-            Poll::Pending => None,
-        }
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Frame {
-        wait::block_on(|cx| self.poll_gather(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_gather(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        future::poll_fn(|cx| self.poll_gather(cx)).await
-    }
-
-    fn poll_gather(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        let (peers, queue) = self.parts_accepting(cx);
-        poll_single_part(peers, queue, cx)
+        self.recv_next_async().await
     }
 }
 
@@ -404,27 +345,23 @@ impl Socket<Server> {
     /// The next message and the id of the client that sent it, if one is
     /// waiting.
     pub fn try_recv(&mut self) -> Option<(ClientId, Frame)> {
-        try_recv_routed(self).map(|(id, frame)| (ClientId(id), frame))
+        self.try_recv_next()
     }
 
     /// The next message and its sender's id, blocking until one arrives.
     pub fn recv(&mut self) -> (ClientId, Frame) {
-        let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
-        (ClientId(id), frame)
+        self.recv_next()
     }
 
     /// The next message and its sender's id, blocking for at most
     /// `timeout`; `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(ClientId, Frame)> {
-        let (id, frame) =
-            wait::block_on_until(wait::deadline(timeout), |cx| poll_recv_routed(self, cx))?;
-        Some((ClientId(id), frame))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message and its sender's id, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (ClientId, Frame) {
-        let (id, frame) = future::poll_fn(|cx| poll_recv_routed(self, cx)).await;
-        (ClientId(id), frame)
+        self.recv_next_async().await
     }
 
     /// Sends `frame` to the client `to` without waiting.
@@ -505,7 +442,7 @@ impl sealed::Sealed for Peer {}
 impl SocketType for Peer {
     const KIND: zmtp::SocketType = zmtp::SocketType::Peer;
     type Routing = ServerTable;
-    type Received = (NonZeroU32, Frame);
+    type Received = (PeerId, Frame);
 }
 
 impl PeerId {
@@ -538,27 +475,23 @@ impl Socket<Peer> {
     /// The next message and the id of the peer that sent it, if one is
     /// waiting.
     pub fn try_recv(&mut self) -> Option<(PeerId, Frame)> {
-        try_recv_routed(self).map(|(id, frame)| (PeerId(id), frame))
+        self.try_recv_next()
     }
 
     /// The next message and its sender's id, blocking until one arrives.
     pub fn recv(&mut self) -> (PeerId, Frame) {
-        let (id, frame) = wait::block_on(|cx| poll_recv_routed(self, cx));
-        (PeerId(id), frame)
+        self.recv_next()
     }
 
     /// The next message and its sender's id, blocking for at most
     /// `timeout`; `None` if none arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(PeerId, Frame)> {
-        let (id, frame) =
-            wait::block_on_until(wait::deadline(timeout), |cx| poll_recv_routed(self, cx))?;
-        Some((PeerId(id), frame))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message and its sender's id, waiting until one arrives.
     pub async fn recv_async(&mut self) -> (PeerId, Frame) {
-        let (id, frame) = future::poll_fn(|cx| poll_recv_routed(self, cx)).await;
-        (PeerId(id), frame)
+        self.recv_next_async().await
     }
 
     /// Sends `frame` to the peer `to` without waiting.
@@ -613,22 +546,10 @@ impl Socket<Peer> {
 
 // SERVER and PEER route the same way, by the ids their table gives peers.
 
-fn try_recv_routed<T: SocketType<Routing = ServerTable, Received = (NonZeroU32, Frame)>>(
-    socket: &mut Socket<T>,
-) -> Option<(NonZeroU32, Frame)> {
-    match poll_recv_routed(socket, &mut noop()) {
-        Poll::Ready(received) => Some(received),
-        Poll::Pending => None,
-    }
-}
-
-fn poll_recv_routed<T: SocketType<Routing = ServerTable, Received = (NonZeroU32, Frame)>>(
+fn poll_routed<T: SocketType<Routing = ServerTable>>(
     socket: &mut Socket<T>,
     cx: &mut TaskContext<'_>,
 ) -> Poll<(NonZeroU32, Frame)> {
-    if let Some(received) = socket.take_pending() {
-        return Poll::Ready(received);
-    }
     let (peers, table) = socket.parts_accepting(cx);
     table.poll_recv(peers, cx)
 }
@@ -708,97 +629,56 @@ impl SocketType for Channel {
 impl Socket<Channel> {
     /// Sends `frame` if there is a peer with room, otherwise hands it back.
     pub fn try_send(&mut self, frame: impl Into<Frame>) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        let _ = self.poll_channel_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.try_send_message(Message::new(frame))
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, blocking until there is a peer with room.
     pub fn send(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on(|cx| self.poll_channel_send(&mut slot, cx));
+        self.send_message(Message::new(frame));
     }
 
-    /// Sends `frame`, blocking for at most `timeout` while there is no peer with room. Hands
-    /// it back if there is still no room.
+    /// Sends `frame`, blocking for at most `timeout` while there is no peer
+    /// with room. Hands it back if there is still no room.
     pub fn send_timeout(
         &mut self,
         frame: impl Into<Frame>,
         timeout: Duration,
     ) -> Result<(), Frame> {
-        let mut slot = Some(Message::new(frame.into()));
-        wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_channel_send(&mut slot, cx)
-        });
-        slot.map_or(Ok(()), |message| Err(only_frame(message)))
+        self.send_message_timeout(Message::new(frame), timeout)
+            .map_err(only_frame)
     }
 
     /// Sends `frame`, waiting until there is a peer with room.
     pub async fn send_async(&mut self, frame: impl Into<Frame>) {
-        let mut slot = Some(Message::new(frame.into()));
-        future::poll_fn(|cx| self.poll_channel_send(&mut slot, cx)).await;
+        self.send_message_async(Message::new(frame)).await;
     }
 
     /// The next message, if one is waiting.
     pub fn try_recv(&mut self) -> Option<Frame> {
-        match self.poll_channel_recv(&mut noop()) {
-            Poll::Ready(frame) => Some(frame),
-            Poll::Pending => None,
-        }
+        self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
     pub fn recv(&mut self) -> Frame {
-        wait::block_on(|cx| self.poll_channel_recv(cx))
+        self.recv_next()
     }
 
-    /// The next message, blocking for at most `timeout`; `None` if none arrives in time.
+    /// The next message, blocking for at most `timeout`; `None` if none
+    /// arrives in time.
     pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Frame> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_channel_recv(cx))
+        self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
     pub async fn recv_async(&mut self) -> Frame {
-        future::poll_fn(|cx| self.poll_channel_recv(cx)).await
-    }
-
-    fn poll_channel_send(
-        &mut self,
-        slot: &mut Option<Message>,
-        cx: &mut TaskContext<'_>,
-    ) -> Poll<()> {
-        let Some(message) = slot.take() else {
-            return Poll::Ready(());
-        };
-        let (peers, pair) = self.parts_accepting(cx);
-        match pair.poll_send(peers, message, cx) {
-            Ok(()) => Poll::Ready(()),
-            Err(message) => {
-                *slot = Some(message);
-                Poll::Pending
-            }
-        }
-    }
-
-    fn poll_channel_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        if let Some(received) = self.take_pending() {
-            return Poll::Ready(received);
-        }
-        let (peers, pair) = self.parts_accepting(cx);
-        loop {
-            let Poll::Ready(message) = pair.poll_recv(peers, cx) else {
-                return Poll::Pending;
-            };
-            let (frame, rest) = message.split_first();
-            if rest.is_empty() {
-                return Poll::Ready(frame.clone());
-            }
-        }
+        self.recv_next_async().await
     }
 }
 
+/// The frame of a message a frame send handed back, as it was sent.
 fn only_frame(message: Message) -> Frame {
-    message.into_iter().next().expect("a message has a frame")
+    message.into_parts().0
 }
 
 impl fmt::Display for ClientId {
@@ -831,37 +711,49 @@ impl std::error::Error for NoSuchClient {}
 
 impl Receives for Dish {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {
-        socket.poll_recv_group(cx)
+        let (peers, dish) = socket.parts_accepting(cx);
+        dish.poll_recv(peers, cx)
     }
 }
 
 impl Receives for Client {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        socket.poll_recv_frame(cx)
+        let (peers, routing) = socket.parts_accepting(cx);
+        poll_single_part(peers, &mut routing.recv, cx)
     }
 }
 
 impl Receives for Server {
-    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(NonZeroU32, Frame)> {
-        poll_recv_routed(socket, cx)
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(ClientId, Frame)> {
+        poll_routed(socket, cx).map(|(id, frame)| (ClientId(id), frame))
     }
 }
 
 impl Receives for Gather {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        socket.poll_gather(cx)
+        let (peers, queue) = socket.parts_accepting(cx);
+        poll_single_part(peers, queue, cx)
     }
 }
 
 impl Receives for Peer {
-    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(NonZeroU32, Frame)> {
-        poll_recv_routed(socket, cx)
+    fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(PeerId, Frame)> {
+        poll_routed(socket, cx).map(|(id, frame)| (PeerId(id), frame))
     }
 }
 
 impl Receives for Channel {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Frame> {
-        socket.poll_channel_recv(cx)
+        let (peers, pair) = socket.parts_accepting(cx);
+        loop {
+            let Poll::Ready(message) = pair.poll_recv(peers, cx) else {
+                return Poll::Pending;
+            };
+            let (frame, rest) = message.split_first();
+            if rest.is_empty() {
+                return Poll::Ready(frame.clone());
+            }
+        }
     }
 }
 
@@ -870,15 +762,36 @@ impl WaitsForRoom for Client {
         let (peers, routing) = socket.parts_accepting(cx);
         routing.send.poll_ready(peers, cx)
     }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        let (peers, routing) = socket.parts_accepting(cx);
+        poll_load_balanced(peers, &mut routing.send, slot, cx)
+    }
 }
 
 impl WaitsForRoom for Scatter {
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
-        // As `poll_scatter`: SCATTER discards what peers send and drops
-        // those gone.
+        // As `poll_send`: SCATTER discards what peers send and drops those
+        // gone.
         socket.prune_send_only();
         let (peers, balancer) = socket.parts_accepting(cx);
         balancer.poll_ready(peers, cx)
+    }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        // SCATTER never receives: discard anything peers send, and drop
+        // peers that are gone.
+        socket.prune_send_only();
+        let (peers, balancer) = socket.parts_accepting(cx);
+        poll_load_balanced(peers, balancer, slot, cx)
     }
 }
 
@@ -886,5 +799,23 @@ impl WaitsForRoom for Channel {
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
         let (peers, pair) = socket.parts_accepting(cx);
         pair.poll_ready(peers, cx)
+    }
+
+    fn poll_send(
+        socket: &mut Socket<Self>,
+        slot: &mut Option<Message>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<()> {
+        let Some(message) = slot.take() else {
+            return Poll::Ready(());
+        };
+        let (peers, pair) = socket.parts_accepting(cx);
+        match pair.poll_send(peers, message, cx) {
+            Ok(()) => Poll::Ready(()),
+            Err(message) => {
+                *slot = Some(message);
+                Poll::Pending
+            }
+        }
     }
 }
