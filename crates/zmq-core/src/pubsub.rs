@@ -422,6 +422,13 @@ impl Publisher {
         message.set_metadata(None);
         self.sync(peers);
         self.match_peers(&message);
+        self.send_matched(peers, message)
+    }
+
+    /// Sends `message` to the peers [`match_peers`](Self::match_peers)
+    /// found, without reading subscriptions first, so the peers are those
+    /// the caller checked.
+    fn send_matched(&mut self, peers: &mut PeerList, message: Message) -> usize {
         let mut sent = 0;
         if self.invert {
             self.for_each_wanted(peers, |peer| {
@@ -480,7 +487,9 @@ impl Publisher {
             *slot = Some(message);
             return Poll::Pending;
         }
-        Poll::Ready(self.send(peers, message))
+        // Reading subscriptions again could add a peer whose queue is full,
+        // which would then miss the message.
+        Poll::Ready(self.send_matched(peers, message))
     }
 
     /// Whether the peer with `key` should get `message`.
