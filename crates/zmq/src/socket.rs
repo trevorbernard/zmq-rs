@@ -1152,7 +1152,7 @@ impl SubscriptionRequest<'_> {
         match &self.event {
             XPubEvent::Subscribe(topic) => self.apply(Subscription::Subscribe(topic.clone())),
             XPubEvent::Cancel(topic) => self.apply(Subscription::Cancel(topic.clone())),
-            XPubEvent::Message(_) => true,
+            XPubEvent::Message(_) => self.socket.peers.list_mut().get(self.peer).is_some(),
         }
     }
 

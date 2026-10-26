@@ -140,3 +140,27 @@ fn a_departed_peers_topics_are_cancelled_with_no_peer_to_answer() {
     drop(request);
     assert_eq!(xpub.send("a1"), 0);
 }
+
+#[test]
+fn accepting_a_message_says_whether_its_peer_is_still_there() {
+    let context = Context::new().unwrap();
+    let mut xpub = bound(&context, "message-from");
+    let mut xsub = context.socket::<zmq::XSub>();
+    xsub.connect("inproc://message-from").unwrap();
+    xsub.send("still here");
+    let mut request = xpub.recv();
+    assert_eq!(
+        request.event(),
+        &XPubEvent::Message(Message::from("still here"))
+    );
+    assert!(request.accept());
+    drop(request);
+    xsub.send("leaving");
+    drop(xsub);
+    let mut request = xpub.recv();
+    assert_eq!(
+        request.event(),
+        &XPubEvent::Message(Message::from("leaving"))
+    );
+    assert!(!request.accept(), "the peer left after sending it");
+}
