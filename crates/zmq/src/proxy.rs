@@ -386,9 +386,10 @@ fn raw_event(event: XPubEvent) -> Message {
 /// Splits off the routing id a ROUTER sends to, if the message has a body.
 fn routed(message: Message) -> Option<(RoutingId, Message)> {
     let mut frames = message.into_iter();
-    let id = frames.next()?;
+    // A first frame no peer could have as its id is unroutable.
+    let id = RoutingId::new(frames.next()?).ok()?;
     let body = Message::try_from(frames.collect::<Vec<Frame>>()).ok()?;
-    (!id.is_empty()).then(|| (RoutingId::trusted(id), body))
+    Some((id, body))
 }
 
 /// Drops the message in `slot`, for sockets that cannot send.
