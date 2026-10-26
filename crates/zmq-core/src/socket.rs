@@ -581,6 +581,19 @@ pub struct FairQueue {
     cursor: PeerCursor,
 }
 
+/// The most messages [`FairQueue::poll_drain`] reads from one peer in a call.
+const DRAIN_BATCH: usize = 256;
+
+/// How [`FairQueue::read_turn`] left a peer.
+enum Drained {
+    /// It read a batch; the peer may have more.
+    Batch,
+    /// The peer has nothing more for now.
+    Empty,
+    /// The peer's session is gone and everything it sent was read.
+    Gone,
+}
+
 /// A peer's waker, and whether the peer is in the turn.
 #[derive(Debug)]
 struct Waiting {
@@ -669,48 +682,66 @@ impl FairQueue {
     /// XPUB reads a pipe through once it is activated, then `None` for a
     /// peer whose session is gone. Peers are read in the order they woke.
     /// Registers no task, so one registered earlier stays in place.
-    pub(crate) fn drain(
-        &mut self,
-        peers: &mut PeerList,
-        mut f: impl FnMut(PeerKey, Option<Message>),
-    ) {
-        self.sync(peers);
-        self.take_woken();
-        while let Some(index) = self.turn.pop_front() {
-            let waiting = &mut self.waiting[index];
-            let key = waiting.key;
-            let mut cx = TaskContext::from_waker(&waiting.waker);
-            let rx = &mut peers.peers[index].connection.rx;
-            let closed = loop {
-                match rx.poll_recv(&mut cx) {
-                    Poll::Ready(Some(message)) => f(key, Some(message)),
-                    Poll::Ready(None) => break true,
-                    Poll::Pending => break false,
-                }
-            };
-            if closed {
-                self.forget(peers, index);
-                f(key, None);
-            } else {
-                self.waiting[index].in_turn = false;
-            }
-        }
+    pub(crate) fn drain(&mut self, peers: &mut PeerList, f: impl FnMut(PeerKey, Option<Message>)) {
+        self.read_turn(peers, usize::MAX, f);
     }
 
-    /// As [`drain`](Self::drain), then registers `cx` to be woken once any
-    /// peer sends more.
+    /// As [`drain`](Self::drain), but reads at most [`DRAIN_BATCH`]
+    /// messages from each peer, then registers `cx` to be woken once any
+    /// peer sends more, or at once if one has more to read already. A peer
+    /// that never stops sending cannot keep the task here, past its
+    /// deadline.
     pub(crate) fn poll_drain(
         &mut self,
         peers: &mut PeerList,
         cx: &mut TaskContext<'_>,
+        f: impl FnMut(PeerKey, Option<Message>),
+    ) {
+        self.read_turn(peers, DRAIN_BATCH, f);
+        // Registered before looking, as in `poll_recv`.
+        self.ready.task.register(cx.waker());
+        if !self.turn.is_empty() || self.ready.any.load(Ordering::Acquire) {
+            cx.waker().wake_by_ref();
+        }
+    }
+
+    /// Reads each peer in the turn once, up to `batch` messages; a peer
+    /// with more takes another turn.
+    fn read_turn(
+        &mut self,
+        peers: &mut PeerList,
+        batch: usize,
         mut f: impl FnMut(PeerKey, Option<Message>),
     ) {
-        loop {
-            self.drain(peers, &mut f);
-            // Registered before looking again, as in `poll_recv`.
-            self.ready.task.register(cx.waker());
-            if !self.ready.any.load(Ordering::Acquire) {
-                return;
+        self.sync(peers);
+        self.take_woken();
+        for _ in 0..self.turn.len() {
+            let Some(index) = self.turn.pop_front() else {
+                break;
+            };
+            let waiting = &mut self.waiting[index];
+            let key = waiting.key;
+            let mut cx = TaskContext::from_waker(&waiting.waker);
+            let rx = &mut peers.peers[index].connection.rx;
+            let mut left = batch;
+            let read = loop {
+                if left == 0 {
+                    break Drained::Batch;
+                }
+                left -= 1;
+                match rx.poll_recv(&mut cx) {
+                    Poll::Ready(Some(message)) => f(key, Some(message)),
+                    Poll::Ready(None) => break Drained::Gone,
+                    Poll::Pending => break Drained::Empty,
+                }
+            };
+            match read {
+                Drained::Batch => self.turn.push_back(index),
+                Drained::Empty => self.waiting[index].in_turn = false,
+                Drained::Gone => {
+                    self.forget(peers, index);
+                    f(key, None);
+                }
             }
         }
     }
@@ -1277,6 +1308,28 @@ mod tests {
         assert!(
             matches!(fq.poll_recv(&mut peers, &mut cx), Poll::Ready((_, m)) if m == msg("late"))
         );
+    }
+
+    #[test]
+    fn a_drain_reads_a_batch_from_each_peer_and_wakes_for_the_rest() {
+        let (a, mut sa) = connection(1000);
+        let (b, mut sb) = connection(1000);
+        for _ in 0..DRAIN_BATCH + 10 {
+            sa.to_socket.try_send(msg("a")).unwrap();
+        }
+        sb.to_socket.try_send(msg("b")).unwrap();
+        let mut peers = list(vec![a, b]);
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let mut fq = FairQueue::default();
+        let mut read = Vec::new();
+        fq.poll_drain(&mut peers, &mut cx, |_, message| read.extend(message));
+        assert_eq!(read.len(), DRAIN_BATCH + 1, "a batch of a, then b");
+        assert_eq!(read.last(), Some(&msg("b")));
+        assert!(count.0.load(Ordering::SeqCst) > 0, "woken for the rest");
+        read.clear();
+        fq.poll_drain(&mut peers, &mut cx, |_, message| read.extend(message));
+        assert_eq!(read.len(), 10);
     }
 
     #[test]

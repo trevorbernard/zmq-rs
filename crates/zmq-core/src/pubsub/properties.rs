@@ -197,7 +197,8 @@ impl Model {
     }
 
     /// What reading peers does: ZMTP 1.0 peers are settled first, then each
-    /// peer that woke is read through, in the order it woke.
+    /// peer that woke is read through, in the order it woke. Scenarios send
+    /// fewer messages than a drain batch, so one pass reads them all.
     fn sync(&mut self) {
         for i in 0..self.peers.len() {
             if self.peers[i].gone {

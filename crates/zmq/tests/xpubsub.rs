@@ -192,3 +192,28 @@ fn xsub_subscriptions_are_never_dropped_however_many() {
         assert!(xsub.try_recv().is_some());
     }
 }
+
+#[test]
+fn a_flooding_subscriber_cannot_keep_xpub_from_returning() {
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<XPub>();
+    xpub.bind("inproc://flood").unwrap();
+    let mut xsub = context.socket::<XSub>();
+    xsub.connect("inproc://flood").unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let flooding = {
+        let stop = stop.clone();
+        thread::spawn(move || {
+            while !stop.load(Ordering::Relaxed) {
+                xsub.send(Message::from(&b"\x01a"[..]));
+            }
+        })
+    };
+    let heard = within(FIVE, move || {
+        let first = xpub.recv();
+        (first, xpub.recv_timeout(Duration::from_millis(200)))
+    });
+    stop.store(true, Ordering::Relaxed);
+    flooding.join().unwrap();
+    assert_eq!(heard, (subscribed("a"), None));
+}
