@@ -150,11 +150,20 @@ struct EventLoop {
     /// Sessions whose last round got work done, to drive again after the
     /// others, without waiting for an event.
     busy: Vec<usize>,
-    /// Set once shutdown starts: when it must end, and where to report.
-    shutdown: Option<(Option<Instant>, mpsc::Sender<usize>)>,
+    /// Set once shutdown starts.
+    shutdown: Option<Shutdown>,
     /// Ids are never reused, so a late wakeup for something closed cannot
     /// reach a newcomer.
     next_id: usize,
+}
+
+/// A shutdown under way.
+struct Shutdown {
+    /// When it must end; `None` waits as long as each linger allows.
+    deadline: Option<Instant>,
+    /// Where to report how many connections were cut off: one for each
+    /// [`IoCommand::Shutdown`], as clones of a context may each shut it down.
+    done: Vec<mpsc::Sender<usize>>,
 }
 
 impl EventLoop {
@@ -173,6 +182,9 @@ impl EventLoop {
                 if err.kind() == io::ErrorKind::Interrupted {
                     continue;
                 }
+                // Nothing can be driven any more: every open connection is
+                // cut off.
+                self.report_shutdown();
                 return;
             }
             due.append(&mut self.busy);
@@ -222,13 +234,22 @@ impl EventLoop {
                     self.drive_listener(id);
                 }
             }
-            if let Some((deadline, done)) = &self.shutdown {
+            if let Some(shutdown) = &self.shutdown {
                 let finished = self.sessions.is_empty();
-                if finished || deadline.is_some_and(|deadline| Instant::now() >= deadline) {
-                    let _ = done.send(self.sessions.len());
+                let expired = shutdown.deadline.is_some_and(|at| Instant::now() >= at);
+                if finished || expired {
+                    self.report_shutdown();
                     return;
                 }
             }
+        }
+    }
+
+    /// Tells everyone waiting for the shutdown how many connections are
+    /// still open, about to be cut off as the thread exits.
+    fn report_shutdown(&self) {
+        for done in self.shutdown.iter().flat_map(|shutdown| &shutdown.done) {
+            let _ = done.send(self.sessions.len());
         }
     }
 
@@ -239,6 +260,11 @@ impl EventLoop {
         deadline: Option<Instant>,
         done: mpsc::Sender<usize>,
     ) -> Vec<usize> {
+        // A later shutdown can only bring the end forward.
+        let deadline = match self.shutdown.as_ref().map(|shutdown| shutdown.deadline) {
+            Some(Some(earlier)) => Some(deadline.map_or(earlier, |deadline| deadline.min(earlier))),
+            _ => deadline,
+        };
         for (_, mut entry) in self.listeners.drain() {
             let _ = self.poll.registry().deregister(&mut entry.listener);
             entry
@@ -273,7 +299,12 @@ impl EventLoop {
         if let Some(deadline) = deadline {
             self.timers.push(Reverse((deadline, WAKER.0)));
         }
-        self.shutdown = Some((deadline, done));
+        let shutdown = self.shutdown.get_or_insert_with(|| Shutdown {
+            deadline,
+            done: Vec::new(),
+        });
+        shutdown.deadline = deadline;
+        shutdown.done.push(done);
         due
     }
 
@@ -329,10 +360,15 @@ impl EventLoop {
             closed,
         } = request;
         let id = self.take_id();
-        self.poll
-            .registry()
-            .register(&mut listener, Token(id), Interest::READABLE)
-            .ok()?;
+        let registered =
+            self.poll
+                .registry()
+                .register(&mut listener, Token(id), Interest::READABLE);
+        if registered.is_err() {
+            // The monitor has seen it listening: it closes at once.
+            config.monitor.emit(&endpoint, EventKind::Closed);
+            return None;
+        }
         let waker = self.token_waker(id);
         let entry = ListenerEntry {
             listener,
@@ -632,14 +668,17 @@ impl EventLoop {
                 listener: id,
                 connection,
             }));
-            if let Some(session) = self.add_session(
+            match self.add_session(
                 origin,
                 Some(stream),
                 config.clone(),
                 pipes,
                 endpoint.clone(),
             ) {
-                self.drive_session(session);
+                Some(session) => self.drive_session(session),
+                // Registering its stream failed: the connection the monitor
+                // saw accepted is gone.
+                None => config.monitor.emit(&endpoint, EventKind::Disconnected),
             }
         }
     }
