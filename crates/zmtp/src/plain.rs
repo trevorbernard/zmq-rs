@@ -435,7 +435,7 @@ mod tests {
             client
                 .receive(raw("WELCOME", b"x"), &mut Vec::new())
                 .unwrap_err(),
-            HandshakeError::MalformedCommand(CommandError::Truncated { command: "WELCOME" })
+            HandshakeError::MalformedCommand(CommandError::Malformed { command: "WELCOME" })
         );
     }
 
@@ -633,7 +633,7 @@ mod tests {
                 server
                     .receive(raw("HELLO", data), &mut Vec::new())
                     .unwrap_err(),
-                HandshakeError::MalformedCommand(CommandError::Truncated { command: "HELLO" }),
+                HandshakeError::MalformedCommand(CommandError::Malformed { command: "HELLO" }),
                 "{data:?}"
             );
         }
@@ -678,7 +678,7 @@ mod tests {
             welcomed_server()
                 .receive(raw("INITIATE", b"\x01"), &mut Vec::new())
                 .unwrap_err(),
-            HandshakeError::MalformedCommand(CommandError::Truncated {
+            HandshakeError::MalformedCommand(CommandError::Malformed {
                 command: "INITIATE"
             })
         );

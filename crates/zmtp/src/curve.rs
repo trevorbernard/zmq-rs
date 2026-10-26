@@ -716,7 +716,7 @@ fn split_command(body: &[u8]) -> Result<(&[u8], &[u8]), HandshakeError> {
         .split_first()
         .ok_or(HandshakeError::MalformedCommand(CommandError::MissingName))?;
     rest.split_at_checked(usize::from(len))
-        .ok_or(HandshakeError::MalformedCommand(CommandError::Truncated {
+        .ok_or(HandshakeError::MalformedCommand(CommandError::Malformed {
             command: "command name",
         }))
 }

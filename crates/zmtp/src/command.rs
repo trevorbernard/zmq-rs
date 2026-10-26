@@ -104,8 +104,9 @@ pub enum InvalidName {
 pub enum CommandError {
     /// The body has no command name.
     MissingName,
-    /// The named command's data is shorter than its fields require.
-    Truncated { command: &'static str },
+    /// The named command's data does not have the shape its fields
+    /// require, such as being too short or a different size.
+    Malformed { command: &'static str },
     /// A JOIN or LEAVE group is invalid.
     InvalidGroup(InvalidGroup),
     /// A metadata property has an empty name.
@@ -131,15 +132,15 @@ impl Command {
         match name {
             b"READY" => parse_metadata(data, "READY").map(Self::Ready),
             b"ERROR" => {
-                let truncated = CommandError::Truncated { command: "ERROR" };
-                let (&len, rest) = data.split_first().ok_or(truncated.clone())?;
-                let reason = rest.get(..usize::from(len)).ok_or(truncated)?;
+                let malformed = CommandError::Malformed { command: "ERROR" };
+                let (&len, rest) = data.split_first().ok_or(malformed.clone())?;
+                let reason = rest.get(..usize::from(len)).ok_or(malformed)?;
                 Ok(Self::Error(ErrorReason(Frame::copy_from_slice(reason))))
             }
             b"PING" => {
                 let (ttl, context) = data
                     .split_first_chunk()
-                    .ok_or(CommandError::Truncated { command: "PING" })?;
+                    .ok_or(CommandError::Malformed { command: "PING" })?;
                 Ok(Self::Ping(Ping {
                     ttl: Ttl(u16::from_be_bytes(*ttl)),
                     context: PingContext::truncating(context),
@@ -219,7 +220,7 @@ pub(crate) fn parse_metadata(
     mut data: &[u8],
     command: &'static str,
 ) -> Result<Metadata, CommandError> {
-    let truncated = || CommandError::Truncated { command };
+    let malformed = || CommandError::Malformed { command };
     let mut properties = Vec::new();
     while let Some((&name_len, rest)) = data.split_first() {
         if name_len == 0 {
@@ -227,10 +228,10 @@ pub(crate) fn parse_metadata(
         }
         let (name, rest) = rest
             .split_at_checked(usize::from(name_len))
-            .ok_or_else(truncated)?;
-        let (value_len, rest) = rest.split_first_chunk().ok_or_else(truncated)?;
-        let value_len = usize::try_from(u32::from_be_bytes(*value_len)).map_err(|_| truncated())?;
-        let (value, rest) = rest.split_at_checked(value_len).ok_or_else(truncated)?;
+            .ok_or_else(malformed)?;
+        let (value_len, rest) = rest.split_first_chunk().ok_or_else(malformed)?;
+        let value_len = usize::try_from(u32::from_be_bytes(*value_len)).map_err(|_| malformed())?;
+        let (value, rest) = rest.split_at_checked(value_len).ok_or_else(malformed)?;
         properties.push((
             PropertyName(Frame::copy_from_slice(name)),
             Frame::copy_from_slice(value),
@@ -481,7 +482,7 @@ impl fmt::Display for CommandError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingName => f.write_str("command has no name"),
-            Self::Truncated { command } => write!(f, "malformed {command} command"),
+            Self::Malformed { command } => write!(f, "malformed {command} command"),
             Self::InvalidGroup(err) => write!(f, "invalid group: {err}"),
             Self::EmptyPropertyName => f.write_str("metadata property has an empty name"),
         }
@@ -632,7 +633,7 @@ mod tests {
         for cut in (7..full.len()).filter(|&cut| cut != first_property_end) {
             assert_eq!(
                 Command::parse(&full[..cut]),
-                Err(CommandError::Truncated { command: "READY" }),
+                Err(CommandError::Malformed { command: "READY" }),
                 "cut at {cut}"
             );
         }
@@ -640,7 +641,7 @@ mod tests {
         trailing.push(0x01);
         assert_eq!(
             Command::parse(&trailing),
-            Err(CommandError::Truncated { command: "READY" })
+            Err(CommandError::Malformed { command: "READY" })
         );
     }
 
@@ -676,7 +677,7 @@ mod tests {
     fn ping_needs_a_ttl() {
         assert_eq!(
             Command::parse(b"\x04PING\x01"),
-            Err(CommandError::Truncated { command: "PING" })
+            Err(CommandError::Malformed { command: "PING" })
         );
     }
 
@@ -702,11 +703,11 @@ mod tests {
     fn error_reason_must_fit_the_body() {
         assert_eq!(
             Command::parse(b"\x05ERROR"),
-            Err(CommandError::Truncated { command: "ERROR" })
+            Err(CommandError::Malformed { command: "ERROR" })
         );
         assert_eq!(
             Command::parse(b"\x05ERROR\x04400"),
-            Err(CommandError::Truncated { command: "ERROR" })
+            Err(CommandError::Malformed { command: "ERROR" })
         );
     }
 
@@ -822,7 +823,7 @@ mod tests {
             "name contains invalid character b' '"
         );
         assert_eq!(
-            CommandError::Truncated { command: "PING" }.to_string(),
+            CommandError::Malformed { command: "PING" }.to_string(),
             "malformed PING command"
         );
     }

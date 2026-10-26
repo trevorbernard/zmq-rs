@@ -365,7 +365,7 @@ pub(crate) fn command_body(incoming: Incoming) -> Result<Frame, HandshakeError> 
 
 /// `command`'s body did not have the shape its mechanism requires.
 pub(crate) fn malformed(command: &'static str) -> HandshakeError {
-    HandshakeError::MalformedCommand(CommandError::Truncated { command })
+    HandshakeError::MalformedCommand(CommandError::Malformed { command })
 }
 
 /// The peer sent the command `name` where another was due.
@@ -690,7 +690,7 @@ mod tests {
         let bad = Incoming::Command(Frame::from(&b"\x05READY\x01"[..]));
         assert_eq!(
             handshake.receive(bad, &mut Vec::new()),
-            Err(HandshakeError::MalformedCommand(CommandError::Truncated {
+            Err(HandshakeError::MalformedCommand(CommandError::Malformed {
                 command: "READY"
             }))
         );
