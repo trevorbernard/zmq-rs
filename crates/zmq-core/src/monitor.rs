@@ -136,16 +136,17 @@ impl Monitor {
         self.events.poll_recv(cx)
     }
 
-    /// The next event, waiting for one. `None` once the socket and all its
-    /// connections are gone.
-    pub async fn recv(&mut self) -> Option<Event> {
-        self.events.recv().await
+    /// The next event, blocking the thread, as a socket's `recv` does.
+    /// `None` once the socket and all its connections are gone.
+    pub fn recv(&mut self) -> Option<Event> {
+        self.events.recv_blocking()
     }
 
-    /// The next event, blocking the thread. `None` once the socket and all
-    /// its connections are gone.
-    pub fn recv_blocking(&mut self) -> Option<Event> {
-        self.events.recv_blocking()
+    /// The next event, waiting for one without blocking the thread, as a
+    /// socket's `recv_async` does. `None` once the socket and all its
+    /// connections are gone.
+    pub async fn recv_async(&mut self) -> Option<Event> {
+        self.events.recv().await
     }
 
     /// The next event, blocking the thread for at most `timeout`. Fails

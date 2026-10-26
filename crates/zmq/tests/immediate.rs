@@ -142,7 +142,7 @@ fn a_dropped_socket_stops_reconnecting() {
     thread::sleep(Duration::from_millis(30));
     drop(push);
     // The monitor closes once the socket and all its connections are gone.
-    within(FIVE, move || while monitor.recv_blocking().is_some() {});
+    within(FIVE, move || while monitor.recv().is_some() {});
 }
 
 #[test]
