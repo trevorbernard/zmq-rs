@@ -216,7 +216,9 @@ impl fmt::Display for Error {
             Self::UnsupportedTransport(transport) => {
                 write!(f, "unsupported transport \"{transport}\"")
             }
-            Self::Io(err) => write!(f, "{err}"),
+            // The io error is the source, so reporters that walk sources
+            // print it once.
+            Self::Io(_) => f.write_str("the operating system refused"),
             Self::UnknownEndpoint(endpoint) => {
                 write!(f, "not bound or connected at \"{endpoint}\"")
             }
@@ -370,6 +372,13 @@ mod tests {
         assert_eq!(
             Error::UnsupportedTransport("ipc".into()).to_string(),
             "unsupported transport \"ipc\""
+        );
+        let refused = Error::Io(io::Error::from(io::ErrorKind::AddrInUse));
+        assert_eq!(refused.to_string(), "the operating system refused");
+        let source = std::error::Error::source(&refused).map(ToString::to_string);
+        assert_eq!(
+            source,
+            Some(io::Error::from(io::ErrorKind::AddrInUse).to_string())
         );
     }
 }
