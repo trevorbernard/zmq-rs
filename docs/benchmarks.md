@@ -323,6 +323,48 @@ everywhere except tcp at 256 B (0.90), whose runs overlap: ours spans
   trimming off. The machine ran the `schedutil` governor; rerun a
   subset before acting on a difference under about 10%.
 
+### Why we are ahead at 8 B over tcp
+
+Profiled on this Xeon at `8529ea9`, 3M messages per run, as the bench's
+child runs them (`--child thr tcp 8 <pair> 3000000`). perf counts user
+space only here (`perf_event_paranoid` is 2); kernel time comes from
+`getrusage`.
+
+- **Not system calls.** Both libraries batch: under strace, a million
+  messages took 481 `sendto` calls from us and 1,622 from libzmq.
+  Kernel time is 2–4% of either's CPU time (0.02–0.07 s against
+  1.1–1.8 s of user time).
+- **Not an idle stage.** All four threads, the two applications' and
+  the two I/O threads, are 94–100% busy for both libraries, so
+  throughput follows the cycles each stage spends per message: about
+  300 for ours and 480–620 for libzmq's.
+- **libzmq's pipes move more cache lines between cores.** Per message:
+
+  | | Instructions | Cycles | HITM loads | RFO misses | Memory-ordering clears |
+  |---|---|---|---|---|---|
+  | ours | 2,012 | 1,370 | 0.95 | 2.3 | 0.1 |
+  | libzmq | 2,520 | 2,130 | 3.3 | 6.8 | 1.7 |
+
+  HITM loads read a line another core has modified; RFO misses fetch a
+  line to write it; a memory-ordering clear discards speculative work
+  because another core wrote a line just read, costing on the order of
+  100 cycles. Sampled, nearly all of libzmq's clears and HITM loads land
+  in `ypipe_t::read`, `ypipe_t::flush`, `pipe_t::read` and
+  `pipe_t::write`: the ypipe's writer and reader both compare-and-swap
+  one shared pointer, `_c`, on every message. Our pipes keep readiness
+  in each slot (above), and their clears and HITM loads land in
+  `Reader::take` and `Writer::poll_ready`.
+- **libzmq shares a reference count across threads per message: 7%.**
+  It attaches the connection's metadata to every message it decodes
+  (`stream_engine_base.cpp`, `msg_->set_metadata (_metadata)`), an atomic
+  increment on the I/O thread, and the application's `zmq_msg_close`
+  decrements it, so the count's line crosses cores twice a message.
+  libzmq 4.3.5 rebuilt without that call, preloaded, five interleaved
+  rounds: 6.36M msg/s stock, 6.83M without (+7%), ours 11.03M. Ours
+  changes its count on the receiving application's thread only.
+- **Not measured:** the M1's larger lead, and our own spread, 7.7M to
+  12.4M msg/s across those five rounds.
+
 ## Other patterns
 
 `perf` covers one PUSH to one PULL and REQ to REP. The scenarios bench
