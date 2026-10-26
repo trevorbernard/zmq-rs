@@ -254,9 +254,6 @@ pub struct Publisher {
     /// look at every peer.
     upstream: FairQueue,
     cursor: PeerCursor,
-    /// Peers whose handshake had not completed when last looked at for an
-    /// implicit subscription.
-    unsettled: Vec<PeerKey>,
 }
 
 #[derive(Debug, Default)]
@@ -373,7 +370,6 @@ impl Publisher {
             manual,
             upstream,
             cursor,
-            unsettled,
             ..
         } = self;
         let mut changes = Changes {
@@ -385,25 +381,7 @@ impl Publisher {
         };
         for peer in cursor.added_since(peers) {
             subscribers.insert(peer.key(), PeerTopics::default());
-            unsettled.push(peer.key());
         }
-        unsettled.retain(|&key| {
-            let Some(peer) = peers.get(key) else {
-                return false;
-            };
-            let Some(established) = peer.connection.peer() else {
-                return true;
-            };
-            // A ZMTP 1.0 subscriber filters for itself and never says what
-            // it wants, so it gets everything.
-            if established.implicit_subscription
-                && let Some(entry) = subscribers.get_mut(&key)
-            {
-                changes.from = Some(key);
-                changes.subscribe(entry, Frame::new());
-            }
-            false
-        });
         let read = |key, message: Option<Message>| {
             changes.from = Some(key);
             let Some(message) = message else {
@@ -1065,7 +1043,7 @@ mod tests {
 
     #[test]
     fn xpub_reports_a_legacy_peers_implicit_subscription() {
-        let (a, sa) = connection(10);
+        let (a, mut sa) = connection(10);
         let mut peers = list(vec![a]);
         let mut publisher = Publisher::with_events();
         sa.establish_legacy_subscriber();

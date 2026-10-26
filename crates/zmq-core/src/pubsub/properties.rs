@@ -152,8 +152,8 @@ struct ModelPeer {
     /// The publisher has read from it, so it has an entry.
     known: bool,
     closed: bool,
+    /// A ZMTP 1.0 SUB, which the engine subscribed to everything once.
     legacy: bool,
-    settled: bool,
     /// Closed and noticed: out of the list.
     gone: bool,
     /// Waiting in `Model::turn` to be read.
@@ -196,19 +196,15 @@ impl Model {
         }
     }
 
-    /// What reading peers does: ZMTP 1.0 peers are settled first, then each
-    /// peer that woke is read through, in the order it woke. Scenarios send
-    /// fewer messages than a drain batch, so one pass reads them all.
+    /// What reading peers does: each peer that woke is read through, in the
+    /// order it woke. Scenarios send fewer messages than a drain batch, so
+    /// one pass reads them all.
     fn sync(&mut self) {
         for i in 0..self.peers.len() {
             if self.peers[i].gone {
                 continue;
             }
             self.peers[i].known = true;
-            if self.peers[i].legacy && !self.peers[i].settled {
-                self.peers[i].settled = true;
-                self.subscribe(i, Vec::new());
-            }
         }
         while let Some(i) = self.turn.pop_front() {
             self.peers[i].in_turn = false;
@@ -412,9 +408,14 @@ proptest! {
                     }
                 }
                 Op::Legacy(i) => {
-                    let Some(session) = &sessions[i] else { continue };
+                    let Some(session) = &mut sessions[i] else { continue };
+                    if model.peers[i].legacy {
+                        continue;
+                    }
                     session.establish_legacy_subscriber();
                     model.peers[i].legacy = true;
+                    model.peers[i].queued.push(Upstream::Subscribe(Vec::new()));
+                    model.wake(i);
                 }
                 Op::Publish(data) => {
                     let sent = publisher.send(&mut peers, Message::new(Frame::from(data.clone())));

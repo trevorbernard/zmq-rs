@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Wake, Waker};
 
 use zmq_pipe::{Hwm, Reader, Writer, pipe};
-use zmtp::{Established, Frame, Message, Metadata, SocketType, Version};
+use zmtp::{Established, Frame, Message, Metadata, SocketType, Subscription, Version};
 
 use crate::context::PeerSlot;
 use crate::socket::PeerList;
@@ -36,8 +36,11 @@ impl FakeSession {
 
 impl FakeSession {
     /// Completes a handshake with a ZMTP 1.0 SUB, which never sends
-    /// subscriptions.
-    pub(crate) fn establish_legacy_subscriber(&self) {
+    /// subscriptions: the engine subscribes it to everything.
+    pub(crate) fn establish_legacy_subscriber(&mut self) {
+        self.to_socket
+            .try_send(Subscription::Subscribe(Frame::new()).to_message())
+            .expect("room for the implicit subscription");
         *self.connection_peer.lock().unwrap() = Some(Established {
             version: Version::V1,
             peer_socket_type: None,

@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{
     Context, Dealer, Identity, Message, Pub, Pull, Push, Rep, Req, Router, RoutingId, Security,
-    SocketOptions, Sub, ZapReply, ZapRequest,
+    SocketOptions, Sub, XPub, XPubEvent, ZapReply, ZapRequest,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -199,6 +199,32 @@ against_both!(
     our_sub_gets_only_its_topic_from_an_old_pub,
     an_old_peer_is_refused_where_we_require_security,
 );
+
+/// A ZMTP 1.0 SUB never sends its subscriptions, so it is subscribed to
+/// everything as it connects, and an XPUB waiting for subscriptions hears
+/// that at once. Only libzmq 2.2 speaks ZMTP 1.0.
+#[test]
+fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
+    let endpoint = free_endpoint();
+    let Some(_sub) = Peer::start(
+        Libzmq::V2,
+        "SUB",
+        "bind",
+        &endpoint,
+        &["--subscribe", &hex(b"news")],
+    ) else {
+        return;
+    };
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<XPub>();
+    xpub.connect(&endpoint).unwrap();
+    let (heard, event) = mpsc::channel();
+    thread::spawn(move || heard.send(xpub.recv()));
+    assert_eq!(
+        event.recv_timeout(FIVE).unwrap(),
+        XPubEvent::Subscribe(zmq::Frame::new())
+    );
+}
 
 /// Messages, multipart ones included, reach us, over a connection that
 /// announced no properties: there is no READY before ZMTP 3.0.

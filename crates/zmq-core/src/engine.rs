@@ -99,7 +99,8 @@ enum State {
     Active {
         decoder: Decoder,
         encoder: Encoder,
-        /// A message the receive pipe refused because it was full.
+        /// A message waiting for room in the receive pipe: one it refused
+        /// when full, or a ZMTP 1.0 subscriber's implicit subscription.
         pending: Option<Message>,
         /// What `zmq_msg_gets` reads on every message from this peer, until
         /// attached to the first: the socket's [`Inbound`] gives it to the
@@ -670,6 +671,13 @@ impl Engine {
                         .heartbeat
                         .map(|heartbeat| Instant::now() + heartbeat.interval);
                 }
+                // A ZMTP 1.0 subscriber filters for itself and never says
+                // what it wants, so, as libzmq's engine does, it is
+                // subscribed to everything by a subscription of its own,
+                // which wakes the socket like any other.
+                let implicit = established
+                    .implicit_subscription
+                    .then(|| Subscription::Subscribe(zmtp::Frame::new()).to_message());
                 // Published before any message from this peer can be
                 // delivered, so a ROUTER always knows who sent it. Poisoning
                 // is ignored: storing a value cannot be left half done.
@@ -689,7 +697,7 @@ impl Engine {
                 self.state = State::Active {
                     decoder,
                     encoder,
-                    pending: None,
+                    pending: implicit,
                     metadata,
                 };
             }
