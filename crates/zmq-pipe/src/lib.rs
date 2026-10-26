@@ -51,10 +51,15 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         receiver: Receiver::Queue(consumer),
         shared,
         read: 0,
-        // libzmq's pipe_t::compute_lwm.
-        lwm: hwm.map(|hwm| hwm.div_ceil(2)),
+        lwm: low_water_mark(hwm),
     };
     (writer, reader)
+}
+
+/// How many items the reader takes between waking a waiting writer, from
+/// the high-water mark, as libzmq's `pipe_t::compute_lwm`.
+fn low_water_mark(hwm: Option<u64>) -> Option<u64> {
+    hwm.map(|hwm| hwm.div_ceil(2))
 }
 
 /// Creates a pipe that holds only the latest item, like libzmq's
@@ -383,8 +388,7 @@ impl<T> Reader<T> {
             return;
         }
         self.shared.raise_hwm(hwm);
-        // libzmq's pipe_t::compute_lwm.
-        self.lwm = self.shared.hwm().map(|hwm| hwm.div_ceil(2));
+        self.lwm = low_water_mark(self.shared.hwm());
         self.shared.writer_waker.wake();
     }
 
@@ -419,6 +423,9 @@ impl<T> Reader<T> {
         self.read += 1;
         self.shared.read.store(self.read, Ordering::Release);
         if self.lwm.is_some_and(|lwm| self.read.is_multiple_of(lwm)) {
+            // The writer may have raised the mark since, which libzmq's
+            // set_hwms gives both ends at once: catch up here.
+            self.lwm = low_water_mark(self.shared.hwm());
             self.shared.writer_waker.wake();
         }
         Ok(item)
@@ -723,6 +730,17 @@ mod tests {
         writer.try_send(0).unwrap();
         writer.try_send(1).unwrap();
         assert_eq!(writer.try_send(2), Err(TrySendError::Full(2)));
+    }
+
+    #[test]
+    fn the_reader_catches_up_with_a_mark_the_writer_raised() {
+        let (mut writer, mut reader) = pipe(hwm(2));
+        writer.raise_hwm(hwm(8));
+        for i in 0..8 {
+            writer.try_send(i).unwrap();
+        }
+        reader.try_recv().unwrap();
+        assert_eq!(reader.lwm, Some(4), "as libzmq's set_hwms recomputes it");
     }
 
     #[test]
