@@ -9,8 +9,7 @@
 use std::num::NonZeroUsize;
 
 use zmq::{
-    Context, Dealer, Hwm, Identity, Message, Router, RouterSendError, RoutingId, Socket,
-    SocketOptions,
+    Context, Dealer, Hwm, Identity, Message, Router, RoutingId, SendError, Socket, SocketOptions,
 };
 
 use crate::support::FIVE;
@@ -37,7 +36,7 @@ fn basic() {
     let unknown = RoutingId::new("UNKNOWN").unwrap();
     assert!(matches!(
         router.try_send(&unknown, "DATA"),
-        Err(RouterSendError::UnknownPeer(_))
+        Err(SendError::UnknownPeer(_))
     ));
     assert!(router.send(&unknown, "DATA").is_err());
 
@@ -86,8 +85,8 @@ fn get_peer_state() {
         }
         match router.try_send(&y, "Hello") {
             Ok(()) => dealer2_sent += 1,
-            Err(RouterSendError::Full(_)) => dealer2_blocked = true,
-            Err(RouterSendError::UnknownPeer(_)) => panic!("Y is connected"),
+            Err(SendError::Full(_)) => dealer2_blocked = true,
+            Err(SendError::UnknownPeer(_)) => panic!("Y is connected"),
         }
         // dealer2 is never read, so its queue fills.
         while let Some(message) = dealer1.try_recv() {

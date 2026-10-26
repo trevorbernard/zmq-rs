@@ -40,11 +40,11 @@ pub use radiodish::{Dish, Radio};
 pub use reconnect::Reconnect;
 pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester};
 pub use security::{Authenticator, Security, ZapResponder};
-pub use socket::{
-    EndpointId, FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome,
-    RouterSendError, RouterTable, noop_context,
-};
 #[cfg(feature = "draft")]
-pub use socket::{ServerSendError, ServerTable};
+pub use socket::ServerTable;
+pub use socket::{
+    EndpointId, FairQueue, LoadBalancer, Peer, PeerKey, PeerList, Peers, RouteOutcome, RouterTable,
+    SendError, noop_context,
+};
 pub use transport::{interface_addr, resolve_tcp};
 pub use zmq_pipe::{RecvTimeoutError, TryRecvError};

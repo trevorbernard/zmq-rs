@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
-use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
+use zmq_core::{FairQueue, LoadBalancer, SendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
 use crate::socket::{
@@ -348,7 +348,7 @@ impl Socket<Server> {
         &mut self,
         to: ClientId,
         frame: impl Into<Frame>,
-    ) -> Result<(), ServerSendError> {
+    ) -> Result<(), SendError<Frame>> {
         try_send_routed(self, to.0, frame.into())
     }
 
@@ -371,7 +371,7 @@ impl Socket<Server> {
         to: ClientId,
         frame: impl Into<Frame>,
         timeout: Duration,
-    ) -> Result<(), ServerSendError> {
+    ) -> Result<(), SendError<Frame>> {
         send_routed_timeout(self, to.0, frame.into(), timeout)
     }
 
@@ -406,15 +406,6 @@ pub enum Peer {}
 /// current peers.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct PeerId(NonZeroU32);
-
-/// Why a PEER could not send without waiting.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum PeerSendError {
-    /// No peer has that id, or it has gone. The frame is handed back.
-    UnknownPeer(Frame),
-    /// The peer's queue is full. The frame is handed back.
-    Full(Frame),
-}
 
 impl sealed::Sealed for Peer {}
 impl SocketType for Peer {
@@ -473,11 +464,12 @@ impl Socket<Peer> {
     }
 
     /// Sends `frame` to the peer `to` without waiting.
-    pub fn try_send(&mut self, to: PeerId, frame: impl Into<Frame>) -> Result<(), PeerSendError> {
-        try_send_routed(self, to.0, frame.into()).map_err(|err| match err {
-            ServerSendError::UnknownPeer(frame) => PeerSendError::UnknownPeer(frame),
-            ServerSendError::Full(frame) => PeerSendError::Full(frame),
-        })
+    pub fn try_send(
+        &mut self,
+        to: PeerId,
+        frame: impl Into<Frame>,
+    ) -> Result<(), SendError<Frame>> {
+        try_send_routed(self, to.0, frame.into())
     }
 
     /// Sends `frame` to the peer `to`, blocking while its queue is full.
@@ -495,11 +487,8 @@ impl Socket<Peer> {
         to: PeerId,
         frame: impl Into<Frame>,
         timeout: Duration,
-    ) -> Result<(), PeerSendError> {
-        send_routed_timeout(self, to.0, frame.into(), timeout).map_err(|err| match err {
-            ServerSendError::UnknownPeer(frame) => PeerSendError::UnknownPeer(frame),
-            ServerSendError::Full(frame) => PeerSendError::Full(frame),
-        })
+    ) -> Result<(), SendError<Frame>> {
+        send_routed_timeout(self, to.0, frame.into(), timeout)
     }
 
     /// Sends `frame` to the peer `to`, waiting while its queue is full.
@@ -536,7 +525,7 @@ fn try_send_routed<T: SocketType<Routing = ServerTable>>(
     socket: &mut Socket<T>,
     to: NonZeroU32,
     frame: Frame,
-) -> Result<(), ServerSendError> {
+) -> Result<(), SendError<Frame>> {
     let (peers, table) = socket.parts_accepting(&mut noop());
     table.try_send(peers, to, frame)
 }
@@ -559,16 +548,14 @@ fn send_routed_timeout<T: SocketType<Routing = ServerTable>>(
     to: NonZeroU32,
     frame: Frame,
     timeout: Duration,
-) -> Result<(), ServerSendError> {
+) -> Result<(), SendError<Frame>> {
     let mut slot = Some(frame);
     match wait::block_on_until(wait::deadline(timeout), |cx| {
         poll_send_routed(socket, to, &mut slot, cx)
     }) {
         Some(Ok(())) => Ok(()),
-        Some(Err(frame)) => Err(ServerSendError::UnknownPeer(frame)),
-        None => Err(ServerSendError::Full(
-            slot.take().expect("kept while pending"),
-        )),
+        Some(Err(frame)) => Err(SendError::UnknownPeer(frame)),
+        None => Err(SendError::Full(slot.take().expect("kept while pending"))),
     }
 }
 
@@ -661,17 +648,6 @@ impl fmt::Display for PeerId {
         self.0.fmt(f)
     }
 }
-
-impl fmt::Display for PeerSendError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::UnknownPeer(_) => "no peer has that id",
-            Self::Full(_) => "the peer's queue is full",
-        })
-    }
-}
-
-impl std::error::Error for PeerSendError {}
 
 impl Receives for Dish {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<(Group, Frame)> {

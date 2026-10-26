@@ -242,7 +242,7 @@ proptest! {
                         None => {
                             prop_assert_eq!(
                                 result,
-                                Err(RouterSendError::UnknownPeer(message)),
+                                Err(SendError::UnknownPeer(message)),
                                 "to {:?}",
                                 id
                             );

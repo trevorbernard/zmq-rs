@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
-    Context, Dealer, Hwm, Identity, Message, Pair, Pull, Push, Router, RouterSendError, RoutingId,
+    Context, Dealer, Hwm, Identity, Message, Pair, Pull, Push, Router, RoutingId, SendError,
     SocketOptions, Sub, XPub,
 };
 
@@ -157,7 +157,7 @@ fn router_reports_an_unknown_peer_at_once() {
     let start = Instant::now();
     assert_eq!(
         router.send_timeout(&RoutingId::new("nobody").unwrap(), "x", FIVE),
-        Err(RouterSendError::UnknownPeer(Message::from("x")))
+        Err(SendError::UnknownPeer(Message::from("x")))
     );
     assert!(start.elapsed() < SLACK);
 }
@@ -177,7 +177,7 @@ fn router_reports_a_full_peer_after_the_timeout() {
     while router.try_send(&dealer_id(), "fill").is_ok() {}
     assert_eq!(
         router.send_timeout(&dealer_id(), "x", SHORT),
-        Err(RouterSendError::Full(Message::from("x")))
+        Err(SendError::Full(Message::from("x")))
     );
 }
 
@@ -211,7 +211,7 @@ fn xpub_send_all() {
 #[cfg(feature = "draft")]
 mod draft {
     use super::*;
-    use zmq::{Channel, Client, Frame, Gather, Peer, PeerId, PeerSendError, Scatter, Server};
+    use zmq::{Channel, Client, Frame, Gather, Peer, PeerId, Scatter, SendError, Server};
 
     #[test]
     fn client() {
@@ -300,7 +300,7 @@ mod draft {
         while other.try_send(id, "fill").is_ok() {}
         assert_eq!(
             other.send_timeout(id, "x", SHORT),
-            Err(PeerSendError::Full(Frame::from("x")))
+            Err(SendError::Full(Frame::from("x")))
         );
     }
 
@@ -312,7 +312,7 @@ mod draft {
         let start = Instant::now();
         assert_eq!(
             peer.send_timeout(nobody, "x", FIVE),
-            Err(PeerSendError::UnknownPeer(Frame::from("x")))
+            Err(SendError::UnknownPeer(Frame::from("x")))
         );
         assert!(start.elapsed() < SLACK);
     }

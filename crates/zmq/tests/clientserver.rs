@@ -9,8 +9,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Client, ClientId, Context, Dealer, Frame, Hwm, Server, ServerSendError, SocketOptions,
-    UnknownPeer,
+    Client, ClientId, Context, Dealer, Frame, Hwm, SendError, Server, SocketOptions, UnknownPeer,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -111,7 +110,7 @@ fn a_full_client_makes_try_send_hand_the_frame_back() {
     server.try_send(id, "2").unwrap();
     assert_eq!(
         server.try_send(id, "3"),
-        Err(ServerSendError::Full(Frame::from("3")))
+        Err(SendError::Full(Frame::from("3")))
     );
     // A blocking send waits for room.
     let sending = thread::spawn(move || {
@@ -139,7 +138,7 @@ fn a_disconnected_client_is_forgotten() {
     assert!(!server.disconnect_client(id), "already gone");
     assert_eq!(
         server.try_send(id, "after"),
-        Err(ServerSendError::UnknownPeer(Frame::from("after")))
+        Err(SendError::UnknownPeer(Frame::from("after")))
     );
     assert!(
         client.try_send("anyone?").is_err(),

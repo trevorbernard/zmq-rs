@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Channel, Context, Frame, Peer, PeerId, PeerSendError, UnknownPeer};
+use zmq::{Channel, Context, Frame, Peer, PeerId, SendError, UnknownPeer};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -71,7 +71,7 @@ fn sending_to_an_unknown_peer_fails() {
     assert_eq!(peer.send(nobody, "hi"), Err(UnknownPeer(Frame::from("hi"))));
     assert_eq!(
         peer.try_send(nobody, "hi"),
-        Err(PeerSendError::UnknownPeer(Frame::from("hi")))
+        Err(SendError::UnknownPeer(Frame::from("hi")))
     );
 }
 

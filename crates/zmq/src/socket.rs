@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use zmq_core::{
     ConnectionConfig, EndpointId, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting,
-    PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome,
-    RouterSendError, RouterTable, Subscriber, Verbosity, XPubEvent,
+    PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterTable,
+    SendError, Subscriber, Verbosity, XPubEvent,
 };
 use zmtp::{Frame, Message, Subscription};
 
@@ -1536,7 +1536,7 @@ impl Socket<Router> {
         &mut self,
         to: &RoutingId,
         message: impl Into<Message>,
-    ) -> Result<(), RouterSendError> {
+    ) -> Result<(), SendError<Message>> {
         self.peers.accept(&mut noop());
         let RouterRouting { table, .. } = &mut self.routing;
         let peers = self.peers.list_mut();
@@ -1564,16 +1564,14 @@ impl Socket<Router> {
         to: &RoutingId,
         message: impl Into<Message>,
         timeout: Duration,
-    ) -> Result<(), RouterSendError> {
+    ) -> Result<(), SendError<Message>> {
         let mut slot = Some(message.into());
         match wait::block_on_until(wait::deadline(timeout), |cx| {
             self.poll_send(to, &mut slot, cx)
         }) {
             Some(Ok(())) => Ok(()),
-            Some(Err(message)) => Err(RouterSendError::UnknownPeer(message)),
-            None => Err(RouterSendError::Full(
-                slot.take().expect("kept while pending"),
-            )),
+            Some(Err(message)) => Err(SendError::UnknownPeer(message)),
+            None => Err(SendError::Full(slot.take().expect("kept while pending"))),
         }
     }
 

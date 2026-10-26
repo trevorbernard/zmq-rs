@@ -432,7 +432,7 @@ GitHub CI, which installs Ubuntu's.
 - Verified against libzmq's SCATTER and GATHER in both directions.
 
 **Done (PEER and CHANNEL):**
-- `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`PeerSendError`), `recv` and `disconnect_peer` mirror SERVER's.
+- `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`SendError`), `recv` and `disconnect_peer` mirror SERVER's.
 - `Socket<Channel>` is PAIR in single frames: the first peer is the one, and multipart messages received are dropped.
 - Not supported: libzmq's `ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG` and `ZMQ_HICCUP_MSG` options for PEER.
 - Verified against libzmq's PEER both ways and its CHANNEL.

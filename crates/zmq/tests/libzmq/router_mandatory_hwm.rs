@@ -7,9 +7,7 @@ use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{
-    Context, Dealer, Hwm, Identity, Linger, Router, RouterSendError, RoutingId, SocketOptions,
-};
+use zmq::{Context, Dealer, Hwm, Identity, Linger, Router, RoutingId, SendError, SocketOptions};
 
 use crate::support::FIVE;
 
@@ -22,8 +20,8 @@ fn send_until_full(router: &mut zmq::Socket<Router>, to: &RoutingId, mut sent: u
     while sent < MESSAGES {
         match router.try_send(to, vec![0u8; 65536]) {
             Ok(()) => sent += 1,
-            Err(RouterSendError::Full(_)) => break,
-            Err(RouterSendError::UnknownPeer(_)) => panic!("X is connected"),
+            Err(SendError::Full(_)) => break,
+            Err(SendError::UnknownPeer(_)) => panic!("X is connected"),
         }
     }
     sent

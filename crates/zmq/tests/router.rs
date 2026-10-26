@@ -9,8 +9,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Hwm, Identity, Message, Router, RouterSendError, RoutingId,
-    SocketOptions, UnknownPeer,
+    Context, Dealer, Frame, Hwm, Identity, Message, Router, RoutingId, SendError, SocketOptions,
+    UnknownPeer,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -65,7 +65,7 @@ fn try_send_to_an_unknown_routing_id_hands_the_message_back() {
     let mut router = context.socket::<Router>();
     assert_eq!(
         router.try_send(&id("nobody"), "lost"),
-        Err(RouterSendError::UnknownPeer(Message::from("lost")))
+        Err(SendError::UnknownPeer(Message::from("lost")))
     );
 }
 
@@ -87,7 +87,7 @@ fn try_send_to_a_full_peer_hands_the_message_back() {
     assert_eq!(router.try_send(&id("d"), "2"), Ok(()));
     assert_eq!(
         router.try_send(&id("d"), "3"),
-        Err(RouterSendError::Full(Message::from("3")))
+        Err(SendError::Full(Message::from("3")))
     );
 }
 

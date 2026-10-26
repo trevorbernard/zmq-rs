@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use zmq::{Context, Dealer, Identity, Message, Router, RouterSendError, RoutingId, SocketOptions};
+use zmq::{Context, Dealer, Identity, Message, Router, RoutingId, SendError, SocketOptions};
 
 use crate::support::{FIVE, msg, settle};
 
@@ -99,7 +99,7 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // as libzmq delivers it (docs/rfc-compliance.md, "Socket patterns").
     assert!(matches!(
         a.try_send(&to_b, ""),
-        Err(RouterSendError::UnknownPeer(_))
+        Err(SendError::UnknownPeer(_))
     ));
     assert_eq!(
         a.try_recv(),

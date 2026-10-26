@@ -113,9 +113,7 @@ use std::io;
 use std::num::NonZeroUsize;
 
 #[cfg(feature = "draft")]
-pub use draft::{
-    Channel, Client, ClientId, Dish, Gather, Peer, PeerId, PeerSendError, Radio, Scatter, Server,
-};
+pub use draft::{Channel, Client, ClientId, Dish, Gather, Peer, PeerId, Radio, Scatter, Server};
 pub use endpoint::{Endpoint, Error};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions};
 pub use polling::{PollItem, poll, poll_timeout};
@@ -127,12 +125,10 @@ pub use socket::{
     RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownPeer, WaitsForRoom,
     XPub, XSub,
 };
-#[cfg(feature = "draft")]
-pub use zmq_core::ServerSendError;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
-    ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, RouterSendError, Security,
-    TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
+    ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError, TcpKeepalive,
+    TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{

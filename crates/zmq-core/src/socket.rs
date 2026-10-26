@@ -952,25 +952,26 @@ pub enum RouteOutcome {
     PeerFull,
 }
 
-/// Why a ROUTER could not send without waiting. The message is handed back.
+/// Why a send to one peer, by its routing id, client id or peer id, could
+/// not go without waiting. What was being sent is handed back.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum RouterSendError {
-    /// No peer has that routing id, or it has gone.
-    UnknownPeer(Message),
-    /// The peer's queue is full.
-    Full(Message),
+pub enum SendError<T> {
+    /// No peer has that id, or it has gone (libzmq's `EHOSTUNREACH`).
+    UnknownPeer(T),
+    /// The peer's queue is full (libzmq's `EAGAIN`).
+    Full(T),
 }
 
-impl fmt::Display for RouterSendError {
+impl<T> fmt::Display for SendError<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(match self {
-            Self::UnknownPeer(_) => "no peer has that routing id",
+            Self::UnknownPeer(_) => "no peer has that id",
             Self::Full(_) => "the peer's queue is full",
         })
     }
 }
 
-impl std::error::Error for RouterSendError {}
+impl<T: fmt::Debug> std::error::Error for SendError<T> {}
 
 impl Default for RouterTable {
     fn default() -> Self {
@@ -1053,20 +1054,20 @@ impl RouterTable {
         peers: &mut PeerList,
         routing_id: &[u8],
         mut message: Message,
-    ) -> Result<(), RouterSendError> {
+    ) -> Result<(), SendError<Message>> {
         message.set_metadata(None);
         let Some(&key) = self.by_identity.get(routing_id) else {
-            return Err(RouterSendError::UnknownPeer(message));
+            return Err(SendError::UnknownPeer(message));
         };
         let Some(peer) = peers.get_mut(key) else {
-            return Err(RouterSendError::UnknownPeer(message));
+            return Err(SendError::UnknownPeer(message));
         };
         match peer.connection.tx.try_send(message) {
             Ok(()) => Ok(()),
-            Err(TrySendError::Full(message)) => Err(RouterSendError::Full(message)),
+            Err(TrySendError::Full(message)) => Err(SendError::Full(message)),
             Err(TrySendError::Closed(message)) => {
                 peers.remove_finished([key]);
-                Err(RouterSendError::UnknownPeer(message))
+                Err(SendError::UnknownPeer(message))
             }
         }
     }
@@ -1119,29 +1120,6 @@ pub struct ServerTable {
     next_id: u32,
     recv: FairQueue,
 }
-
-/// Why SERVER could not send to a client.
-#[cfg(feature = "draft")]
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ServerSendError {
-    /// No client has that id, or it has gone. The frame is handed back.
-    UnknownPeer(Frame),
-    /// The client's queue is full. The frame is handed back.
-    Full(Frame),
-}
-
-#[cfg(feature = "draft")]
-impl fmt::Display for ServerSendError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
-            Self::UnknownPeer(_) => "no client has that id",
-            Self::Full(_) => "the client's queue is full",
-        })
-    }
-}
-
-#[cfg(feature = "draft")]
-impl std::error::Error for ServerSendError {}
 
 #[cfg(feature = "draft")]
 impl Default for ServerTable {
@@ -1211,18 +1189,18 @@ impl ServerTable {
         peers: &mut PeerList,
         id: std::num::NonZeroU32,
         frame: Frame,
-    ) -> Result<(), ServerSendError> {
+    ) -> Result<(), SendError<Frame>> {
         self.sync(peers);
         let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
-            return Err(ServerSendError::UnknownPeer(frame));
+            return Err(SendError::UnknownPeer(frame));
         };
         peer.connection
             .tx
             .try_send(Message::new(frame))
             .map_err(|err| match err {
-                TrySendError::Full(message) => ServerSendError::Full(only_frame(message)),
+                TrySendError::Full(message) => SendError::Full(only_frame(message)),
                 // The client's session has ended.
-                TrySendError::Closed(message) => ServerSendError::UnknownPeer(only_frame(message)),
+                TrySendError::Closed(message) => SendError::UnknownPeer(only_frame(message)),
             })
     }
 
@@ -1417,7 +1395,7 @@ mod tests {
         drop(sa);
         assert_eq!(
             table.try_send(&mut peers, b"alice", msg("x")),
-            Err(RouterSendError::UnknownPeer(msg("x")))
+            Err(SendError::UnknownPeer(msg("x")))
         );
         assert_eq!(peers.len(), 0);
     }
@@ -1662,12 +1640,12 @@ mod tests {
         table.sync(&mut peers);
         assert_eq!(
             table.try_send(&mut peers, b"nobody", msg("x")),
-            Err(RouterSendError::UnknownPeer(msg("x")))
+            Err(SendError::UnknownPeer(msg("x")))
         );
         assert_eq!(table.try_send(&mut peers, b"alice", msg("1")), Ok(()));
         assert_eq!(
             table.try_send(&mut peers, b"alice", msg("2")),
-            Err(RouterSendError::Full(msg("2")))
+            Err(SendError::Full(msg("2")))
         );
         assert_eq!(drain(&mut sa), [msg("1")]);
     }
@@ -1749,14 +1727,14 @@ mod tests {
         drop(sa);
         assert_eq!(
             table.try_send(&mut peers, b"gone", msg("w")),
-            Err(RouterSendError::UnknownPeer(msg("w"))),
+            Err(SendError::UnknownPeer(msg("w"))),
             "gone but not yet forgotten"
         );
         peers.retain_mut(|peer| !peer.connection.tx.is_closed());
         table.sync(&mut peers);
         assert_eq!(
             table.try_send(&mut peers, b"gone", msg("x")),
-            Err(RouterSendError::UnknownPeer(msg("x")))
+            Err(SendError::UnknownPeer(msg("x")))
         );
         // A new peer may now take the identity.
         let (b, mut sb) = connection(10);
