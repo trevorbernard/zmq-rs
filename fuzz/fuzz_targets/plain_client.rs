@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    ClientStep, Credential, GreetingConfig, Identity, Mechanism, PlainClient, PlainCredentials,
+    PlainClientStep, Credential, GreetingConfig, Identity, Mechanism, PlainClient, PlainCredentials,
     Role, SocketType,
 };
 
@@ -35,8 +35,8 @@ fuzz_target!(|data: &[u8]| {
             return;
         };
         match client.receive(incoming, &mut out) {
-            Ok(ClientStep::Continue(next)) => client = next,
-            Ok(ClientStep::Established(_)) => {
+            Ok(PlainClientStep::Continue(next)) => client = next,
+            Ok(PlainClientStep::Established(_)) => {
                 zmtp_fuzz::drain(&mut decoder);
                 return;
             }

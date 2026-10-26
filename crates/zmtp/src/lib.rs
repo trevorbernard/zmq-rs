@@ -45,7 +45,9 @@ pub use identity::{Identity, InvalidIdentity};
 pub use mechanism::{LegacyPeers, Mechanism, Role};
 pub use membership::Membership;
 pub use message::{EmptyMessage, IntoIter, Iter, Message, MessageMetadata};
-pub use plain::{ClientStep, PendingAuthentication, PlainClient, PlainServer, ServerStep};
+pub use plain::{
+    PendingPlainAuthentication, PlainClient, PlainClientStep, PlainServer, PlainServerStep,
+};
 pub use socket_type::SocketType;
 pub use subscription::Subscription;
 pub use zap::{

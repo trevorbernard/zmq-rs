@@ -43,7 +43,7 @@ enum ClientState {
 /// Where a client handshake goes next.
 #[derive(Debug)]
 #[must_use]
-pub enum ClientStep {
+pub enum PlainClientStep {
     Continue(PlainClient),
     Established(Established),
 }
@@ -66,17 +66,17 @@ enum ServerState {
 /// Where a server handshake goes next.
 #[derive(Debug)]
 #[must_use]
-pub enum ServerStep {
+pub enum PlainServerStep {
     /// Ask the authenticator about `request`, then call
-    /// [`PendingAuthentication::reply`].
-    Authenticate(PendingAuthentication, ZapRequest),
+    /// [`PendingPlainAuthentication::reply`].
+    Authenticate(PendingPlainAuthentication, ZapRequest),
     Established(Established),
 }
 
 /// A server handshake waiting for its ZAP reply.
 #[derive(Debug)]
 #[must_use]
-pub struct PendingAuthentication {
+pub struct PendingPlainAuthentication {
     config: ServerConfig,
     version: Version,
 }
@@ -112,7 +112,7 @@ impl PlainClient {
         self,
         incoming: Incoming,
         out: &mut Vec<u8>,
-    ) -> Result<ClientStep, HandshakeError> {
+    ) -> Result<PlainClientStep, HandshakeError> {
         match (self.state, parse_from_server(incoming)?) {
             (_, Command::Error(reason)) => Err(HandshakeError::PeerError(reason)),
             (ClientState::WaitingForWelcome, Command::Other { name, data })
@@ -127,7 +127,7 @@ impl PlainClient {
                     &mut initiate,
                 );
                 write_raw_command(self.version, INITIATE, &initiate, out);
-                Ok(ClientStep::Continue(Self {
+                Ok(PlainClientStep::Continue(Self {
                     state: ClientState::WaitingForReady,
                     ..self
                 }))
@@ -141,7 +141,7 @@ impl PlainClient {
                     Rejection::Silent,
                     out,
                 )
-                .map(ClientStep::Established)
+                .map(PlainClientStep::Established)
             }
             (_, other) => Err(unexpected(other.name())),
         }
@@ -164,7 +164,7 @@ impl PlainServer {
         self,
         incoming: Incoming,
         out: &mut Vec<u8>,
-    ) -> Result<ServerStep, HandshakeError> {
+    ) -> Result<PlainServerStep, HandshakeError> {
         match (self.state, parse(incoming)?) {
             (_, Command::Error(reason)) => Err(HandshakeError::PeerError(reason)),
             (ServerState::WaitingForHello, Command::Other { name, data })
@@ -172,11 +172,11 @@ impl PlainServer {
             {
                 let credentials = parse_hello(&data)?;
                 let request = self.config.zap_request(ZapCredentials::Plain(credentials));
-                let pending = PendingAuthentication {
+                let pending = PendingPlainAuthentication {
                     config: self.config,
                     version: self.version,
                 };
-                Ok(ServerStep::Authenticate(pending, request))
+                Ok(PlainServerStep::Authenticate(pending, request))
             }
             (ServerState::WaitingForInitiate(authenticated), Command::Other { name, data })
                 if name.as_slice() == INITIATE.as_bytes() =>
@@ -194,14 +194,14 @@ impl PlainServer {
                 let ready = Command::Ready(local_metadata(socket_type, &self.config.identity));
                 write_command(self.version, &ready, out);
                 established.authenticated = Some(authenticated);
-                Ok(ServerStep::Established(established))
+                Ok(PlainServerStep::Established(established))
             }
             (_, other) => Err(unexpected(other.name())),
         }
     }
 }
 
-impl PendingAuthentication {
+impl PendingPlainAuthentication {
     /// Applies the authenticator's verdict: WELCOME on success, otherwise
     /// ERROR or a silent close.
     pub fn reply(self, reply: ZapReply, out: &mut Vec<u8>) -> Result<PlainServer, HandshakeError> {
@@ -350,8 +350,8 @@ mod tests {
             .receive(raw("WELCOME", b""), &mut Vec::new())
             .unwrap()
         {
-            ClientStep::Continue(client) => client,
-            ClientStep::Established(_) => panic!("established before READY"),
+            PlainClientStep::Continue(client) => client,
+            PlainClientStep::Established(_) => panic!("established before READY"),
         }
     }
 
@@ -366,7 +366,7 @@ mod tests {
         let (client, _) = client();
         let mut out = Vec::new();
         let step = client.receive(raw("WELCOME", b""), &mut out).unwrap();
-        assert!(matches!(step, ClientStep::Continue(_)));
+        assert!(matches!(step, PlainClientStep::Continue(_)));
         let initiate = body(&Command::Ready(metadata(&[
             ("Socket-Type", "DEALER"),
             ("Identity", "me"),
@@ -381,7 +381,7 @@ mod tests {
         let client = welcomed_client();
         let ready = metadata_command("READY", &[("Socket-Type", "ROUTER"), ("Identity", "srv")]);
         let step = client.receive(ready, &mut Vec::new()).unwrap();
-        let ClientStep::Established(established) = step else {
+        let PlainClientStep::Established(established) = step else {
             panic!("expected established");
         };
         assert_eq!(established.version, Version::V3_1);
@@ -517,11 +517,11 @@ mod tests {
         raw("HELLO", b"\x05admin\x07hunter2")
     }
 
-    fn pending() -> PendingAuthentication {
+    fn pending() -> PendingPlainAuthentication {
         let server = PlainServer::start(server_config(), &V3_1).unwrap();
         match server.receive(hello(), &mut Vec::new()).unwrap() {
-            ServerStep::Authenticate(pending, _) => pending,
-            ServerStep::Established(_) => panic!("established before INITIATE"),
+            PlainServerStep::Authenticate(pending, _) => pending,
+            PlainServerStep::Established(_) => panic!("established before INITIATE"),
         }
     }
 
@@ -544,7 +544,7 @@ mod tests {
     fn server_asks_zap_about_hello() {
         let server = PlainServer::start(server_config(), &V3_1).unwrap();
         let mut out = Vec::new();
-        let ServerStep::Authenticate(_, request) = server.receive(hello(), &mut out).unwrap()
+        let PlainServerStep::Authenticate(_, request) = server.receive(hello(), &mut out).unwrap()
         else {
             panic!("expected a ZAP request");
         };
@@ -575,7 +575,7 @@ mod tests {
             "INITIATE",
             &[("Socket-Type", "DEALER"), ("Identity", "cid")],
         );
-        let ServerStep::Established(established) = server.receive(initiate, &mut out).unwrap()
+        let PlainServerStep::Established(established) = server.receive(initiate, &mut out).unwrap()
         else {
             panic!("expected established");
         };

@@ -6,11 +6,11 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
 use zmtp::{
-    ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
-    CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting,
-    GreetingConfig, GreetingError, HandshakeError, Identity, Incoming, Keypair, LegacyPeers,
-    Mechanism, Message, NullHandshake, PeerGreeting, PlainClient, PlainCredentials, PlainServer,
-    PublicKey, Role, ServerConfig, ServerStep, SocketType, ZapReply, ZapRequest,
+    Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,
+    DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting, GreetingConfig,
+    GreetingError, HandshakeError, Identity, Incoming, Keypair, LegacyPeers, Mechanism, Message,
+    NullHandshake, PeerGreeting, PlainClient, PlainClientStep, PlainCredentials, PlainServer,
+    PlainServerStep, PublicKey, Role, ServerConfig, SocketType, ZapReply, ZapRequest,
 };
 
 /// Which security mechanism a [`Peer`] uses, and its side of it.
@@ -136,8 +136,8 @@ impl Peer {
                     let item = io.next()?;
                     let step = client.receive(item, &mut io.out);
                     match io.flush(step)? {
-                        ClientStep::Continue(next) => client = next,
-                        ClientStep::Established(established) => break established,
+                        PlainClientStep::Continue(next) => client = next,
+                        PlainClientStep::Established(established) => break established,
                     }
                 }
             }
@@ -160,14 +160,14 @@ impl Peer {
                 let server = PlainServer::start(config, &peer).map_err(ConnectError::Handshake)?;
                 let hello = io.next()?;
                 let step = server.receive(hello, &mut io.out);
-                let ServerStep::Authenticate(pending, request) = io.flush(step)? else {
+                let PlainServerStep::Authenticate(pending, request) = io.flush(step)? else {
                     unreachable!("HELLO always leads to authentication");
                 };
                 let reply = pending.reply(authenticate(&request), &mut io.out);
                 let server = io.flush(reply)?;
                 let initiate = io.next()?;
                 let step = server.receive(initiate, &mut io.out);
-                let ServerStep::Established(established) = io.flush(step)? else {
+                let PlainServerStep::Established(established) = io.flush(step)? else {
                     unreachable!("INITIATE always completes the handshake");
                 };
                 established

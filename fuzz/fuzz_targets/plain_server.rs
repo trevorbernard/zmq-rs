@@ -3,7 +3,7 @@
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
     Frame, GreetingConfig, Identity, Mechanism, Metadata, PlainServer, Role, ServerConfig,
-    ServerStep, SocketType, ZapReply,
+    PlainServerStep, SocketType, ZapReply,
 };
 
 // A PLAIN server whose authenticator accepts everyone, so the fuzzer can
@@ -33,7 +33,7 @@ fuzz_target!(|data: &[u8]| {
             return;
         };
         match server.receive(incoming, &mut out) {
-            Ok(ServerStep::Authenticate(pending, _request)) => {
+            Ok(PlainServerStep::Authenticate(pending, _request)) => {
                 let reply = ZapReply::Ok {
                     user_id: Frame::new(),
                     metadata: Metadata::new(),
@@ -43,7 +43,7 @@ fuzz_target!(|data: &[u8]| {
                     Err(_) => return,
                 }
             }
-            Ok(ServerStep::Established(_)) => {
+            Ok(PlainServerStep::Established(_)) => {
                 zmtp_fuzz::drain(&mut decoder);
                 return;
             }

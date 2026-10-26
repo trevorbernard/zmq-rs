@@ -5,12 +5,11 @@
 
 use proptest::prelude::*;
 use zmtp::{
-    Authenticated, ClientStep, Credential, CurveClient, CurveClientStep, CurveCodec, CurveError,
-    CurveServer, CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, ErrorReason,
-    Established, Frame, HandshakeError, Identity, Incoming, Keypair, Message, Metadata,
-    PeerGreeting, PlainClient, PlainCredentials, PlainServer, PropertyName, SecretKey,
-    ServerConfig, ServerStep, SocketType, Version, ZapCredentials, ZapFailure, ZapReply,
-    ZapRequest,
+    Authenticated, Credential, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
+    CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, ErrorReason, Established, Frame,
+    HandshakeError, Identity, Incoming, Keypair, Message, Metadata, PeerGreeting, PlainClient,
+    PlainClientStep, PlainCredentials, PlainServer, PlainServerStep, PropertyName, SecretKey,
+    ServerConfig, SocketType, Version, ZapCredentials, ZapFailure, ZapReply, ZapRequest,
 };
 
 fn socket_type() -> impl Strategy<Value = SocketType> {
@@ -220,12 +219,12 @@ impl End {
         let out = &mut self.outbox;
         let result = match handshake {
             Handshake::PlainClient(client) => match client.receive(incoming, out) {
-                Ok(ClientStep::Continue(client)) => Ok(Some(Handshake::PlainClient(client))),
-                Ok(ClientStep::Established(established)) => Err(Ok((established, None))),
+                Ok(PlainClientStep::Continue(client)) => Ok(Some(Handshake::PlainClient(client))),
+                Ok(PlainClientStep::Established(established)) => Err(Ok((established, None))),
                 Err(err) => Err(Err(err)),
             },
             Handshake::PlainServer(server) => match server.receive(incoming, out) {
-                Ok(ServerStep::Authenticate(pending, request)) => {
+                Ok(PlainServerStep::Authenticate(pending, request)) => {
                     self.zap = Some(request);
                     let verdict = self.verdict.take().expect("asked ZAP once");
                     match pending.reply(verdict, out) {
@@ -233,7 +232,7 @@ impl End {
                         Err(err) => Err(Err(err)),
                     }
                 }
-                Ok(ServerStep::Established(established)) => Err(Ok((established, None))),
+                Ok(PlainServerStep::Established(established)) => Err(Ok((established, None))),
                 Err(err) => Err(Err(err)),
             },
             Handshake::CurveClient(client) => match client.receive(incoming, out) {

@@ -14,13 +14,13 @@ use std::time::{Duration, Instant};
 
 use zmq_pipe::{Reader, TrySendError, Writer};
 use zmtp::{
-    ClientStep, Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer,
-    CurveServerStep, DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting,
-    GreetingConfig, GreetingError, Group, HandshakeError, Incoming, LegacyPeers, Membership,
-    Message, MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting, PendingAuthentication,
-    PendingCurveAuthentication, PendingNullAuthentication, Ping, PingContext, PlainClient,
-    PlainServer, ReadInto, Role, ServerConfig, ServerStep, SocketType, Subscription, Ttl, Version,
-    ZapFailure, ZapReply, ZapRequest,
+    Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,
+    DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting, GreetingConfig,
+    GreetingError, Group, HandshakeError, Incoming, LegacyPeers, Membership, Message,
+    MessageMetadata, NullHandshake, NullZapConfig, PeerGreeting, PendingCurveAuthentication,
+    PendingNullAuthentication, PendingPlainAuthentication, Ping, PingContext, PlainClient,
+    PlainClientStep, PlainServer, PlainServerStep, ReadInto, Role, ServerConfig, SocketType,
+    Subscription, Ttl, Version, ZapFailure, ZapReply, ZapRequest,
 };
 
 use crate::context::PeerSlot;
@@ -129,7 +129,7 @@ enum Mechanism {
 /// A server handshake waiting for ZAP, by mechanism.
 enum Pending {
     Null(PendingNullAuthentication),
-    Plain(PendingAuthentication),
+    Plain(PendingPlainAuthentication),
     Curve(Box<PendingCurveAuthentication>),
 }
 
@@ -709,20 +709,26 @@ impl Engine {
             Mechanism::PlainClient(client) => {
                 let result = client.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
-                    ClientStep::Continue(client) => Step::Continue(Mechanism::PlainClient(client)),
-                    ClientStep::Established(established) => Step::Established(established, None),
+                    PlainClientStep::Continue(client) => {
+                        Step::Continue(Mechanism::PlainClient(client))
+                    }
+                    PlainClientStep::Established(established) => {
+                        Step::Established(established, None)
+                    }
                 }
             }
             Mechanism::PlainServer(server) => {
                 let result = server.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
-                    ServerStep::Authenticate(pending, request) => {
+                    PlainServerStep::Authenticate(pending, request) => {
                         let authenticator = self
                             .authenticator()
                             .expect("a PLAIN server is configured with an authenticator");
                         Step::Continue(ask(authenticator, request, Pending::Plain(pending), cx))
                     }
-                    ServerStep::Established(established) => Step::Established(established, None),
+                    PlainServerStep::Established(established) => {
+                        Step::Established(established, None)
+                    }
                 }
             }
             Mechanism::CurveClient(client) => {
