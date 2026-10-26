@@ -490,6 +490,11 @@ impl InprocListener {
         self.connections.poll_recv(cx)
     }
 
+    /// The next connection, waiting for one to arrive.
+    pub async fn accept(&mut self) -> Option<Connection> {
+        self.connections.recv().await
+    }
+
     /// The next connection, blocking the thread until one arrives.
     pub fn accept_blocking(&mut self) -> Option<Connection> {
         self.connections.recv_blocking()
