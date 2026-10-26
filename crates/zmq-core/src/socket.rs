@@ -759,7 +759,7 @@ impl FairQueue {
 #[derive(Debug)]
 pub struct RouterTable {
     by_identity: HashMap<Box<[u8]>, PeerKey>,
-    by_peer: HashMap<PeerKey, Route>,
+    by_peer: PeerMap<Route>,
     /// Peers whose handshake had not completed when last looked at.
     waiting: Vec<PeerKey>,
     cursor: PeerCursor,
@@ -798,7 +798,7 @@ impl Default for RouterTable {
     fn default() -> Self {
         Self {
             by_identity: HashMap::new(),
-            by_peer: HashMap::new(),
+            by_peer: PeerMap::default(),
             waiting: Vec::new(),
             cursor: PeerCursor::default(),
             // libzmq starts the generated ids at a random value.
@@ -934,7 +934,7 @@ impl RouterTable {
 #[derive(Debug)]
 pub struct ServerTable {
     by_id: HashMap<std::num::NonZeroU32, PeerKey>,
-    by_peer: HashMap<PeerKey, std::num::NonZeroU32>,
+    by_peer: PeerMap<std::num::NonZeroU32>,
     cursor: PeerCursor,
     next_id: u32,
     recv: FairQueue,
@@ -955,7 +955,7 @@ impl Default for ServerTable {
     fn default() -> Self {
         Self {
             by_id: HashMap::new(),
-            by_peer: HashMap::new(),
+            by_peer: PeerMap::default(),
             cursor: PeerCursor::default(),
             recv: FairQueue::default(),
             // libzmq starts its ids at a random value.
