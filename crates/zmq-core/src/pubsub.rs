@@ -687,7 +687,7 @@ impl Subscriber {
             }
             None => {
                 self.greet(peers);
-                peers.broadcast(&message);
+                peers.send_to_all(&message);
             }
         }
     }
@@ -697,7 +697,7 @@ impl Subscriber {
         for peer in self.greeted.added_since(peers) {
             for topic in self.topics.iter() {
                 let subscription = Subscription::Subscribe(Frame::copy_from_slice(topic));
-                let _ = peer.connection.tx.try_send(subscription.to_message());
+                let _ = peer.connection.tx.force_send(subscription.to_message());
             }
         }
     }

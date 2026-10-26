@@ -254,6 +254,22 @@ impl<T> Writer<T> {
         if self.is_full() {
             return Err(TrySendError::Full(item));
         }
+        self.push(item);
+        Ok(())
+    }
+
+    /// Queues `item` whatever the high-water mark, for items that must
+    /// never be dropped, such as a subscriber's subscriptions. Later items
+    /// still wait for the pipe to drop below the mark.
+    pub fn force_send(&mut self, item: T) -> Result<(), Closed<T>> {
+        if self.is_closed() {
+            return Err(Closed(item));
+        }
+        self.push(item);
+        Ok(())
+    }
+
+    fn push(&mut self, item: T) {
         let reader_waiting = match &mut self.sender {
             Sender::Queue(producer) => producer.push(item),
             Sender::Latest(latest) => {
@@ -272,7 +288,6 @@ impl<T> Writer<T> {
         if reader_waiting {
             self.shared.reader.waker.wake();
         }
-        Ok(())
     }
 
     /// Ready once an item can be queued, or with `ReaderGone` once the
@@ -635,6 +650,24 @@ mod tests {
 
     fn wakes(count: &Count) -> usize {
         count.0.load(Ordering::SeqCst)
+    }
+
+    #[test]
+    fn a_forced_send_goes_past_the_high_water_mark() {
+        let (mut writer, mut reader) = pipe(hwm(1));
+        writer.try_send(1).unwrap();
+        assert_eq!(writer.force_send(2), Ok(()));
+        assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+        assert_eq!(reader.try_recv(), Ok(1));
+        assert_eq!(
+            writer.try_send(3),
+            Err(TrySendError::Full(3)),
+            "still at the mark"
+        );
+        assert_eq!(reader.try_recv(), Ok(2));
+        assert_eq!(writer.try_send(3), Ok(()));
+        drop(reader);
+        assert_eq!(writer.force_send(4), Err(Closed(4)));
     }
 
     #[test]

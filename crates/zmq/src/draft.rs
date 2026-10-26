@@ -57,8 +57,8 @@ impl Routing for zmq_core::Dish {
 pub enum Radio {}
 
 /// Receives what its RADIO peers send to the groups it joined (RFC 48).
-/// Joins nothing at first. Its joins are never dropped: its queues towards
-/// peers are unbounded, whatever its send HWM.
+/// Joins nothing at first. Its joins are never dropped: they go to peers
+/// whatever its send HWM.
 #[derive(Debug)]
 pub enum Dish {}
 

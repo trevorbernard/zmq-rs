@@ -12,7 +12,6 @@ use zmq_core::{
     PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome,
     RouterSendError, RouterTable, Subscriber, Verbosity, XPubEvent,
 };
-use zmq_pipe::Hwm;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
@@ -421,7 +420,7 @@ pub enum Pub {}
 /// Receives what its PUB peers publish on the topics it subscribes to
 /// (RFC 29). Subscribed to nothing at first, so it receives nothing until
 /// [`subscribe`](Socket::subscribe) is called. Its subscriptions are never
-/// dropped: its queues towards peers are unbounded, whatever its send HWM.
+/// dropped: they go to peers whatever its send HWM.
 #[derive(Debug)]
 pub enum Sub {}
 
@@ -433,7 +432,9 @@ pub enum Sub {}
 pub enum XPub {}
 
 /// A SUB that also sends: [`send`](Socket::send) goes to every publisher
-/// (RFC 29). Used with [`XPub`] to build proxies.
+/// (RFC 29). Used with [`XPub`] to build proxies. Subscriptions are never
+/// dropped; other messages are, for a publisher at the send HWM, as in
+/// libzmq.
 #[derive(Debug)]
 pub enum XSub {}
 
@@ -633,16 +634,7 @@ impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
             identity: options.identity,
-            // Subscriptions and joins must never be dropped, so SUB, XSUB
-            // and DISH queue without limit towards their peers.
-            send_hwm: if matches!(
-                T::KIND,
-                zmtp::SocketType::Sub | zmtp::SocketType::XSub | zmtp::SocketType::Dish
-            ) {
-                Hwm::Unlimited
-            } else {
-                options.send_hwm
-            },
+            send_hwm: options.send_hwm,
             recv_hwm: options.recv_hwm,
             // PEER's connect_peer names the peer at once.
             immediate: options.immediate && !is_peer(T::KIND),

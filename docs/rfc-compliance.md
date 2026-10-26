@@ -366,7 +366,7 @@ Rules shared by every pattern:
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.
 - A SUB counts its subscriptions: every `subscribe` goes upstream, as in libzmq, while `unsubscribe` sends CANCEL only for the last one. A publisher keeps one subscription per topic and peer, as libzmq's XPUB does.
 - A SUB filters what arrives too. That covers publishers that send everything, and messages queued before an `unsubscribe`.
-- A SUB's subscriptions go to a peer as soon as `connect` returns. Its queues towards peers are unbounded, so a subscription is never dropped at the HWM.
+- A SUB's subscriptions go to a peer as soon as `connect` returns. A subscription is never dropped at the HWM: it goes to peers past it. An XSUB's other messages are dropped for a peer at the HWM, as libzmq's are.
 - A session replays the topics it has carried to each new connection after a reconnect, which is the effect of libzmq's hiccup. Cancelled topics are not replayed.
 
 **`CONFLATE`** (PUSH, PULL, PUB, SUB, DEALER): each queue holds only the latest message and the HWM no longer applies. libzmq conflates both directions, which can lose all but the last of a SUB's subscriptions; here the subscription direction never conflates.
@@ -421,7 +421,7 @@ GitHub CI, which installs Ubuntu's.
 
 **Done (RADIO and DISH):**
 - `Socket<Radio>::send(&group, body)` reaches every DISH peer that joined the group, matched exactly, and never blocks: a full dish misses the message, as in libzmq. It returns how many dishes it was queued for.
-- `Socket<Dish>` joins and leaves groups (`false` for a second join, or leaving one not joined, as libzmq refuses them), and receives `(Group, Frame)`. It filters what arrives, so messages queued before a leave are dropped. Its queues towards peers are unbounded, so a join is never dropped.
+- `Socket<Dish>` joins and leaves groups (`false` for a second join, or leaving one not joined, as libzmq refuses them), and receives `(Group, Frame)`. It filters what arrives, so messages queued before a leave are dropped. A join is never dropped: it goes to peers past the HWM.
 - On the wire, messages are `group (MORE) | body` and membership changes are JOIN and LEAVE commands, whatever the ZMTP 3.x version, as libzmq's DISH sends them. Inside the process, DISH writes `zmtp::Membership` in a `0x01`/`0x00` message form, as SUB does subscriptions; engines convert, and a session replays its groups after reconnecting.
 - The interop tests drive libzmq's RADIO and DISH through its draft API (`zmq_join`, `zmq_msg_set_group`, `zmq_msg_group`), looked up at run time: a libzmq without drafts exports them only under C++-mangled names.
 - Not supported: UDP, RADIO/DISH's other transport.

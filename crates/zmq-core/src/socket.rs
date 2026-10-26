@@ -210,9 +210,18 @@ impl PeerList {
         }
     }
 
-    /// Sends a copy of `message` to every peer, skipping those that are
-    /// full or gone.
+    /// Sends a copy of `message` to every peer, past the HWM: for
+    /// subscriptions and joins, which are never dropped. Skips peers that
+    /// are gone.
     pub(crate) fn broadcast(&mut self, message: &Message) {
+        for peer in &mut self.peers {
+            let _ = peer.connection.tx.force_send(message.clone());
+        }
+    }
+
+    /// Sends a copy of `message` to every peer below its HWM, as libzmq's
+    /// `dist` does: a peer that is full or gone misses it.
+    pub(crate) fn send_to_all(&mut self, message: &Message) {
         for peer in &mut self.peers {
             let _ = peer.connection.tx.try_send(message.clone());
         }

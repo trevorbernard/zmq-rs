@@ -116,7 +116,7 @@ impl Dish {
         for peer in self.greeted.added_since(peers) {
             for group in &self.groups {
                 let join = Membership::Join(group.clone()).to_message();
-                let _ = peer.connection.tx.try_send(join);
+                let _ = peer.connection.tx.force_send(join);
             }
         }
     }

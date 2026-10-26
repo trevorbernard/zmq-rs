@@ -217,3 +217,28 @@ fn a_flooding_subscriber_cannot_keep_xpub_from_returning() {
     flooding.join().unwrap();
     assert_eq!(heard, (subscribed("a"), None));
 }
+
+#[test]
+fn xsub_drops_messages_at_the_hwm_but_never_subscriptions() {
+    let marks = |n| zmq::SocketOptions {
+        send_hwm: zmq::Hwm::Messages(std::num::NonZeroUsize::new(n).unwrap()),
+        recv_hwm: zmq::Hwm::Messages(std::num::NonZeroUsize::new(n).unwrap()),
+        ..zmq::SocketOptions::default()
+    };
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket_with::<XPub>(marks(1));
+    xpub.bind("inproc://xsub-hwm").unwrap();
+    let mut xsub = context.socket_with::<XSub>(marks(2));
+    xsub.connect("inproc://xsub-hwm").unwrap();
+    for i in 0..10 {
+        xsub.send(format!("upstream {i}"));
+    }
+    xsub.send(Message::from(&b"\x01news"[..]));
+    let events: Vec<XPubEvent> = std::iter::from_fn(|| xpub.try_recv()).collect();
+    // An inproc pipe holds what both ends would: 2 + 1.
+    let expected: Vec<XPubEvent> = (0..3)
+        .map(|i| XPubEvent::Message(Message::from(format!("upstream {i}"))))
+        .chain([subscribed("news")])
+        .collect();
+    assert_eq!(events, expected);
+}
