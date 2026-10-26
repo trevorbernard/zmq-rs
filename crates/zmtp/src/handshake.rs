@@ -6,8 +6,6 @@
 
 use std::fmt;
 
-use zeroize::Zeroizing;
-
 use crate::command::MAX_SHORT;
 use crate::identity::MAX_IDENTITY;
 use crate::{
@@ -393,11 +391,11 @@ pub(crate) fn write_command(version: Version, command: &Command, out: &mut Vec<u
 /// Writes a command frame whose body is `name` followed by `data`.
 pub(crate) fn write_raw_command(version: Version, name: &str, data: &[u8], out: &mut Vec<u8>) {
     debug_assert!(!name.is_empty() && name.len() <= MAX_SHORT);
-    let mut body = Zeroizing::new(Vec::with_capacity(1 + name.len() + data.len()));
-    body.push(name.len() as u8);
-    body.extend_from_slice(name.as_bytes());
-    body.extend_from_slice(data);
-    write_body(version, &body, out);
+    let written = Encoder::new(version).encode_command_header(1 + name.len() + data.len(), out);
+    debug_assert!(written.is_ok(), "only ZMTP 3.x handshakes send commands");
+    out.push(name.len() as u8);
+    out.extend_from_slice(name.as_bytes());
+    out.extend_from_slice(data);
 }
 
 fn write_body(version: Version, body: &[u8], out: &mut Vec<u8>) {

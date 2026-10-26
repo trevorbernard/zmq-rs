@@ -182,9 +182,21 @@ impl Encoder {
         body: &[u8],
         out: &mut Vec<u8>,
     ) -> Result<(), CommandsUnsupported> {
+        self.encode_command_header(body.len(), out)?;
+        out.extend_from_slice(body);
+        Ok(())
+    }
+
+    /// Writes the header of a command frame of `size` octets, for a
+    /// caller that writes the body itself.
+    pub(crate) fn encode_command_header(
+        &self,
+        size: usize,
+        out: &mut Vec<u8>,
+    ) -> Result<(), CommandsUnsupported> {
         match self.version {
             Version::V3_0 | Version::V3_1 => {
-                self.encode_frame(COMMAND, body, out);
+                self.encode_header(COMMAND, size as u64, out);
                 Ok(())
             }
             Version::V1 | Version::V2 => Err(CommandsUnsupported),
