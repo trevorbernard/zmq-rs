@@ -107,7 +107,7 @@ off.
 - `PropertyName` is a validated newtype with case-insensitive `Eq` and `Hash`. User metadata must start with `X-`.
 - A missing Socket-Type is accepted, for libzmq interop.
 - On a mismatch we send ERROR and then close.
-- `Command` is a typed enum: `Ready`, `Error`, `Ping`, `Pong`, `Subscribe`, `Cancel`, `Join`, `Leave`, `Unknown`. Unknown commands are ignored after the handshake.
+- `Command` is a typed enum: `Ready`, `Error`, `Ping`, `Pong`, `Subscribe`, `Cancel`, `Join`, `Leave`, and `Other` for any other command, such as a security mechanism's. Other commands are ignored after the handshake.
 
 **Message metadata** (`zmq_msg_gets`): each message received over a connection carries that connection's `MessageMetadata`, read with `Message::property`, as libzmq and JeroMQ attach theirs:
 - Built once when the handshake completes, in libzmq's order, the first of a name kept: `Peer-Address` (the peer's IP, over TCP only), then what ZAP returned (`User-Id` and its metadata), then the peer's READY properties (`Socket-Type`, `Identity`, `X-` properties). A connection with none of these attaches nothing, and `inproc` has no connection, so its messages carry none.
@@ -238,9 +238,8 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - Post-handshake commands are boxed as MESSAGE with COMMAND set.
   - On receipt, mask the flags with `0x03`.
   - The server keeps per-connection state instead of being stateless; this is indistinguishable on the wire.
-- **Crypto:** RustCrypto `crypto_box` (`SalsaBox`, curve25519xsalsa20poly1305) and `xsalsa20poly1305` for cookies.
-  - NaCl puts the tag before the ciphertext; use the detached APIs and lay out `tag || ct` explicitly.
-  - **Verify against HELLO/WELCOME captures from libzmq before trusting the layout.**
+- **Crypto:** `dryoc`'s libsodium-compatible `crypto_box` (curve25519xsalsa20poly1305). The server's cookie is sealed by the same box keyed with a random key, which is libsodium's `crypto_secretbox`. dryoc's Salsa20 uses AVX2 or AVX-512 where the CPU has them.
+  - NaCl puts the tag before the ciphertext; the detached APIs are used and the layout is `tag || ct`, verified against libzmq on the wire (see below).
 
 **Design:**
 - `Keypair` can only be generated or derived from its secret key, so a mismatched pair cannot be constructed. `SecretKey` is zeroized, not `Clone`, and its `Debug` prints nothing of it.
