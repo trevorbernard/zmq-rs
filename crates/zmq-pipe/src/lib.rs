@@ -214,6 +214,10 @@ pub enum TrySendError<T> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Closed<T>(pub T);
 
+/// The reader is gone, so no item will ever be queued.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReaderGone;
+
 /// Why [`Reader::try_recv`] returned nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TryRecvError {
@@ -271,9 +275,9 @@ impl<T> Writer<T> {
         Ok(())
     }
 
-    /// Ready once an item can be queued, or with `Err(())` once the reader
-    /// is gone.
-    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ()>> {
+    /// Ready once an item can be queued, or with `ReaderGone` once the
+    /// reader is gone.
+    pub fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), ReaderGone>> {
         if let Poll::Ready(ready) = self.ready() {
             return Poll::Ready(ready);
         }
@@ -338,9 +342,9 @@ impl<T> Writer<T> {
             .is_some_and(|hwm| self.written - self.peer_read >= hwm)
     }
 
-    fn ready(&mut self) -> Poll<Result<(), ()>> {
+    fn ready(&mut self) -> Poll<Result<(), ReaderGone>> {
         if self.is_closed() {
-            Poll::Ready(Err(()))
+            Poll::Ready(Err(ReaderGone))
         } else if self.is_full() {
             Poll::Pending
         } else {
@@ -593,6 +597,14 @@ impl<T> fmt::Display for Closed<T> {
 }
 
 impl<T: fmt::Debug> std::error::Error for Closed<T> {}
+
+impl fmt::Display for ReaderGone {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("pipe is closed")
+    }
+}
+
+impl std::error::Error for ReaderGone {}
 
 #[cfg(test)]
 mod tests {
@@ -883,7 +895,7 @@ mod tests {
         assert_eq!(writer.poll_ready(&mut cx), Poll::Pending);
         drop(reader);
         assert_eq!(wakes(&count), 1);
-        assert_eq!(writer.poll_ready(&mut cx), Poll::Ready(Err(())));
+        assert_eq!(writer.poll_ready(&mut cx), Poll::Ready(Err(ReaderGone)));
     }
 
     /// A minimal `block_on`: polls with a waker that unparks this thread.

@@ -10,7 +10,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::task::{Context, Poll, Wake, Waker};
 
 use proptest::prelude::*;
-use zmq_pipe::{Hwm, Reader, TryRecvError, TrySendError, Writer, pipe, pipe_conflated};
+use zmq_pipe::{Hwm, Reader, ReaderGone, TryRecvError, TrySendError, Writer, pipe, pipe_conflated};
 
 #[derive(Default)]
 struct Count(AtomicUsize);
@@ -199,7 +199,7 @@ proptest! {
                     let (waiting, waker) = Waiting::new(until);
                     let polled = writer.poll_ready(&mut Context::from_waker(&waker));
                     let expected = if !model.reader {
-                        Poll::Ready(Err(()))
+                        Poll::Ready(Err(ReaderGone))
                     } else if model.full() {
                         writer_waiting = Some(waiting);
                         Poll::Pending

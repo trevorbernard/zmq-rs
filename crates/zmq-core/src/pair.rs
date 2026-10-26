@@ -3,7 +3,7 @@
 use std::collections::VecDeque;
 use std::task::{Context as TaskContext, Poll};
 
-use zmq_pipe::TrySendError;
+use zmq_pipe::{ReaderGone, TrySendError};
 use zmtp::Message;
 
 use crate::socket::{PeerKey, PeerList};
@@ -87,7 +87,7 @@ impl Pair {
             };
             match peer.connection.tx.poll_ready(cx) {
                 Poll::Ready(Ok(())) => return Poll::Ready(()),
-                Poll::Ready(Err(())) => {}
+                Poll::Ready(Err(ReaderGone)) => {}
                 Poll::Pending => return Poll::Pending,
             }
         }

@@ -12,7 +12,7 @@ use std::sync::{PoisonError, mpsc};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use zmq_pipe::{Reader, TrySendError, Writer};
+use zmq_pipe::{Reader, ReaderGone, TrySendError, Writer};
 use zmtp::{
     Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,
     DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting, GreetingConfig,
@@ -1002,7 +1002,7 @@ fn deliver(
             Ok(()) | Err(TrySendError::Closed(_)) => None,
             Err(TrySendError::Full(message)) => Some(message),
         },
-        Poll::Ready(Err(())) => None,
+        Poll::Ready(Err(ReaderGone)) => None,
         Poll::Pending => Some(message),
     }
 }

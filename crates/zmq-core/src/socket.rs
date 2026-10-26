@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context as TaskContext, Poll, Wake, Waker};
 
 use atomic_waker::AtomicWaker;
-use zmq_pipe::{TryRecvError, TrySendError};
+use zmq_pipe::{ReaderGone, TryRecvError, TrySendError};
 use zmtp::{Frame, Message};
 
 use crate::context::AcceptQueue;
@@ -83,7 +83,7 @@ impl Peer {
         let tx = &mut self.connection.tx;
         match tx.poll_ready(cx) {
             Poll::Ready(Ok(())) => tx.try_send(message),
-            Poll::Ready(Err(())) => Err(TrySendError::Closed(message)),
+            Poll::Ready(Err(ReaderGone)) => Err(TrySendError::Closed(message)),
             Poll::Pending => Err(TrySendError::Full(message)),
         }
     }
