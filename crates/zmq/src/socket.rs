@@ -387,6 +387,32 @@ impl<T: WaitsForRoom> Socket<T> {
     }
 }
 
+impl<T: Receives + WaitsForRoom> Socket<T> {
+    /// This socket, to [`poll`](crate::poll()) until a receive or a send
+    /// would not wait, as libzmq's `ZMQ_POLLIN | ZMQ_POLLOUT`. Once the
+    /// poll reports it, try both: `try_recv` returns a message if one is
+    /// waiting, and `try_send` succeeds if a peer has room.
+    ///
+    /// ```
+    /// # use zmq::{Context, Dealer};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let context = Context::new()?;
+    /// let mut a = context.socket::<Dealer>();
+    /// a.bind("inproc://both")?;
+    /// let mut b = context.socket::<Dealer>();
+    /// b.connect("inproc://both")?;
+    /// // Nothing to receive yet, but room to send.
+    /// assert_eq!(zmq::poll([b.readable_or_writable()]), [true]);
+    /// assert!(b.try_recv().is_none());
+    /// assert!(b.try_send("hello").is_ok());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn readable_or_writable(&mut self) -> PollItem<'_> {
+        PollItem::either(self)
+    }
+}
+
 impl<T: Receives> PollReadable for Socket<T> {
     /// Receives into `pending` rather than peeking: SUB, DISH and others
     /// drop messages as they receive, so a message in a pipe does not mean

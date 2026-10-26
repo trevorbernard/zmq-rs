@@ -7,9 +7,10 @@ use std::time::{Duration, Instant};
 use crate::wait;
 
 /// A socket to [`poll`], and what to wait for. Made by
-/// [`Socket::readable`](crate::Socket::readable) and
-/// [`Socket::writable`](crate::Socket::writable); it borrows the socket
-/// only until the poll returns.
+/// [`Socket::readable`](crate::Socket::readable),
+/// [`Socket::writable`](crate::Socket::writable) and
+/// [`Socket::readable_or_writable`](crate::Socket::readable_or_writable);
+/// it borrows the socket only until the poll returns.
 pub struct PollItem<'a> {
     target: Target<'a>,
 }
@@ -17,6 +18,8 @@ pub struct PollItem<'a> {
 enum Target<'a> {
     Readable(&'a mut dyn PollReadable),
     Writable(&'a mut dyn PollWritable),
+    /// Ready once either is, as libzmq's `ZMQ_POLLIN | ZMQ_POLLOUT`.
+    Either(&'a mut dyn PollEither),
     /// Left out by [`PollItem::when`]: never ready.
     Skipped,
 }
@@ -32,6 +35,11 @@ pub(crate) trait PollWritable {
     /// Ready once a send would succeed at once; registers `cx` if not.
     fn poll_writable(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
+
+/// A socket that can be polled both ways.
+pub(crate) trait PollEither: PollReadable + PollWritable {}
+
+impl<T: PollReadable + PollWritable> PollEither for T {}
 
 impl<'a> PollItem<'a> {
     /// This item if `condition` holds, and otherwise one that is never
@@ -80,10 +88,26 @@ impl<'a> PollItem<'a> {
         }
     }
 
+    pub(crate) fn either(socket: &'a mut dyn PollEither) -> Self {
+        Self {
+            target: Target::Either(socket),
+        }
+    }
+
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         match &mut self.target {
             Target::Readable(socket) => socket.poll_readable(cx),
             Target::Writable(socket) => socket.poll_writable(cx),
+            // Both are polled, so that both register `cx`.
+            Target::Either(socket) => {
+                let readable = socket.poll_readable(cx);
+                let writable = socket.poll_writable(cx);
+                if readable.is_ready() || writable.is_ready() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            }
             Target::Skipped => Poll::Pending,
         }
     }
@@ -94,6 +118,7 @@ impl fmt::Debug for PollItem<'_> {
         let interest = match self.target {
             Target::Readable(_) => "readable",
             Target::Writable(_) => "writable",
+            Target::Either(_) => "readable or writable",
             Target::Skipped => "skipped",
         };
         f.debug_tuple("PollItem").field(&interest).finish()

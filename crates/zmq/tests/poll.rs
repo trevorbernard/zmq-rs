@@ -192,3 +192,22 @@ fn draft_sockets_poll_too() {
     assert_eq!(zmq::poll_timeout([client.readable()], FIVE), Some([true]));
     assert_eq!(client.try_recv(), Some(Frame::from("hi")));
 }
+
+#[test]
+fn a_socket_can_be_polled_both_ways_at_once() {
+    let context = Context::new().unwrap();
+    let mut a = context.socket::<Dealer>();
+    a.bind("inproc://both-ways").unwrap();
+    // No peer: nothing to receive, and nowhere to send.
+    assert_eq!(zmq::poll_timeout([a.readable_or_writable()], BRIEFLY), None);
+    let mut b = context.socket::<Dealer>();
+    b.connect("inproc://both-ways").unwrap();
+    b.send("hello");
+    assert_eq!(
+        zmq::poll_timeout([a.readable_or_writable()], FIVE),
+        Some([true])
+    );
+    assert_eq!(a.try_recv(), Some(Message::from("hello")));
+    assert!(a.try_send("back").is_ok());
+    assert_eq!(b.recv_timeout(FIVE), Some(Message::from("back")));
+}
