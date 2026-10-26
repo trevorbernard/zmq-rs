@@ -311,8 +311,7 @@ fn normalized(mut events: Vec<(PeerKey, XPubEvent)>) -> Vec<(PeerKey, XPubEvent)
 fn take_events(publisher: &mut Publisher, peers: &mut PeerList) -> Vec<(PeerKey, XPubEvent)> {
     let mut cx = TaskContext::from_waker(Waker::noop());
     std::iter::from_fn(|| match publisher.poll_request(peers, &mut cx) {
-        Poll::Ready((Some(key), event)) => Some((key, event)),
-        Poll::Ready((None, event)) => panic!("{event:?} came from no peer"),
+        Poll::Ready(request) => Some(request),
         Poll::Pending => None,
     })
     .collect()

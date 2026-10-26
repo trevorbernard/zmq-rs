@@ -254,7 +254,7 @@ impl Receives for ManualXPub {
     fn poll_next(
         socket: &mut Socket<Self>,
         cx: &mut TaskContext<'_>,
-    ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
+    ) -> Poll<(zmq_core::PeerKey, XPubEvent)> {
         socket.peers.accept(cx);
         socket.routing.poll_request(socket.peers.list_mut(), cx)
     }
@@ -461,7 +461,7 @@ impl sealed::Sealed for ManualXPub {}
 impl SocketType for ManualXPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
     type Routing = Publisher;
-    type Received = (Option<zmq_core::PeerKey>, XPubEvent);
+    type Received = (zmq_core::PeerKey, XPubEvent);
 
     /// A publisher that leaves subscriptions to the application.
     fn routing() -> Publisher {
@@ -1129,11 +1129,7 @@ impl Socket<ManualXPub> {
     }
 
     /// Lends the socket to what a peer sent, to act on it.
-    fn lend(
-        &mut self,
-        peer: Option<zmq_core::PeerKey>,
-        event: XPubEvent,
-    ) -> SubscriptionRequest<'_> {
+    fn lend(&mut self, peer: zmq_core::PeerKey, event: XPubEvent) -> SubscriptionRequest<'_> {
         SubscriptionRequest {
             socket: self,
             peer,
@@ -1149,7 +1145,7 @@ impl Socket<ManualXPub> {
 #[must_use = "a subscription has no effect until accepted"]
 pub struct SubscriptionRequest<'a> {
     socket: &'a mut Socket<ManualXPub>,
-    peer: Option<zmq_core::PeerKey>,
+    peer: zmq_core::PeerKey,
     event: XPubEvent,
 }
 
@@ -1166,7 +1162,7 @@ impl SubscriptionRequest<'_> {
         match &self.event {
             XPubEvent::Subscribe(topic) => self.apply(Subscription::Subscribe(topic.clone())),
             XPubEvent::Cancel(topic) => self.apply(Subscription::Cancel(topic.clone())),
-            XPubEvent::Message(_) => self.peer.is_some(),
+            XPubEvent::Message(_) => true,
         }
     }
 
@@ -1186,18 +1182,14 @@ impl SubscriptionRequest<'_> {
     /// has room, as libzmq's `ZMQ_XPUB_MANUAL_LAST_VALUE` does after a
     /// subscription. Returns whether it was queued.
     pub fn send(&mut self, message: impl Into<Message>) -> bool {
-        let Some(peer) = self.peer else {
-            return false;
-        };
         let socket = &mut *self.socket;
         socket
             .routing
-            .send_to(socket.peers.list_mut(), peer, message.into())
+            .send_to(socket.peers.list_mut(), self.peer, message.into())
     }
 
     fn apply(&mut self, subscription: Subscription) -> bool {
-        self.peer
-            .is_some_and(|peer| self.socket.routing.apply(peer, subscription))
+        self.socket.routing.apply(self.peer, subscription)
     }
 }
 

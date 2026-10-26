@@ -244,7 +244,7 @@ pub struct Publisher {
     matched: PeerSet,
     /// What XPUB has yet to receive, and from which peer. `None` for PUB,
     /// which discards it.
-    events: Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
+    events: Option<VecDeque<(PeerKey, XPubEvent)>>,
     verbosity: Verbosity,
     /// Whether peers' subscriptions wait for [`apply`](Self::apply).
     manual: bool,
@@ -308,13 +308,13 @@ impl Publisher {
         self.poll_request(peers, cx).map(|(_, event)| event)
     }
 
-    /// The next event and the peer it came from, if it is still here, or
-    /// `Pending` with `cx` woken once a peer sends more.
+    /// The next event and the peer it came from, or `Pending` with `cx`
+    /// woken once a peer sends more.
     pub fn poll_request(
         &mut self,
         peers: &mut PeerList,
         cx: &mut TaskContext<'_>,
-    ) -> Poll<(Option<PeerKey>, XPubEvent)> {
+    ) -> Poll<(PeerKey, XPubEvent)> {
         self.drain(peers, Some(cx));
         match self.events.as_mut().and_then(VecDeque::pop_front) {
             Some(request) => Poll::Ready(request),
@@ -586,7 +586,7 @@ fn leave(index: &mut PeerIndex, topic: &[u8], key: PeerKey) -> bool {
 /// Applies what one peer sent to the topics of all peers, noting events.
 struct Changes<'a> {
     index: &'a mut PeerIndex,
-    events: &'a mut Option<VecDeque<(Option<PeerKey>, XPubEvent)>>,
+    events: &'a mut Option<VecDeque<(PeerKey, XPubEvent)>>,
     verbosity: Verbosity,
     manual: bool,
     /// The peer being read.
@@ -653,8 +653,9 @@ impl Changes<'_> {
     }
 
     fn event(&mut self, event: XPubEvent) {
+        let from = self.key();
         if let Some(events) = self.events {
-            events.push_back((self.from, event));
+            events.push_back((from, event));
         }
     }
 }
