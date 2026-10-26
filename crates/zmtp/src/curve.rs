@@ -86,11 +86,11 @@ pub struct CurveClient {
 }
 
 enum ClientState {
-    WaitingForWelcome,
+    /// `key` boxes between our transient key and the server's long-term
+    /// key, HELLO and WELCOME alike.
+    WaitingForWelcome { key: BoxKey },
     /// `key` boxes between the transient keys, READY and MESSAGEs alike.
-    WaitingForReady {
-        key: BoxKey,
-    },
+    WaitingForReady { key: BoxKey },
 }
 
 type Key = [u8; KEY];
@@ -248,7 +248,7 @@ impl CurveClient {
             public: keypair.public(),
             secret: Zeroizing::new(*keypair.secret().expose()),
             transient,
-            state: ClientState::WaitingForWelcome,
+            state: ClientState::WaitingForWelcome { key },
         })
     }
 
@@ -262,8 +262,8 @@ impl CurveClient {
         let (name, data) = split_command(&body)?;
         match (&self.state, name) {
             (_, b"ERROR") => Err(peer_error(&body)),
-            (ClientState::WaitingForWelcome, b"WELCOME") => {
-                let key = self.welcome(data, out)?;
+            (ClientState::WaitingForWelcome { key }, b"WELCOME") => {
+                let key = self.welcome(key, data, out)?;
                 self.state = ClientState::WaitingForReady { key };
                 Ok(CurveClientStep::Continue(self))
             }
@@ -274,16 +274,17 @@ impl CurveClient {
 
     /// Opens WELCOME and answers with INITIATE. Returns the box key for
     /// the rest of the connection.
-    fn welcome(&self, data: &[u8], out: &mut Vec<u8>) -> Result<BoxKey, HandshakeError> {
+    fn welcome(
+        &self,
+        hello_key: &BoxKey,
+        data: &[u8],
+        out: &mut Vec<u8>,
+    ) -> Result<BoxKey, HandshakeError> {
         if data.len() != WELCOME {
             return Err(malformed("WELCOME"));
         }
         let (nonce, sealed) = data.split_at(LONG_NONCE);
-        let opened = open(
-            &BoxKey::between(self.server_key.as_bytes(), &self.transient.secret)?,
-            &long_nonce(b"WELCOME-", nonce),
-            sealed,
-        )?;
+        let opened = open(hello_key, &long_nonce(b"WELCOME-", nonce), sealed)?;
         let (server_transient, cookie) = opened.split_at(KEY);
         let server_transient: Key = server_transient.try_into().expect("32 octets");
         let key = BoxKey::between(&server_transient, &self.transient.secret)?;
