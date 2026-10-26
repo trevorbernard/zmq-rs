@@ -76,6 +76,8 @@ pub(crate) enum Target {
     TcpHost {
         host: String,
         port: u16,
+        /// Where to connect from, as libzmq's `tcp://source;host:port`.
+        source: Option<SocketAddr>,
     },
     Ipc(PathBuf),
     /// `ipc://*`: a fresh path in a new temporary directory.
@@ -105,7 +107,7 @@ impl Target {
     pub(crate) fn resolve(&self) -> Option<SocketAddr> {
         match self {
             Self::Tcp(addr) => Some(*addr),
-            Self::TcpHost { host, port } => zmq_core::resolve_tcp(host, *port).ok(),
+            Self::TcpHost { host, port, .. } => zmq_core::resolve_tcp(host, *port).ok(),
             _ => None,
         }
     }
@@ -166,49 +168,89 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
     Ok(None)
 }
 
-/// The address to bind for `endpoint`. `*` means every interface or, as the
-/// port, any free port.
+/// The address to bind for `endpoint`: `*` for every interface, an
+/// address, or an interface name, as libzmq binds, or a host name. `*` as
+/// the port means any free port.
 fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
-    let (host, port) = tcp_host_port(endpoint)?;
-    let port = match port {
-        "*" => 0,
-        port => parse_port(port, endpoint)?,
-    };
-    if host == "*" {
-        return Ok(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)));
+    let (host, port) = host_port(tcp_address(endpoint)?, endpoint)?;
+    let port = local_port(port, endpoint)?;
+    if let Some(addr) = local_addr(host, port) {
+        return Ok(addr);
     }
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(SocketAddr::new(ip, port));
-    }
-    // As libzmq's bind, which resolves at once and fails with EINVAL.
+    // libzmq's bind takes no host names; ours resolves one at once. One
+    // that does not resolve is libzmq's EINVAL.
     zmq_core::resolve_tcp(host, port).map_err(|_| invalid(endpoint))
 }
 
 /// What to connect to for `endpoint`. A host name is resolved only when
-/// connecting, as libzmq defers it, so it must only look like one.
+/// connecting, as libzmq defers it, so it must only look like one. With
+/// `tcp://source;host:port`, the connection is made from `source`, an
+/// address of our own as for a bind, but never a host name: libzmq looks
+/// nothing up for it.
 fn connect_addr(endpoint: &str) -> Result<Target, Error> {
-    let (host, port) = tcp_host_port(endpoint)?;
+    let address = tcp_address(endpoint)?;
+    let (source, address) = match address.rsplit_once(';') {
+        Some((source, address)) => {
+            let (host, port) = host_port(source, endpoint)?;
+            let source =
+                local_addr(host, local_port(port, endpoint)?).ok_or_else(|| invalid(endpoint))?;
+            (Some(source), address)
+        }
+        None => (None, address),
+    };
+    let (host, port) = host_port(address, endpoint)?;
     if host == "*" || port == "*" {
         return Err(invalid(endpoint));
     }
     let port = parse_port(port, endpoint)?;
-    if let Ok(ip) = host.parse::<IpAddr>() {
-        return Ok(Target::Tcp(SocketAddr::new(ip, port)));
+    // An IPv6 address, perhaps with a scope such as `fe80::1%eth0`, which
+    // only the system resolver parses. It is numeric, so nothing is looked
+    // up.
+    let ipv6 = host.contains(':');
+    if source.is_none() {
+        if let Ok(ip) = host.parse::<IpAddr>() {
+            return Ok(Target::Tcp(SocketAddr::new(ip, port)));
+        }
+        if ipv6 {
+            return zmq_core::resolve_tcp(host, port)
+                .map(Target::Tcp)
+                .map_err(|_| invalid(endpoint));
+        }
     }
-    // An IPv6 address with a scope, such as `fe80::1%eth0`, which only the
-    // system resolver parses. It is numeric, so nothing is looked up.
-    if host.contains(':') {
-        return zmq_core::resolve_tcp(host, port)
-            .map(Target::Tcp)
-            .map_err(|_| invalid(endpoint));
-    }
-    if !is_host_name(host) {
+    let valid = if ipv6 {
+        zmq_core::resolve_tcp(host, port).is_ok()
+    } else {
+        is_host_name(host)
+    };
+    if !valid {
         return Err(invalid(endpoint));
     }
     Ok(Target::TcpHost {
         host: host.to_owned(),
         port,
+        source,
     })
+}
+
+/// An address of our own, as libzmq takes one for a bind or a connect's
+/// source: `*` for every interface, an address, or an interface name.
+/// Nothing is looked up.
+fn local_addr(host: &str, port: u16) -> Option<SocketAddr> {
+    if host == "*" {
+        return Some(SocketAddr::from((Ipv4Addr::UNSPECIFIED, port)));
+    }
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return Some(SocketAddr::new(ip, port));
+    }
+    zmq_core::interface_addr(host, port)
+}
+
+/// A port of our own: `*` for any free one.
+fn local_port(port: &str, endpoint: &str) -> Result<u16, Error> {
+    match port {
+        "*" => Ok(0),
+        port => parse_port(port, endpoint),
+    }
 }
 
 /// Whether `host` looks like a host name: letters, digits, `.`, `-` and
@@ -220,14 +262,19 @@ fn is_host_name(host: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
-/// Splits `tcp://host:port`, removing brackets around an IPv6 host.
-fn tcp_host_port(endpoint: &str) -> Result<(&str, &str), Error> {
+/// The address of a `tcp://` endpoint.
+fn tcp_address(endpoint: &str) -> Result<&str, Error> {
     let (transport, address) = endpoint
         .split_once("://")
         .ok_or_else(|| invalid(endpoint))?;
     if transport != "tcp" {
         return Err(Error::UnsupportedTransport(transport.to_owned()));
     }
+    Ok(address)
+}
+
+/// Splits `host:port`, removing brackets around an IPv6 host.
+fn host_port<'a>(address: &'a str, endpoint: &str) -> Result<(&'a str, &'a str), Error> {
     let (host, port) = address.rsplit_once(':').ok_or_else(|| invalid(endpoint))?;
     let host = host
         .strip_prefix('[')
@@ -307,9 +354,49 @@ mod tests {
             connect_addr("tcp://no-such-host.invalid:5555").unwrap(),
             Target::TcpHost {
                 host: "no-such-host.invalid".into(),
-                port: 5555
+                port: 5555,
+                source: None,
             }
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn binds_take_an_interface_name() {
+        assert_eq!(bind_addr("tcp://lo:*").unwrap(), addr("127.0.0.1:0"));
+        assert_eq!(bind_addr("tcp://lo:5555").unwrap(), addr("127.0.0.1:5555"));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn connections_can_name_their_source() {
+        assert_eq!(
+            connect_addr("tcp://127.0.0.1:*;localhost:5555").unwrap(),
+            Target::TcpHost {
+                host: "localhost".into(),
+                port: 5555,
+                source: Some(addr("127.0.0.1:0")),
+            }
+        );
+        assert_eq!(
+            connect_addr("tcp://lo:6000;127.0.0.1:5555").unwrap(),
+            Target::TcpHost {
+                host: "127.0.0.1".into(),
+                port: 5555,
+                source: Some(addr("127.0.0.1:6000")),
+            }
+        );
+        // A source is an address of our own: no host names, and a port.
+        for endpoint in [
+            "tcp://localhost:0;127.0.0.1:5555",
+            "tcp://127.0.0.1;127.0.0.1:5555",
+            "tcp://;127.0.0.1:5555",
+        ] {
+            assert!(
+                matches!(connect_addr(endpoint), Err(Error::InvalidEndpoint(_))),
+                "{endpoint}"
+            );
+        }
     }
 
     #[test]

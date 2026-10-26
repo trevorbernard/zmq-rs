@@ -8,7 +8,7 @@
 //! mio's streams are used as they are.
 
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, ToSocketAddrs};
+use std::net::{SocketAddr, SocketAddrV6, ToSocketAddrs};
 
 use mio::event::Source;
 use mio::net::TcpListener;
@@ -52,6 +52,61 @@ pub fn resolve_tcp(host: &str, port: u16) -> io::Result<SocketAddr> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, format!("{host} has no address")))
 }
 
+/// The address of the network interface named `name`, as libzmq binds
+/// `tcp://eth0:port` and connects from `tcp://eth0:port;...`: an IPv4 one
+/// if it has one, as for host names. `None` if there is no such interface
+/// or it has no address.
+pub fn interface_addr(name: &str, port: u16) -> Option<SocketAddr> {
+    let interfaces: Vec<_> = if_addrs::get_if_addrs()
+        .ok()?
+        .into_iter()
+        .filter(|interface| interface.name == name)
+        .collect();
+    let interface = interfaces
+        .iter()
+        .find(|interface| interface.ip().is_ipv4())
+        .or_else(|| interfaces.first())?;
+    Some(match interface.ip() {
+        std::net::IpAddr::V4(ip) => SocketAddr::from((ip, port)),
+        // A link-local address means nothing without its interface.
+        std::net::IpAddr::V6(ip) => {
+            SocketAddr::V6(SocketAddrV6::new(ip, port, 0, interface.index.unwrap_or(0)))
+        }
+    })
+}
+
+/// Starts a non-blocking connection to `addr` from `source`, as libzmq
+/// does for `tcp://source;host:port`: reusing the address, so that one
+/// source port can reach several servers.
+fn connect_from(source: SocketAddr, addr: SocketAddr) -> io::Result<TcpStream> {
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(addr),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )?;
+    socket.set_nonblocking(true)?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&source.into())?;
+    match socket.connect(&addr.into()) {
+        Ok(()) => {}
+        Err(err) if in_progress(&err) => {}
+        Err(err) => return Err(err),
+    }
+    let stream = std::net::TcpStream::from(socket);
+    #[cfg(not(unix))]
+    let stream = mio::net::TcpStream::from_std(stream);
+    Ok(stream)
+}
+
+/// Whether a non-blocking connect failed only because it is under way.
+fn in_progress(err: &io::Error) -> bool {
+    #[cfg(unix)]
+    if err.raw_os_error() == Some(libc::EINPROGRESS) {
+        return true;
+    }
+    err.kind() == io::ErrorKind::WouldBlock
+}
+
 /// Nothing to clean up without `ipc://`.
 #[cfg(not(unix))]
 #[derive(Debug)]
@@ -61,11 +116,13 @@ pub(crate) enum IpcCleanup {}
 #[derive(Debug, Clone)]
 pub(crate) enum Address {
     Tcp(SocketAddr),
-    /// A host name, resolved for each attempt as libzmq resolves it, so a
-    /// reconnect follows the name to a new address.
+    /// A host name or address, resolved for each attempt as libzmq
+    /// resolves it, so a reconnect follows a name to a new address. Made
+    /// from `source` if given, as libzmq's `tcp://source;host:port`.
     TcpHost {
         host: String,
         port: u16,
+        source: Option<SocketAddr>,
     },
     #[cfg(unix)]
     Ipc(PathBuf),
@@ -79,7 +136,17 @@ impl std::fmt::Display for Address {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
-            Self::TcpHost { host, port } => write!(f, "tcp://{host}:{port}"),
+            Self::TcpHost { host, port, source } => {
+                f.write_str("tcp://")?;
+                if let Some(source) = source {
+                    write!(f, "{source};")?;
+                }
+                if host.contains(':') {
+                    write!(f, "[{host}]:{port}")
+                } else {
+                    write!(f, "{host}:{port}")
+                }
+            }
             #[cfg(unix)]
             Self::Ipc(path) => write!(f, "ipc://{}", path.display()),
             #[cfg(any(target_os = "linux", target_os = "android"))]
@@ -120,8 +187,12 @@ impl Stream {
     pub(crate) fn connect(address: &Address) -> io::Result<Self> {
         match address {
             Address::Tcp(addr) => mio::net::TcpStream::connect(*addr).map(|s| Self::Tcp(s.into())),
-            Address::TcpHost { host, port } => {
-                mio::net::TcpStream::connect(resolve_tcp(host, *port)?).map(|s| Self::Tcp(s.into()))
+            Address::TcpHost { host, port, source } => {
+                let addr = resolve_tcp(host, *port)?;
+                match source {
+                    Some(source) => connect_from(*source, addr).map(Self::Tcp),
+                    None => mio::net::TcpStream::connect(addr).map(|s| Self::Tcp(s.into())),
+                }
             }
             #[cfg(unix)]
             Address::Ipc(path) => mio::net::UnixStream::connect(path).map(|s| Self::Unix(s.into())),

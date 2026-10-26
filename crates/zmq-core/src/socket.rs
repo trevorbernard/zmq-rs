@@ -366,13 +366,21 @@ impl Peers {
         self.connect_to(Address::Tcp(addr))
     }
 
-    /// Connects to `host`, resolving the name for each attempt, as libzmq
-    /// does: one that does not resolve yet is retried like a refused
-    /// connection. Otherwise as [`connect`](Self::connect).
-    pub fn connect_host(&mut self, host: &str, port: u16) -> (EndpointId, Option<PeerKey>) {
+    /// Connects to `host`, a name or an address, resolving it for each
+    /// attempt, as libzmq does: a name that does not resolve yet is retried
+    /// like a refused connection. Connects from `source`, if given, as
+    /// libzmq's `tcp://source;host:port`. Otherwise as
+    /// [`connect`](Self::connect).
+    pub fn connect_host(
+        &mut self,
+        host: &str,
+        port: u16,
+        source: Option<SocketAddr>,
+    ) -> (EndpointId, Option<PeerKey>) {
         self.connect_to(Address::TcpHost {
             host: host.to_owned(),
             port,
+            source,
         })
     }
 

@@ -230,3 +230,33 @@ fn a_host_name_is_resolved_when_connecting_not_before() {
     ));
     push.disconnect(endpoint).unwrap();
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn a_socket_binds_an_interface_by_name() {
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>();
+    let bound = pull.bind("tcp://lo:*").unwrap();
+    assert!(bound.tcp_addr().unwrap().ip().is_loopback(), "{bound}");
+    let mut push = context.socket::<Push>();
+    push.connect(&bound.to_string()).unwrap();
+    push.send("over lo");
+    assert_eq!(pull.recv_timeout(FIVE), Some(Message::from("over lo")));
+}
+
+#[test]
+fn a_connection_leaves_from_its_source() {
+    let source_port = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let context = Context::new().unwrap();
+    let mut push = context.socket::<Push>();
+    push.connect(&format!("tcp://127.0.0.1:{source_port};{address}"))
+        .unwrap();
+    let (_, peer) = listener.accept().unwrap();
+    assert_eq!(peer.port(), source_port);
+}

@@ -15,10 +15,15 @@ draft = []
 [dependencies]
 atomic-waker.workspace = true
 bytes.workspace = true
+if-addrs.workspace = true
 mio.workspace = true
 socket2.workspace = true
 zmtp.workspace = true
 zmq-pipe.workspace = true
+
+[target.'cfg(unix)'.dependencies]
+# EINPROGRESS, to tell a non-blocking connect under way from a failure.
+libc.workspace = true
 
 [dev-dependencies]
 criterion.workspace = true

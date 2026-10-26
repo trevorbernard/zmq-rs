@@ -18,8 +18,9 @@ criterion = "0.8"
 # `std` for detecting AVX2 and AVX-512 at run time; without it only the
 # features the build targets are used.
 dryoc = { version = "2", default-features = false, features = ["std"] }
-mio = { version = "1", features = ["net", "os-ext", "os-poll"] }
+if-addrs = "0.15"
 libc = "0.2"
+mio = { version = "1", features = ["net", "os-ext", "os-poll"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 # `all` for the TCP keepalive probe count.
 socket2 = { version = "0.6", features = ["all"] }

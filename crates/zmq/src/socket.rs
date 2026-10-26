@@ -685,7 +685,7 @@ impl<T: SocketType> Socket<T> {
     }
 
     /// Binds `endpoint`, such as `tcp://*:5555`, `tcp://127.0.0.1:*`,
-    /// `ipc:///tmp/feed`, `ipc://*`, `ipc://@name` (Linux, Android) or
+    /// `tcp://eth0:5555` (an interface), `ipc:///tmp/feed`, `ipc://*`, `ipc://@name` (Linux, Android) or
     /// `inproc://name`, and accepts peers on it. Returns where it is bound:
     /// the actual port for `tcp://…:*`, and the fresh path for `ipc://*`.
     ///
@@ -767,6 +767,7 @@ impl<T: SocketType> Socket<T> {
     }
 
     /// Connects to `endpoint`, such as `tcp://localhost:5555`,
+    /// `tcp://eth0:*;localhost:5555` (from an interface or address),
     /// `ipc:///tmp/feed`, `ipc://@name` (Linux, Android) or
     /// `inproc://name`. Returns at once; messages queue until the connection
     /// is up, and a TCP or IPC connection retries until something listens
@@ -786,7 +787,7 @@ impl<T: SocketType> Socket<T> {
         let target = endpoint::connect_target(endpoint)?;
         let (id, key) = match &target {
             Target::Tcp(addr) => self.peers.connect(*addr),
-            Target::TcpHost { host, port } => self.peers.connect_host(host, *port),
+            Target::TcpHost { host, port, source } => self.peers.connect_host(host, *port, *source),
             #[cfg(unix)]
             Target::Ipc(path) => self.peers.connect_ipc(path),
             #[cfg(not(unix))]
