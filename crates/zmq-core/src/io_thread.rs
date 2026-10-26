@@ -23,6 +23,10 @@ use crate::{Connection, ConnectionConfig, EventKind, Inbound, Linger, Topics};
 /// Token of the waker that reports commands and pipe wakeups.
 const WAKER: Token = Token(0);
 
+/// How soon a listener tries again after an accept fails, as when the
+/// process is out of file descriptors.
+const ACCEPT_RETRY: Duration = Duration::from_millis(100);
+
 /// Work sent to an I/O thread.
 pub(crate) enum IoCommand {
     /// Connect and serve the pipes in the request.
@@ -664,6 +668,7 @@ impl EventLoop {
         let config = entry.config.clone();
         let endpoint = entry.endpoint.clone();
         let mut accepted = Vec::new();
+        let mut failed = false;
         loop {
             match entry.listener.accept() {
                 Ok(stream) => {
@@ -673,14 +678,20 @@ impl EventLoop {
                 Err(err) if err.kind() == io::ErrorKind::Interrupted => {}
                 Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
                 // A transient error such as too many open files: try again
-                // on the next readiness event.
+                // soon. Readiness is edge-triggered, so the connections
+                // still waiting would otherwise wait for a new one to come.
                 Err(err) => {
                     config
                         .monitor
                         .emit(&endpoint, EventKind::AcceptFailed(err.kind()));
+                    failed = true;
                     break;
                 }
             }
+        }
+        if failed {
+            self.timers
+                .push(Reverse((Instant::now() + ACCEPT_RETRY, id)));
         }
         for stream in accepted {
             let (connection, pipes) = SessionPipes::new(&config);

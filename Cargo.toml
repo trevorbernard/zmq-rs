@@ -19,6 +19,7 @@ criterion = "0.8"
 # features the build targets are used.
 dryoc = { version = "2", default-features = false, features = ["std"] }
 mio = { version = "1", features = ["net", "os-ext", "os-poll"] }
+libc = "0.2"
 proptest = { version = "1", default-features = false, features = ["std"] }
 # `all` for the TCP keepalive probe count.
 socket2 = { version = "0.6", features = ["all"] }

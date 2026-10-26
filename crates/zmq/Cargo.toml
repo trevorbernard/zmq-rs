@@ -22,5 +22,9 @@ zmtp.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 
+[target.'cfg(target_os = "linux")'.dev-dependencies]
+# setrlimit, to run a listener out of file descriptors in a test.
+libc.workspace = true
+
 [lints]
 workspace = true
