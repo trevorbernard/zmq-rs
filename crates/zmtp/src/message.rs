@@ -1,5 +1,6 @@
 //! A whole multipart message.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
@@ -33,12 +34,13 @@ impl MessageMetadata {
     /// Metadata of `properties`, in order of precedence: of two with the
     /// same name, the first is kept, as libzmq builds its map.
     pub fn new(properties: impl IntoIterator<Item = (Frame, Frame)>) -> Self {
-        let mut kept: Vec<(Frame, Frame)> = Vec::new();
-        for (name, value) in properties {
-            if !kept.iter().any(|(kept, _)| *kept == name) {
-                kept.push((name, value));
-            }
-        }
+        // A set, not a scan of what is kept: a peer chooses how many
+        // properties it announces.
+        let mut seen = HashSet::new();
+        let kept = properties
+            .into_iter()
+            .filter(|(name, _)| seen.insert(name.clone()))
+            .collect();
         Self(Arc::new(kept))
     }
 
@@ -525,5 +527,21 @@ mod tests {
         let mut msg = Message::new("a");
         msg.push("");
         assert_eq!(format!("{msg:?}"), r#"Message[Frame(b"a"), Frame(b"")]"#);
+    }
+
+    #[test]
+    fn metadata_keeps_the_first_of_each_name_however_many_a_peer_sends() {
+        let many = 100_000;
+        let properties = (0..many)
+            .map(|i| {
+                (
+                    Frame::from(format!("p{i}").into_bytes()),
+                    Frame::from("first"),
+                )
+            })
+            .chain([(Frame::from("p0"), Frame::from("second"))]);
+        let metadata = MessageMetadata::new(properties);
+        assert_eq!(metadata.iter().len(), many);
+        assert_eq!(metadata.get("p0"), Some(&b"first"[..]));
     }
 }
