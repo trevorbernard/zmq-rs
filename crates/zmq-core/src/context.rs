@@ -150,7 +150,8 @@ pub struct ConnectionConfig {
     /// TCP keepalive probes, off by default.
     pub tcp_keepalive: Option<TcpKeepalive>,
     /// How long the greeting and security handshake may take before the
-    /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s).
+    /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s). `None` or
+    /// zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
     /// Where listeners and connections report [`Event`]s. Shared by every
     /// connection made with a clone of this config.

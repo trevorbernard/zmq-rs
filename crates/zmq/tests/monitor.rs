@@ -194,6 +194,23 @@ fn a_silent_server_fails_the_handshake_without_detail() {
 }
 
 #[test]
+fn a_zero_handshake_timeout_means_none() {
+    let no_limit = || SocketOptions {
+        handshake_timeout: Some(Duration::ZERO),
+        ..SocketOptions::default()
+    };
+    let context = Context::new().unwrap();
+    let mut pull = context.socket_with::<Pull>(no_limit());
+    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let mut push = context.socket_with::<Push>(no_limit());
+    let mut client = push.monitor();
+    push.connect(&bound.to_string()).unwrap();
+    expect(&mut client, |kind| *kind == EventKind::HandshakeSucceeded);
+    push.send("through");
+    assert_eq!(pull.recv_timeout(FIVE), Some(zmq::Message::from("through")));
+}
+
+#[test]
 fn every_monitor_hears_every_event() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();

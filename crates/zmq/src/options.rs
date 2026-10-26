@@ -47,6 +47,7 @@ pub struct SocketOptions {
     /// drops an idle connection.
     pub tcp_keepalive: Option<TcpKeepalive>,
     /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
+    /// `None` or zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
 }
 

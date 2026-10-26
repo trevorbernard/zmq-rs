@@ -375,10 +375,12 @@ impl Engine {
         match self.stream.finish_connect() {
             Ok(true) => {
                 self.connected = true;
-                // As libzmq, the handshake clock starts once connected.
+                // As libzmq, the handshake clock starts once connected, and
+                // a zero timeout means none.
                 self.deadlines.handshake = self
                     .config
                     .handshake_timeout
+                    .filter(|timeout| !timeout.is_zero())
                     .map(|timeout| Instant::now() + timeout);
                 Ok(true)
             }
