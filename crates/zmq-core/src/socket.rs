@@ -1090,25 +1090,53 @@ impl ServerTable {
         }
     }
 
-    /// Sends `frame` to the client with `id`, without waiting. On `Full`,
-    /// `cx` is registered to hear when it has room.
+    /// Sends `frame` to the client with `id` if it is known and has room.
+    /// Never blocks.
     pub fn try_send(
         &mut self,
         peers: &mut PeerList,
         id: std::num::NonZeroU32,
         frame: Frame,
-        cx: &mut TaskContext<'_>,
     ) -> Result<(), ServerSendError> {
         self.sync(peers);
         let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
             return Err(ServerSendError::UnknownPeer(frame));
         };
-        peer.poll_send(Message::new(frame), cx)
+        peer.connection
+            .tx
+            .try_send(Message::new(frame))
             .map_err(|err| match err {
                 TrySendError::Full(message) => ServerSendError::Full(only_frame(message)),
                 // The client's session has ended.
                 TrySendError::Closed(message) => ServerSendError::UnknownPeer(only_frame(message)),
             })
+    }
+
+    /// Sends the frame in `slot` to the client with `id`, or returns
+    /// `Pending` with `cx` registered while that client is full. Fails with
+    /// the frame if no client has that id or it has gone.
+    pub fn poll_send(
+        &mut self,
+        peers: &mut PeerList,
+        id: std::num::NonZeroU32,
+        slot: &mut Option<Frame>,
+        cx: &mut TaskContext<'_>,
+    ) -> Poll<Result<(), Frame>> {
+        let Some(frame) = slot.take() else {
+            return Poll::Ready(Ok(()));
+        };
+        self.sync(peers);
+        let Some(peer) = self.by_id.get(&id).and_then(|&key| peers.get_mut(key)) else {
+            return Poll::Ready(Err(frame));
+        };
+        match peer.poll_send(Message::new(frame), cx) {
+            Ok(()) => Poll::Ready(Ok(())),
+            Err(TrySendError::Closed(message)) => Poll::Ready(Err(only_frame(message))),
+            Err(TrySendError::Full(message)) => {
+                *slot = Some(only_frame(message));
+                Poll::Pending
+            }
+        }
     }
 
     /// The id of the peer with `key`, once it is in the list.

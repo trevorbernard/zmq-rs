@@ -545,9 +545,8 @@ fn try_send_routed<T: SocketType<Routing = ServerTable>>(
     to: NonZeroU32,
     frame: Frame,
 ) -> Result<(), ServerSendError> {
-    let mut cx = noop();
-    let (peers, table) = socket.parts_accepting(&mut cx);
-    table.try_send(peers, to, frame, &mut cx)
+    let (peers, table) = socket.parts_accepting(&mut noop());
+    table.try_send(peers, to, frame)
 }
 
 /// Sends the frame in `slot` to `to`, waiting while it is full. Fails with
@@ -558,16 +557,8 @@ fn poll_send_routed<T: SocketType<Routing = ServerTable>>(
     slot: &mut Option<Frame>,
     cx: &mut TaskContext<'_>,
 ) -> Poll<Result<(), Frame>> {
-    let frame = slot.take().expect("polled again after completing");
     let (peers, table) = socket.parts_accepting(cx);
-    match table.try_send(peers, to, frame, cx) {
-        Ok(()) => Poll::Ready(Ok(())),
-        Err(ServerSendError::UnknownPeer(frame)) => Poll::Ready(Err(frame)),
-        Err(ServerSendError::Full(frame)) => {
-            *slot = Some(frame);
-            Poll::Pending
-        }
-    }
+    table.poll_send(peers, to, slot, cx)
 }
 
 /// Sends `frame` to `to`, waiting at most `timeout` while it is full.
