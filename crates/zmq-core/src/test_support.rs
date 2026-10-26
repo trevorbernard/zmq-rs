@@ -23,7 +23,7 @@ pub(crate) struct FakeSession {
 impl FakeSession {
     /// Completes the handshake, announcing `identity`.
     pub(crate) fn establish(&self, identity: &'static str) {
-        *self.connection_peer.lock().unwrap() = Some(Established {
+        self.connection_peer.set(Established {
             version: Version::V3_1,
             peer_socket_type: Some(SocketType::Dealer),
             peer_identity: Frame::from(identity),
@@ -41,7 +41,7 @@ impl FakeSession {
         self.to_socket
             .try_send(Subscription::Subscribe(Frame::new()).to_message())
             .expect("room for the implicit subscription");
-        *self.connection_peer.lock().unwrap() = Some(Established {
+        self.connection_peer.set(Established {
             version: Version::V1,
             peer_socket_type: None,
             peer_identity: Frame::new(),

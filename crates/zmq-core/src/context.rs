@@ -5,7 +5,7 @@ use std::fmt;
 use std::io;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use std::sync::mpsc;
@@ -343,17 +343,46 @@ impl Inbound {
 
 /// What the most recent handshake established, shared by a session and its
 /// connection. Written before any message from that handshake is delivered.
-pub(crate) type PeerSlot = Arc<Mutex<Option<Established>>>;
+#[derive(Debug, Clone, Default)]
+pub(crate) struct PeerSlot(Arc<PeerSlotInner>);
+
+#[derive(Debug, Default)]
+struct PeerSlotInner {
+    /// Raised once `established` is first set, so asking about a peer still
+    /// in its handshake, as routing does on every call, takes no lock.
+    set: AtomicBool,
+    established: Mutex<Option<Established>>,
+}
+
+impl PeerSlot {
+    pub(crate) fn set(&self, established: Established) {
+        // Poisoning is ignored: storing a value cannot be left half done.
+        *self
+            .0
+            .established
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner) = Some(established);
+        self.0.set.store(true, Ordering::Release);
+    }
+
+    fn get(&self) -> Option<Established> {
+        if !self.0.set.load(Ordering::Acquire) {
+            return None;
+        }
+        self.0
+            .established
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
 
 impl Connection {
     /// What the most recent handshake with the peer established, such as
     /// its identity and socket type. `None` until the first handshake
     /// completes; replaced after each reconnection.
     pub fn peer(&self) -> Option<Established> {
-        self.peer
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .clone()
+        self.peer.get()
     }
 }
 
@@ -570,10 +599,8 @@ fn pair(
     {
         return None;
     }
-    // Poisoning is ignored: each lock only stores a value, which a panic
-    // cannot leave half done.
-    *server.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(client_end));
-    *client.lock().unwrap_or_else(PoisonError::into_inner) = Some(introduce(server_end));
+    server.peer.set(introduce(client_end));
+    client.set(introduce(server_end));
     Some(server)
 }
 

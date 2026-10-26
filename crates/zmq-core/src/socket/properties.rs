@@ -154,7 +154,7 @@ fn established(identity: Vec<u8>) -> Established {
 }
 
 fn establish(session: &FakeSession, identity: Vec<u8>) {
-    *session.connection_peer.lock().unwrap() = Some(established(identity));
+    session.connection_peer.set(established(identity));
 }
 
 proptest! {

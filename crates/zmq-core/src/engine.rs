@@ -8,7 +8,7 @@
 
 use std::io::{self, Read};
 use std::mem;
-use std::sync::{PoisonError, mpsc};
+use std::sync::mpsc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -681,9 +681,8 @@ impl Engine {
                     .implicit_subscription
                     .then(|| Subscription::Subscribe(zmtp::Frame::new()).to_message());
                 // Published before any message from this peer can be
-                // delivered, so a ROUTER always knows who sent it. Poisoning
-                // is ignored: storing a value cannot be left half done.
-                *pipes.peer.lock().unwrap_or_else(PoisonError::into_inner) = Some(established);
+                // delivered, so a ROUTER always knows who sent it.
+                pipes.peer.set(established);
                 let encoder = Encoder::new(version);
                 // A SUB's topics, or a DISH's groups.
                 let dish = self.config.socket_type == SocketType::Dish;
