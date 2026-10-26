@@ -12,9 +12,9 @@ pub enum Reconnect {
     /// Wait `interval` plus a random fraction of it each time, like libzmq's
     /// `ZMQ_RECONNECT_IVL` (default 100 ms).
     Fixed { interval: Duration },
-    /// Wait `initial`, then double up to `max`, like libzmq's
-    /// `ZMQ_RECONNECT_IVL` with `ZMQ_RECONNECT_IVL_MAX`. Resets once a
-    /// connection succeeds.
+    /// Wait `initial`, then double up to `max`, each time plus a random
+    /// fraction of `initial`, like libzmq's `ZMQ_RECONNECT_IVL` with
+    /// `ZMQ_RECONNECT_IVL_MAX`. Resets once a connection succeeds.
     Backoff { initial: Duration, max: Duration },
 }
 
@@ -54,7 +54,9 @@ impl Retry {
                     Some(current) => current.saturating_mul(2).min(max),
                 };
                 self.current = Some(next);
-                Some(next)
+                // libzmq bounds the jitter by the base interval, not the
+                // current one.
+                Some(next + jitter(initial))
             }
         }
     }
@@ -72,7 +74,7 @@ fn jitter(bound: Duration) -> Duration {
     if nanos == 0 {
         return Duration::ZERO;
     }
-    // Each RandomState is freshly seeded, which is random enough for jitter.
+    // Each RandomState gets a new key, which is random enough for jitter.
     let random = u128::from(RandomState::new().hash_one(()));
     Duration::from_nanos((random % nanos) as u64)
 }
@@ -114,8 +116,11 @@ mod tests {
             max: MS(500),
         });
         let delays: Vec<Duration> = (0..5).map(|_| retry.next_delay().unwrap()).collect();
-        assert_eq!(delays, [MS(100), MS(200), MS(400), MS(500), MS(500)]);
+        for (delay, base) in delays.iter().zip([100, 200, 400, 500, 500]) {
+            assert!((MS(base)..MS(base + 100)).contains(delay), "{delays:?}");
+        }
         retry.reset();
-        assert_eq!(retry.next_delay(), Some(MS(100)));
+        let delay = retry.next_delay().unwrap();
+        assert!((MS(100)..MS(200)).contains(&delay), "{delay:?}");
     }
 }
