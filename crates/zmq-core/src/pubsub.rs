@@ -7,9 +7,9 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
+use std::mem;
 use std::task::{Context as TaskContext, Poll};
 
-use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
@@ -250,6 +250,13 @@ pub struct Publisher {
     manual: bool,
     /// Whether messages go to the peers they do not match instead.
     invert: bool,
+    /// Reads only peers that sent something, so that a publish does not
+    /// look at every peer.
+    upstream: FairQueue,
+    cursor: PeerCursor,
+    /// Peers whose handshake had not completed when last looked at for an
+    /// implicit subscription.
+    unsettled: Vec<PeerKey>,
 }
 
 #[derive(Debug, Default)]
@@ -258,9 +265,6 @@ struct PeerTopics {
     topics: Topics,
     /// In manual mode, what the peer asked for, as a set.
     requested: Topics,
-    /// Whether its handshake has been looked at for an implicit
-    /// subscription.
-    settled: bool,
 }
 
 impl Publisher {
@@ -294,7 +298,7 @@ impl Publisher {
         self.invert = on;
     }
 
-    /// The next event, or `Pending` with `cx` registered on every peer.
+    /// The next event, or `Pending` with `cx` woken once a peer sends more.
     /// Always `Pending` for a publisher made without events.
     pub fn poll_event(
         &mut self,
@@ -305,7 +309,7 @@ impl Publisher {
     }
 
     /// The next event and the peer it came from, if it is still here, or
-    /// `Pending` with `cx` registered on every peer.
+    /// `Pending` with `cx` woken once a peer sends more.
     pub fn poll_request(
         &mut self,
         peers: &mut PeerList,
@@ -357,16 +361,19 @@ impl Publisher {
         self.drain(peers, None);
     }
 
-    /// Reads everything peers have sent, registering `cx`, if given, with
-    /// each. Without one, nothing is registered, so a waker registered
-    /// earlier stays in place.
-    fn drain(&mut self, peers: &mut PeerList, mut cx: Option<&mut TaskContext<'_>>) {
+    /// Reads what peers have sent, registering `cx`, if given, to be woken
+    /// when any sends more. Without one, nothing is registered, so a waker
+    /// registered earlier stays in place.
+    fn drain(&mut self, peers: &mut PeerList, cx: Option<&mut TaskContext<'_>>) {
         let Self {
             subscribers,
             index,
             events,
             verbosity,
             manual,
+            upstream,
+            cursor,
+            unsettled,
             ..
         } = self;
         let mut changes = Changes {
@@ -376,44 +383,57 @@ impl Publisher {
             manual: *manual,
             from: None,
         };
-        peers.retain_mut(|peer| {
-            let entry = subscribers.entry(peer.key()).or_default();
-            changes.from = Some(peer.key());
-            if !entry.settled
-                && let Some(established) = peer.connection.peer()
+        for peer in cursor.added_since(peers) {
+            subscribers.insert(peer.key(), PeerTopics::default());
+            unsettled.push(peer.key());
+        }
+        unsettled.retain(|&key| {
+            let Some(peer) = peers.get(key) else {
+                return false;
+            };
+            let Some(established) = peer.connection.peer() else {
+                return true;
+            };
+            // A ZMTP 1.0 subscriber filters for itself and never says what
+            // it wants, so it gets everything.
+            if established.implicit_subscription
+                && let Some(entry) = subscribers.get_mut(&key)
             {
-                entry.settled = true;
-                // A ZMTP 1.0 subscriber filters for itself and never says
-                // what it wants, so it gets everything.
-                if established.implicit_subscription {
-                    changes.subscribe(entry, Frame::new());
-                }
+                changes.from = Some(key);
+                changes.subscribe(entry, Frame::new());
             }
-            loop {
-                let next = match cx.as_deref_mut() {
-                    Some(cx) => peer.connection.rx.poll_recv(cx),
-                    None => match peer.connection.rx.try_recv() {
-                        Ok(message) => Poll::Ready(Some(message)),
-                        Err(TryRecvError::Empty) => Poll::Pending,
-                        Err(TryRecvError::Closed) => Poll::Ready(None),
-                    },
-                };
-                match next {
-                    Poll::Ready(Some(message)) => match Subscription::from_message(&message) {
-                        Some(Subscription::Subscribe(topic)) => changes.subscribe(entry, topic),
-                        Some(Subscription::Cancel(topic)) => changes.cancel(entry, topic),
-                        None => changes.message(message),
-                    },
-                    Poll::Pending => break true,
-                    Poll::Ready(None) => {
-                        if let Some(entry) = subscribers.remove(&peer.key()) {
-                            changes.forget(entry);
-                        }
-                        break false;
-                    }
-                }
-            }
+            false
         });
+        let read = |key, message: Option<Message>| {
+            changes.from = Some(key);
+            let Some(message) = message else {
+                if let Some(entry) = subscribers.remove(&key) {
+                    changes.forget(entry);
+                }
+                return;
+            };
+            let entry = subscribers.entry(key).or_default();
+            match Subscription::from_message(&message) {
+                Some(Subscription::Subscribe(topic)) => changes.subscribe(entry, topic),
+                Some(Subscription::Cancel(topic)) => changes.cancel(entry, topic),
+                None => changes.message(message),
+            }
+        };
+        match cx {
+            Some(cx) => upstream.poll_drain(peers, cx, read),
+            None => upstream.drain(peers, read),
+        }
+        // Peers the socket removed, such as on disconnect.
+        if cursor.removed_since(peers) {
+            subscribers.retain(|&key, entry| {
+                if peers.get(key).is_some() {
+                    return true;
+                }
+                changes.from = Some(key);
+                changes.forget(mem::take(entry));
+                false
+            });
+        }
     }
 
     /// Sends `message` to every peer subscribed to it that has room.
@@ -963,6 +983,19 @@ mod tests {
         assert_eq!(peers.len(), 1);
         assert_eq!(publisher.send(&mut peers, msg("shared")), 1);
         assert_eq!(drain(&mut sb), [msg("shared")]);
+    }
+
+    #[test]
+    fn xpub_cancels_the_topics_of_a_peer_the_socket_drops() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+        let key = peers.iter().next().unwrap().key();
+        // As a disconnect drops the peers of its endpoint.
+        assert!(peers.remove_key(key));
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("x")]);
     }
 
     #[test]

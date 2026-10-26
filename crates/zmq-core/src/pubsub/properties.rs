@@ -1,7 +1,7 @@
 //! Properties of subscription matching and XPUB's reporting, checked
 //! against naive models over generated traffic from several peers.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::task::Waker;
 
 use proptest::prelude::*;
@@ -156,6 +156,8 @@ struct ModelPeer {
     settled: bool,
     /// Closed and noticed: out of the list.
     gone: bool,
+    /// Waiting in `Model::turn` to be read.
+    in_turn: bool,
 }
 
 /// RFC 29's PUB and XPUB as `docs/rfc-compliance.md` describes them.
@@ -164,6 +166,9 @@ struct Model {
     mode: Mode,
     invert: bool,
     peers: Vec<ModelPeer>,
+    /// Peers to read, in the order they woke: new ones, then each as it
+    /// sends or closes after being read through.
+    turn: VecDeque<usize>,
     /// How many peers subscribe to each topic.
     everyone: BTreeMap<Vec<u8>, usize>,
     events: Vec<(usize, XPubEvent)>,
@@ -183,7 +188,16 @@ impl Model {
         }
     }
 
-    /// What reading every peer does, in order.
+    /// The peer sent something or closed: it is read again.
+    fn wake(&mut self, i: usize) {
+        if !self.peers[i].in_turn {
+            self.peers[i].in_turn = true;
+            self.turn.push_back(i);
+        }
+    }
+
+    /// What reading peers does: ZMTP 1.0 peers are settled first, then each
+    /// peer that woke is read through, in the order it woke.
     fn sync(&mut self) {
         for i in 0..self.peers.len() {
             if self.peers[i].gone {
@@ -194,6 +208,9 @@ impl Model {
                 self.peers[i].settled = true;
                 self.subscribe(i, Vec::new());
             }
+        }
+        while let Some(i) = self.turn.pop_front() {
+            self.peers[i].in_turn = false;
             for sent in std::mem::take(&mut self.peers[i].queued) {
                 match sent {
                     Upstream::Subscribe(topic) => self.subscribe(i, topic),
@@ -365,7 +382,13 @@ proptest! {
         let mut model = Model {
             mode,
             invert,
-            peers: (0..count).map(|_| ModelPeer::default()).collect(),
+            peers: (0..count)
+                .map(|_| ModelPeer {
+                    in_turn: true,
+                    ..ModelPeer::default()
+                })
+                .collect(),
+            turn: (0..count).collect(),
             everyone: BTreeMap::new(),
             events: Vec::new(),
         };
@@ -380,10 +403,12 @@ proptest! {
                     let Some(session) = &mut sessions[i] else { continue };
                     session.to_socket.try_send(sent.message()).expect("room");
                     model.peers[i].queued.push(sent);
+                    model.wake(i);
                 }
                 Op::Close(i) => {
                     if sessions[i].take().is_some() {
                         model.peers[i].closed = true;
+                        model.wake(i);
                     }
                 }
                 Op::Legacy(i) => {

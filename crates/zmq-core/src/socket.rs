@@ -641,26 +641,17 @@ impl FairQueue {
             while let Some(index) = self.turn.pop_front() {
                 let waiting = &mut self.waiting[index];
                 let peer = &mut peers.peers[index];
-                match peer
+                let polled = peer
                     .connection
                     .rx
-                    .poll_recv(&mut TaskContext::from_waker(&waiting.waker))
-                {
+                    .poll_recv(&mut TaskContext::from_waker(&waiting.waker));
+                match polled {
                     Poll::Ready(Some(message)) => {
                         self.turn.push_back(index);
                         return Poll::Ready((waiting.key, message));
                     }
                     // Session gone and everything it delivered has been read.
-                    Poll::Ready(None) => {
-                        peers.remove(index);
-                        self.cursor.skip_removals(peers);
-                        self.waiting.remove(index);
-                        for position in &mut self.turn {
-                            if *position > index {
-                                *position -= 1;
-                            }
-                        }
-                    }
+                    Poll::Ready(None) => self.forget(peers, index),
                     Poll::Pending => waiting.in_turn = false,
                 }
             }
@@ -669,6 +660,69 @@ impl FairQueue {
             self.ready.task.register(cx.waker());
             if !self.ready.any.load(Ordering::Acquire) {
                 return Poll::Pending;
+            }
+        }
+    }
+
+    /// Hands `f` everything peers have sent, a peer at a time, as libzmq's
+    /// XPUB reads a pipe through once it is activated, then `None` for a
+    /// peer whose session is gone. Peers are read in the order they woke.
+    /// Registers no task, so one registered earlier stays in place.
+    pub(crate) fn drain(
+        &mut self,
+        peers: &mut PeerList,
+        mut f: impl FnMut(PeerKey, Option<Message>),
+    ) {
+        self.sync(peers);
+        self.take_woken();
+        while let Some(index) = self.turn.pop_front() {
+            let waiting = &mut self.waiting[index];
+            let key = waiting.key;
+            let mut cx = TaskContext::from_waker(&waiting.waker);
+            let rx = &mut peers.peers[index].connection.rx;
+            let closed = loop {
+                match rx.poll_recv(&mut cx) {
+                    Poll::Ready(Some(message)) => f(key, Some(message)),
+                    Poll::Ready(None) => break true,
+                    Poll::Pending => break false,
+                }
+            };
+            if closed {
+                self.forget(peers, index);
+                f(key, None);
+            } else {
+                self.waiting[index].in_turn = false;
+            }
+        }
+    }
+
+    /// As [`drain`](Self::drain), then registers `cx` to be woken once any
+    /// peer sends more.
+    pub(crate) fn poll_drain(
+        &mut self,
+        peers: &mut PeerList,
+        cx: &mut TaskContext<'_>,
+        mut f: impl FnMut(PeerKey, Option<Message>),
+    ) {
+        loop {
+            self.drain(peers, &mut f);
+            // Registered before looking again, as in `poll_recv`.
+            self.ready.task.register(cx.waker());
+            if !self.ready.any.load(Ordering::Acquire) {
+                return;
+            }
+        }
+    }
+
+    /// Drops the peer at `index`, whose session is gone and everything it
+    /// delivered read.
+    fn forget(&mut self, peers: &mut PeerList, index: usize) {
+        peers.remove(index);
+        self.cursor.skip_removals(peers);
+        self.waiting.remove(index);
+        for position in &mut self.turn {
+            if *position > index {
+                *position -= 1;
             }
         }
     }

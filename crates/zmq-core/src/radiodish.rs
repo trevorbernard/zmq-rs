@@ -6,16 +6,20 @@
 use std::collections::{HashMap, HashSet};
 use std::task::{Context as TaskContext, Poll};
 
-use zmq_pipe::TryRecvError;
 use zmtp::{Frame, Group, Membership, Message};
 
 use crate::FairQueue;
-use crate::socket::{PeerCursor, PeerKey, PeerList};
+use crate::socket::{PeerCursor, PeerList, PeerSet};
 
-/// RADIO's routing: the groups each peer joined, and fan-out to them.
+/// RADIO's routing: the peers in each group, and fan-out to them.
 #[derive(Debug, Default)]
 pub struct Radio {
-    joined: HashMap<PeerKey, HashSet<Group>>,
+    /// As libzmq's `radio_t`, so a message goes only to its group's peers.
+    members: HashMap<Group, PeerSet>,
+    /// Reads only peers that sent something, so that a send does not look
+    /// at every peer.
+    upstream: FairQueue,
+    cursor: PeerCursor,
 }
 
 /// DISH's routing: the socket's groups, told to every peer, and filtering
@@ -32,27 +36,33 @@ impl Radio {
     /// Applies the joins and leaves peers have sent, and forgets peers that
     /// are gone. Anything else peers send is discarded.
     pub fn sync(&mut self, peers: &mut PeerList) {
-        let joined = &mut self.joined;
-        peers.retain_mut(|peer| {
-            let groups = joined.entry(peer.key()).or_default();
-            loop {
-                match peer.connection.rx.try_recv() {
-                    Ok(message) => match Membership::from_message(&message) {
-                        Some(Membership::Join(group)) => {
-                            groups.insert(group);
-                        }
-                        Some(Membership::Leave(group)) => {
-                            groups.remove(&group);
-                        }
-                        None => {}
-                    },
-                    Err(TryRecvError::Empty) => break true,
-                    Err(TryRecvError::Closed) => break false,
+        let members = &mut self.members;
+        // Peers that are gone are forgotten below, with those the socket
+        // removed.
+        self.upstream.drain(peers, |key, message| {
+            let Some(message) = message else {
+                return;
+            };
+            match Membership::from_message(&message) {
+                Some(Membership::Join(group)) => {
+                    members.entry(group).or_default().insert(key);
                 }
+                Some(Membership::Leave(group)) => {
+                    if let Some(joined) = members.get_mut(&group) {
+                        joined.remove(&key);
+                        if joined.is_empty() {
+                            members.remove(&group);
+                        }
+                    }
+                }
+                None => {}
             }
         });
-        if joined.len() > peers.len() {
-            joined.retain(|&key, _| peers.get(key).is_some());
+        if self.cursor.removed_since(peers) {
+            self.members.retain(|_, members| {
+                members.retain(|&key| peers.get(key).is_some());
+                !members.is_empty()
+            });
         }
     }
 
@@ -61,16 +71,17 @@ impl Radio {
     /// how many peers it went to.
     pub fn send(&mut self, peers: &mut PeerList, group: &Group, body: Frame) -> usize {
         self.sync(peers);
+        let Some(members) = self.members.get(group) else {
+            return 0;
+        };
         // On the wire: the group, then the body (RFC 48).
         let mut message = Message::new(Frame::copy_from_slice(group.as_slice()));
         message.push(body);
         let mut sent = 0;
-        for peer in peers.iter_mut() {
-            let wanted = self
-                .joined
-                .get(&peer.key())
-                .is_some_and(|groups| groups.contains(group));
-            if wanted && peer.connection.tx.try_send(message.clone()).is_ok() {
+        for &key in members {
+            if let Some(peer) = peers.get_mut(key)
+                && peer.connection.tx.try_send(message.clone()).is_ok()
+            {
                 sent += 1;
             }
         }
