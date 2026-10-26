@@ -97,6 +97,15 @@ impl Output {
         if self.is_empty() {
             self.buf.clear();
             self.pos = 0;
+        } else if self.pos > 0 && self.pos >= self.buf.len() - self.pos {
+            // A connection that never drains fully would otherwise keep
+            // everything it sent. Moving what is left costs no more than
+            // writing what was dropped did.
+            self.buf.drain(..self.pos);
+            for (at, _) in &mut self.shared {
+                *at -= self.pos;
+            }
+            self.pos = 0;
         }
         Ok(progressed)
     }
@@ -248,6 +257,36 @@ mod tests {
         let mut all = expected;
         all.extend_from_slice(b"more");
         assert_eq!(stream.written, all);
+    }
+
+    #[test]
+    fn a_connection_that_never_drains_fully_keeps_only_what_is_unwritten() {
+        let mut output = Output::default();
+        let mut expected = Vec::new();
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: 0,
+            vectored: 0,
+        };
+        for round in 0..1000u32 {
+            // Refilled while under a batch, as the engine refills, and
+            // drained by less than that each time.
+            while output.len() < 4096 {
+                let copied = round.to_be_bytes().repeat(64);
+                expected.extend_from_slice(&copied);
+                output.buf.extend_from_slice(&copied);
+                let shared = Bytes::from(vec![round as u8; 300]);
+                expected.extend_from_slice(&shared);
+                output.push_shared(shared);
+            }
+            stream.budget = 1000;
+            output.write_to(&mut stream).unwrap();
+            assert!(output.buf.len() <= 2 * output.len(), "round {round}");
+        }
+        stream.budget = usize::MAX;
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(stream.written, expected);
     }
 
     #[test]
