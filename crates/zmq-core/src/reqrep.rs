@@ -90,17 +90,15 @@ impl Requester {
         let id = self
             .correlate
             .then(|| self.next_id.wrapping_add(1).to_be_bytes());
-        let mut request = match id {
+        let (mut request, envelope) = match id {
             Some(id) => {
                 let mut request = Message::new(Frame::copy_from_slice(&id));
                 request.push(Frame::new());
-                request
+                (request, 2)
             }
-            None => Message::new(Frame::new()),
+            None => (Message::new(Frame::new()), 1),
         };
-        // Cloning a message bumps reference counts or copies small frames;
-        // it keeps the body to hand back if no peer has room.
-        request.extend(body.clone());
+        request.extend(body);
         match self.balancer.poll_send(peers, request, cx) {
             Ok(peer) => {
                 if id.is_some() {
@@ -108,7 +106,10 @@ impl Requester {
                 }
                 Ok(Outstanding { peer, id })
             }
-            Err(_) => Err(body),
+            Err(refused) => {
+                let body: Vec<Frame> = refused.into_iter().skip(envelope).collect();
+                Err(Message::try_from(body).expect("a request has a body"))
+            }
         }
     }
 
