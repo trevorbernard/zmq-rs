@@ -5,6 +5,7 @@
 //! any pipe that becomes ready wakes the task, which polls again.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fmt;
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
 use std::io;
 use std::mem;
@@ -848,6 +849,17 @@ pub enum RouterSendError {
     Full(Message),
 }
 
+impl fmt::Display for RouterSendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::UnknownRoutingId(_) => "no peer has that routing id",
+            Self::Full(_) => "the peer's queue is full",
+        })
+    }
+}
+
+impl std::error::Error for RouterSendError {}
+
 impl Default for RouterTable {
     fn default() -> Self {
         Self {
@@ -1003,6 +1015,19 @@ pub enum ServerSendError {
     /// The client's queue is full. The frame is handed back.
     Full(Frame),
 }
+
+#[cfg(feature = "draft")]
+impl fmt::Display for ServerSendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoSuchClient(_) => "no client has that id",
+            Self::Full(_) => "the client's queue is full",
+        })
+    }
+}
+
+#[cfg(feature = "draft")]
+impl std::error::Error for ServerSendError {}
 
 #[cfg(feature = "draft")]
 impl Default for ServerTable {

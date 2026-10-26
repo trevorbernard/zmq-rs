@@ -575,6 +575,25 @@ impl fmt::Display for RecvTimeoutError {
 
 impl std::error::Error for RecvTimeoutError {}
 
+impl<T> fmt::Display for TrySendError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::Full(_) => "pipe is full",
+            Self::Closed(_) => "pipe is closed",
+        })
+    }
+}
+
+impl<T: fmt::Debug> std::error::Error for TrySendError<T> {}
+
+impl<T> fmt::Display for Closed<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("pipe is closed")
+    }
+}
+
+impl<T: fmt::Debug> std::error::Error for Closed<T> {}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -693,6 +693,17 @@ impl fmt::Display for NoSuchPeer {
 
 impl std::error::Error for NoSuchPeer {}
 
+impl fmt::Display for PeerSendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::NoSuchPeer(_) => "no peer has that id",
+            Self::Full(_) => "the peer's queue is full",
+        })
+    }
+}
+
+impl std::error::Error for PeerSendError {}
+
 impl fmt::Display for NoSuchClient {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("no client has that id")
