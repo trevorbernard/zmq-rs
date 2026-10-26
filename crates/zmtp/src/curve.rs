@@ -31,15 +31,14 @@ use dryoc::classic::crypto_box::{
 use zeroize::Zeroizing;
 
 use crate::codec::counted_size;
-use crate::command::{encode_metadata, parse_metadata};
+use crate::command::{encode_metadata, parse_metadata, split_name};
 use crate::handshake::{
     Rejection, ServerConfig, accept_peer, command_body, local_metadata, malformed, require_zmtp_3,
     unexpected, write_raw_command, zap_verdict,
 };
 use crate::{
-    Command, CommandError, Encoder, Established, Frame, HandshakeError, Identity, Incoming,
-    Keypair, Message, Metadata, PeerGreeting, PublicKey, SocketType, Version, ZapCredentials,
-    ZapReply, ZapRequest,
+    Command, Encoder, Established, Frame, HandshakeError, Identity, Incoming, Keypair, Message,
+    Metadata, PeerGreeting, PublicKey, SocketType, Version, ZapCredentials, ZapReply, ZapRequest,
 };
 
 const TAG: usize = 16;
@@ -742,15 +741,9 @@ fn random<const N: usize>() -> [u8; N] {
     bytes
 }
 
-/// A command body's name and data.
+/// A command body's name and data, as [`Command::parse`] splits them.
 fn split_command(body: &[u8]) -> Result<(&[u8], &[u8]), HandshakeError> {
-    let (&len, rest) = body
-        .split_first()
-        .ok_or(HandshakeError::MalformedCommand(CommandError::MissingName))?;
-    rest.split_at_checked(usize::from(len))
-        .ok_or(HandshakeError::MalformedCommand(CommandError::Malformed {
-            command: "command name",
-        }))
+    split_name(body).map_err(HandshakeError::MalformedCommand)
 }
 
 fn peer_error(body: &[u8]) -> HandshakeError {
@@ -1181,6 +1174,25 @@ mod tests {
                 start().receive(Incoming::Command(Frame::from(body)), &mut Vec::new()),
                 Err(HandshakeError::MalformedCommand(_))
             ));
+        }
+    }
+
+    #[test]
+    fn a_name_longer_than_its_command_is_missing_as_command_parse_says() {
+        let server_keys = Keypair::generate();
+        for body in [&b"\x05HEL"[..], b"\x00", b""] {
+            let server =
+                CurveServer::start(server_config(SocketType::Router), &server_keys, &V3_1).unwrap();
+            let received = server.receive(Incoming::Command(Frame::from(body)), &mut Vec::new());
+            assert!(
+                matches!(
+                    received,
+                    Err(HandshakeError::MalformedCommand(
+                        crate::CommandError::MissingName
+                    ))
+                ),
+                "{body:?}"
+            );
         }
     }
 

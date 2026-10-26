@@ -113,6 +113,16 @@ pub enum CommandError {
     EmptyPropertyName,
 }
 
+/// A command body's name and data. The name is a short string, and must
+/// not be empty.
+pub(crate) fn split_name(body: &[u8]) -> Result<(&[u8], &[u8]), CommandError> {
+    let (&name_len, rest) = body.split_first().ok_or(CommandError::MissingName)?;
+    match rest.split_at_checked(usize::from(name_len)) {
+        Some((name, data)) if !name.is_empty() => Ok((name, data)),
+        _ => Err(CommandError::MissingName),
+    }
+}
+
 /// The most octets in a short string, which a length octet precedes
 /// (RFC 23, 37): a command name, an ERROR reason, a group, or a PLAIN
 /// credential.
@@ -124,11 +134,7 @@ const DECISECOND_NANOS: u128 = 100_000_000;
 impl Command {
     /// Parses a command frame body.
     pub fn parse(body: &[u8]) -> Result<Self, CommandError> {
-        let (&name_len, rest) = body.split_first().ok_or(CommandError::MissingName)?;
-        let (name, data) = match rest.split_at_checked(usize::from(name_len)) {
-            Some((name, data)) if !name.is_empty() => (name, data),
-            _ => return Err(CommandError::MissingName),
-        };
+        let (name, data) = split_name(body)?;
         match name {
             b"READY" => parse_metadata(data, "READY").map(Self::Ready),
             b"ERROR" => {
