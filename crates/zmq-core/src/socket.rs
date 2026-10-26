@@ -522,12 +522,6 @@ impl Peers {
         });
     }
 
-    /// Drops peers whose sessions are gone, discarding anything they sent.
-    /// For patterns that never receive, such as PUSH.
-    pub fn prune_send_only(&mut self) {
-        self.list.retain_mut(Peer::discard_input);
-    }
-
     /// The peers, for a routing strategy.
     pub fn list_mut(&mut self) -> &mut PeerList {
         &mut self.list
@@ -575,9 +569,22 @@ fn add(
 #[derive(Debug, Default)]
 pub struct LoadBalancer {
     next: usize,
+    /// For a socket that never receives: see [`send_only`](Self::send_only).
+    discards_input: bool,
 }
 
 impl LoadBalancer {
+    /// A balancer for a socket that never receives, such as PUSH. As each
+    /// peer's turn comes, what it sent is discarded, and it is dropped once
+    /// its session is gone. Round robin brings every peer's turn in time,
+    /// at the cost of a look at each peer passed over, not at every peer.
+    pub fn send_only() -> Self {
+        Self {
+            discards_input: true,
+            ..Self::default()
+        }
+    }
+
     /// Sends `message` to the next peer with room and returns that peer.
     /// Hands the message back, with `cx` registered on every peer, if none
     /// has room or there are no peers.
@@ -593,6 +600,10 @@ impl LoadBalancer {
         for offset in 0..count {
             let index = (self.next + offset) % count;
             let peer = &mut peers.peers[index];
+            if self.discards_input && !peer.discard_input() {
+                gone.push(peer.key);
+                continue;
+            }
             // Closed peers are skipped; full ones register `cx`.
             match peer.poll_send(message, cx) {
                 Ok(()) => {
@@ -1369,6 +1380,31 @@ mod tests {
         assert!(lb.poll_send(&mut peers, msg("x"), &mut cx).is_ok());
         assert_eq!(drain(&mut sc), [msg("x")]);
         assert_eq!(peers.len(), 2, "the gone peer with unread input stays");
+    }
+
+    #[test]
+    fn a_send_only_balancer_discards_input_and_drops_peers_that_are_gone() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        sa.to_socket.try_send(msg("ignored")).unwrap();
+        sb.to_socket.try_send(msg("unread")).unwrap();
+        drop(sb);
+        let mut peers = list(vec![a, b]);
+        let mut lb = LoadBalancer::send_only();
+        let mut cx = noop_context();
+        assert!(lb.poll_send(&mut peers, msg("1"), &mut cx).is_ok());
+        assert!(lb.poll_send(&mut peers, msg("2"), &mut cx).is_ok());
+        assert_eq!(drain(&mut sa), [msg("1"), msg("2")]);
+        assert_eq!(
+            peers.len(),
+            1,
+            "the gone peer is dropped, its input discarded"
+        );
+        let rx = &mut peers.iter_mut().next().unwrap().connection.rx;
+        assert!(
+            rx.try_recv().is_err(),
+            "what the live peer sent is discarded"
+        );
     }
 
     #[test]

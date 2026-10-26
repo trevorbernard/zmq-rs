@@ -272,6 +272,11 @@ impl SocketType for Scatter {
     const KIND: zmtp::SocketType = zmtp::SocketType::Scatter;
     type Routing = LoadBalancer;
     type Received = Infallible;
+
+    /// SCATTER never receives: what peers send is discarded.
+    fn routing() -> LoadBalancer {
+        LoadBalancer::send_only()
+    }
 }
 
 impl sealed::Sealed for Gather {}
@@ -752,9 +757,6 @@ impl WaitsForRoom for Client {
 
 impl WaitsForRoom for Scatter {
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
-        // As `poll_send`: SCATTER discards what peers send and drops those
-        // gone.
-        socket.prune_send_only();
         let (peers, balancer) = socket.parts_accepting(cx);
         balancer.poll_ready(peers, cx)
     }
@@ -764,9 +766,6 @@ impl WaitsForRoom for Scatter {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        // SCATTER never receives: discard anything peers send, and drop
-        // peers that are gone.
-        socket.prune_send_only();
         let (peers, balancer) = socket.parts_accepting(cx);
         poll_load_balanced(peers, balancer, slot, cx)
     }

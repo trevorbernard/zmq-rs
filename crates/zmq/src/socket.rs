@@ -312,8 +312,6 @@ impl Receives for Router {
 
 impl WaitsForRoom for Push {
     fn poll_room(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<()> {
-        // As `poll_send`: PUSH discards what peers send and drops those gone.
-        socket.peers.prune_send_only();
         socket.peers.accept(cx);
         socket.routing.poll_ready(socket.peers.list_mut(), cx)
     }
@@ -323,9 +321,6 @@ impl WaitsForRoom for Push {
         slot: &mut Option<Message>,
         cx: &mut TaskContext<'_>,
     ) -> Poll<()> {
-        // PUSH never receives: discard anything peers send, and drop peers
-        // that are gone.
-        socket.peers.prune_send_only();
         poll_load_balanced(&mut socket.peers, &mut socket.routing, slot, cx)
     }
 }
@@ -527,6 +522,11 @@ impl SocketType for Push {
     const KIND: zmtp::SocketType = zmtp::SocketType::Push;
     type Routing = LoadBalancer;
     type Received = Infallible;
+
+    /// PUSH never receives: what peers send is discarded.
+    fn routing() -> LoadBalancer {
+        LoadBalancer::send_only()
+    }
 }
 
 impl sealed::Sealed for Pull {}
@@ -655,13 +655,6 @@ impl<T: SocketType> Socket<T> {
             pending: None,
             _type: PhantomData,
         }
-    }
-
-    /// Drops peers that are gone and discards what peers sent, for
-    /// patterns that never receive.
-    #[cfg(feature = "draft")]
-    pub(crate) fn prune_send_only(&mut self) {
-        self.peers.prune_send_only();
     }
 
     /// Takes in peers the socket's listeners accepted, registering `cx`
