@@ -287,17 +287,21 @@ impl Decoder {
         &mut self,
         read: impl FnOnce(ReadInto<'_>) -> Result<usize, E>,
     ) -> Result<usize, E> {
-        if let (Some(body), State::Body { size, .. }) = (&mut self.body, self.state) {
+        if let (Some(body), State::Body { size, .. }) = (&mut self.body, self.state)
+            && body.len() < size
+        {
             let limit = size - body.len();
             let before = body.len();
             let result = read(ReadInto::Append(body, limit));
             debug_assert!(body.len() - before <= limit, "read past the frame");
             return result;
         }
-        // What the frame being read still lacks; nothing yet for a header.
+        // What the frame being read still lacks: nothing yet for a header,
+        // nor for a body read apart and complete, which `decode` takes next.
+        // What is read now follows it, as a header does.
         let remaining = match self.state {
-            State::Header => 0,
-            State::Body { size, .. } => size.saturating_sub(self.filled),
+            State::Body { size, .. } if self.body.is_none() => size.saturating_sub(self.filled),
+            _ => 0,
         };
         let wanted = remaining.clamp(READ_SIZE, MAX_RESERVE);
         let target = wanted.min(MAX_READ);
@@ -1042,6 +1046,43 @@ mod tests {
         })
         .unwrap();
         assert_eq!(offered, Some((100, BODY_APART - 100)));
+    }
+
+    #[test]
+    fn a_complete_body_is_not_offered_again_so_a_read_never_gets_no_room() {
+        let mut d = decoder(Version::V3_1);
+        let mut wire = Vec::new();
+        let big = message(&[&vec![1; BODY_APART]]);
+        Encoder::new(Version::V3_1).encode(&big, &mut wire);
+        let header = 9;
+        d.extend_from_slice(&wire[..header]);
+        assert_eq!(d.decode().unwrap(), None);
+        let body = &wire[header..];
+        d.fill_into(|into| match into {
+            ReadInto::Append(vec, limit) => {
+                assert_eq!(limit, body.len());
+                vec.extend_from_slice(body);
+                Ok::<_, ()>(body.len())
+            }
+            ReadInto::Slice(_) => panic!("the body is read apart"),
+        })
+        .unwrap();
+        // Filled again before decoding: the next frame goes to the buffer.
+        let mut next = Vec::new();
+        Encoder::new(Version::V3_1).encode(&message(&[b"next"]), &mut next);
+        let read = d
+            .fill(|buf| {
+                assert!(!buf.is_empty(), "a read is never offered no room");
+                buf[..next.len()].copy_from_slice(&next);
+                Ok::<_, ()>(next.len())
+            })
+            .unwrap();
+        assert_eq!(read, next.len());
+        assert_eq!(d.decode().unwrap(), Some(Incoming::Message(big)));
+        assert_eq!(
+            d.decode().unwrap(),
+            Some(Incoming::Message(message(&[b"next"])))
+        );
     }
 
     #[test]
