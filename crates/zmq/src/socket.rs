@@ -37,6 +37,13 @@ pub trait SocketType: sealed::Sealed + 'static {
     /// What one receive yields, as a poll holds it until it is taken.
     #[doc(hidden)]
     type Received: Send;
+
+    /// A new socket's routing. Types that share a routing but set it up
+    /// differently, as XPUB does a PUB's, say how.
+    #[doc(hidden)]
+    fn routing() -> Self::Routing {
+        Self::Routing::default()
+    }
 }
 
 /// A socket type that can keep only the latest message, as libzmq's
@@ -103,8 +110,6 @@ impl Routing for Replier {}
 impl Routing for DealerRouting {}
 impl Routing for RouterRouting {}
 impl Routing for Publisher {}
-impl Routing for XPubRouting {}
-impl Routing for ManualXPubRouting {}
 impl Routing for PairRouting {}
 
 impl Routing for Subscriber {
@@ -112,26 +117,6 @@ impl Routing for Subscriber {
     /// so it publishes to us even before we next receive.
     fn connected(&mut self, peers: &mut PeerList) {
         self.greet(peers);
-    }
-}
-
-/// XSUB's routing: SUB's, delivering every message, as libzmq's XSUB
-/// does. Only SUB filters by topic.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct XSubRouting(Subscriber);
-
-impl Default for XSubRouting {
-    fn default() -> Self {
-        let mut subscriber = Subscriber::default();
-        subscriber.set_deliver_all(true);
-        Self(subscriber)
-    }
-}
-
-impl Routing for XSubRouting {
-    fn connected(&mut self, peers: &mut PeerList) {
-        self.0.connected(peers);
     }
 }
 
@@ -261,7 +246,7 @@ impl Receives for Sub {
 impl Receives for XPub {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<XPubEvent> {
         socket.peers.accept(cx);
-        socket.routing.0.poll_event(socket.peers.list_mut(), cx)
+        socket.routing.poll_event(socket.peers.list_mut(), cx)
     }
 }
 
@@ -271,14 +256,14 @@ impl Receives for ManualXPub {
         cx: &mut TaskContext<'_>,
     ) -> Poll<(Option<zmq_core::PeerKey>, XPubEvent)> {
         socket.peers.accept(cx);
-        socket.routing.0.poll_request(socket.peers.list_mut(), cx)
+        socket.routing.poll_request(socket.peers.list_mut(), cx)
     }
 }
 
 impl Receives for XSub {
     fn poll_next(socket: &mut Socket<Self>, cx: &mut TaskContext<'_>) -> Poll<Message> {
         socket.peers.accept(cx);
-        socket.routing.0.poll_recv(socket.peers.list_mut(), cx)
+        socket.routing.poll_recv(socket.peers.list_mut(), cx)
     }
 }
 
@@ -452,22 +437,16 @@ pub enum XPub {}
 #[derive(Debug)]
 pub enum XSub {}
 
-/// XPUB's routing: a publisher that keeps its peers' events.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct XPubRouting(Publisher);
-
-impl Default for XPubRouting {
-    fn default() -> Self {
-        Self(Publisher::with_events())
-    }
-}
-
 impl sealed::Sealed for XPub {}
 impl SocketType for XPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
-    type Routing = XPubRouting;
+    type Routing = Publisher;
     type Received = XPubEvent;
+
+    /// A publisher that keeps its peers' events.
+    fn routing() -> Publisher {
+        Publisher::with_events()
+    }
 }
 
 /// An XPUB that decides its peers' subscriptions, as libzmq's
@@ -478,30 +457,31 @@ impl SocketType for XPub {
 #[derive(Debug)]
 pub enum ManualXPub {}
 
-/// ManualXPub's routing: a publisher that leaves subscriptions to the
-/// application.
-#[doc(hidden)]
-#[derive(Debug)]
-pub struct ManualXPubRouting(Publisher);
-
-impl Default for ManualXPubRouting {
-    fn default() -> Self {
-        Self(Publisher::manual())
-    }
-}
-
 impl sealed::Sealed for ManualXPub {}
 impl SocketType for ManualXPub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XPub;
-    type Routing = ManualXPubRouting;
+    type Routing = Publisher;
     type Received = (Option<zmq_core::PeerKey>, XPubEvent);
+
+    /// A publisher that leaves subscriptions to the application.
+    fn routing() -> Publisher {
+        Publisher::manual()
+    }
 }
 
 impl sealed::Sealed for XSub {}
 impl SocketType for XSub {
     const KIND: zmtp::SocketType = zmtp::SocketType::XSub;
-    type Routing = XSubRouting;
+    type Routing = Subscriber;
     type Received = Message;
+
+    /// SUB's, delivering every message, as libzmq's XSUB does. Only SUB
+    /// filters by topic.
+    fn routing() -> Subscriber {
+        let mut subscriber = Subscriber::default();
+        subscriber.set_deliver_all(true);
+        subscriber
+    }
 }
 
 /// Talks to exactly one other PAIR socket, both ways (RFC 31). The first
@@ -598,8 +578,8 @@ impl SocketType for Rep {
 #[doc(hidden)]
 #[derive(Debug, Default)]
 pub struct DealerRouting {
-    send: LoadBalancer,
-    recv: FairQueue,
+    pub(crate) send: LoadBalancer,
+    pub(crate) recv: FairQueue,
 }
 
 /// ROUTER's routing: fair-queued receives tagged by routing id.
@@ -682,7 +662,7 @@ impl<T: SocketType> Socket<T> {
         };
         Self {
             peers: Peers::new(context, config),
-            routing: T::Routing::default(),
+            routing: T::routing(),
             bound: Vec::new(),
             connected: Vec::new(),
             pending: None,
@@ -958,28 +938,11 @@ impl Socket<Pair> {
 
 /// A socket type that publishes to subscribers: PUB, XPUB and
 /// [`ManualXPub`].
-pub trait Publishes: SocketType {
-    #[doc(hidden)]
-    fn publisher(routing: &mut Self::Routing) -> &mut Publisher;
-}
+pub trait Publishes: SocketType<Routing = Publisher> {}
 
-impl Publishes for Pub {
-    fn publisher(routing: &mut Publisher) -> &mut Publisher {
-        routing
-    }
-}
-
-impl Publishes for XPub {
-    fn publisher(routing: &mut XPubRouting) -> &mut Publisher {
-        &mut routing.0
-    }
-}
-
-impl Publishes for ManualXPub {
-    fn publisher(routing: &mut ManualXPubRouting) -> &mut Publisher {
-        &mut routing.0
-    }
-}
+impl Publishes for Pub {}
+impl Publishes for XPub {}
+impl Publishes for ManualXPub {}
 
 impl<T: Publishes> Socket<T> {
     /// Sends `message` to every subscriber that wants it and has room.
@@ -988,7 +951,7 @@ impl<T: Publishes> Socket<T> {
     /// arrive after connecting.
     pub fn send(&mut self, message: impl Into<Message>) -> usize {
         self.peers.accept(&mut noop());
-        T::publisher(&mut self.routing).send(self.peers.list_mut(), message.into())
+        self.routing.send(self.peers.list_mut(), message.into())
     }
 
     /// Sends `message` to every subscriber that wants it if all of them
@@ -1038,14 +1001,14 @@ impl<T: Publishes> Socket<T> {
         cx: &mut TaskContext<'_>,
     ) -> Poll<usize> {
         self.peers.accept(cx);
-        T::publisher(&mut self.routing).poll_send_all(self.peers.list_mut(), slot, cx)
+        self.routing.poll_send_all(self.peers.list_mut(), slot, cx)
     }
 
     /// Whether messages go to the subscribers that want none of their
     /// prefixes instead, as libzmq's `ZMQ_INVERT_MATCHING`. Its SUB peers
     /// should invert too, as they filter what arrives. Off by default.
     pub fn set_invert_matching(&mut self, on: bool) {
-        T::publisher(&mut self.routing).set_invert_matching(on);
+        self.routing.set_invert_matching(on);
     }
 }
 
@@ -1101,7 +1064,7 @@ impl Socket<XPub> {
     /// libzmq's `ZMQ_XPUB_VERBOSE` and `ZMQ_XPUB_VERBOSER`. By default only
     /// a topic's first subscription and last cancel.
     pub fn set_verbosity(&mut self, verbosity: Verbosity) {
-        self.routing.0.set_verbosity(verbosity);
+        self.routing.set_verbosity(verbosity);
     }
 
     /// What each peer connected or accepted from now on is sent first, as
@@ -1229,13 +1192,12 @@ impl SubscriptionRequest<'_> {
         let socket = &mut *self.socket;
         socket
             .routing
-            .0
             .send_to(socket.peers.list_mut(), peer, message.into())
     }
 
     fn apply(&mut self, subscription: Subscription) -> bool {
         self.peer
-            .is_some_and(|peer| self.socket.routing.0.apply(peer, subscription))
+            .is_some_and(|peer| self.socket.routing.apply(peer, subscription))
     }
 }
 
@@ -1261,7 +1223,6 @@ impl Socket<XSub> {
     pub fn subscribe(&mut self, topic: impl AsRef<[u8]>) {
         self.peers.accept(&mut noop());
         self.routing
-            .0
             .subscribe(self.peers.list_mut(), topic.as_ref());
     }
 
@@ -1269,7 +1230,6 @@ impl Socket<XSub> {
     pub fn unsubscribe(&mut self, topic: impl AsRef<[u8]>) -> bool {
         self.peers.accept(&mut noop());
         self.routing
-            .0
             .unsubscribe(self.peers.list_mut(), topic.as_ref())
     }
 
@@ -1279,7 +1239,6 @@ impl Socket<XSub> {
     pub fn send(&mut self, message: impl Into<Message>) {
         self.peers.accept(&mut noop());
         self.routing
-            .0
             .send_upstream(self.peers.list_mut(), message.into());
     }
 

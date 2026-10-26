@@ -11,7 +11,7 @@ use std::time::Duration;
 use zmq_core::{FairQueue, LoadBalancer, ServerSendError, ServerTable};
 use zmtp::{Frame, Group, Message};
 
-use crate::socket::{Receives, Routing, SocketType, WaitsForRoom, noop, sealed};
+use crate::socket::{DealerRouting, Receives, Routing, SocketType, WaitsForRoom, noop, sealed};
 use crate::{Socket, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
@@ -45,15 +45,6 @@ pub struct ClientId(NonZeroU32);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoSuchClient(pub Frame);
 
-/// CLIENT's routing: load-balanced sends, fair-queued receives.
-#[doc(hidden)]
-#[derive(Debug, Default)]
-pub struct ClientRouting {
-    send: LoadBalancer,
-    recv: FairQueue,
-}
-
-impl Routing for ClientRouting {}
 impl Routing for ServerTable {}
 impl Routing for zmq_core::Radio {}
 
@@ -142,7 +133,8 @@ impl Socket<Dish> {
 impl sealed::Sealed for Client {}
 impl SocketType for Client {
     const KIND: zmtp::SocketType = zmtp::SocketType::Client;
-    type Routing = ClientRouting;
+    // As DEALER: load-balanced sends, fair-queued receives.
+    type Routing = DealerRouting;
     type Received = Frame;
 }
 
