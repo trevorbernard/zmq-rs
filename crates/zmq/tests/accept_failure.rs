@@ -4,8 +4,9 @@
 // setrlimit has no safe wrapper in the standard library.
 #![allow(unsafe_code)]
 
-use std::fs;
+use std::fs::File;
 use std::net::TcpStream;
+use std::os::fd::AsRawFd;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -30,10 +31,10 @@ fn set_fd_limit(limit: libc::rlimit) {
     assert_eq!(failed, 0);
 }
 
-/// File descriptors open in this process, not counting the one that
-/// lists them.
-fn open_fds() -> u64 {
-    fs::read_dir("/proc/self/fd").unwrap().count() as u64 - 1
+/// The descriptor the next open takes. The limit bounds descriptor numbers,
+/// not how many are open, so a count misses room left in a gap below.
+fn lowest_free_fd() -> u64 {
+    File::open("/dev/null").unwrap().as_raw_fd() as u64
 }
 
 fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) {
@@ -63,15 +64,17 @@ fn a_listener_out_of_file_descriptors_accepts_once_some_are_free() {
     expect(&mut monitor, |kind| *kind == EventKind::Listening);
     let original = fd_limit();
     // Room for the client's socket and nothing more, so the listener
-    // cannot accept it. Counted again if a descriptor opened meanwhile took
-    // the client's room.
+    // cannot accept it. Tried again if a descriptor opened or closed
+    // meanwhile left the client no room, or the listener some.
     let _client = (0..10)
         .find_map(|_| {
             set_fd_limit(libc::rlimit {
-                rlim_cur: open_fds() + 1,
+                rlim_cur: lowest_free_fd() + 1,
                 ..original
             });
-            let client = TcpStream::connect(address).ok();
+            let client = TcpStream::connect(address)
+                .ok()
+                .filter(|_| File::open("/dev/null").is_err());
             if client.is_none() {
                 set_fd_limit(original);
             }
