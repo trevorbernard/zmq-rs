@@ -85,7 +85,7 @@ impl Pair {
             let Some(peer) = self.active.and_then(|key| peers.get_mut(key)) else {
                 return Poll::Pending;
             };
-            match peer.connection.tx.poll_ready(cx) {
+            match peer.poll_ready(cx) {
                 Poll::Ready(Ok(())) => return Poll::Ready(()),
                 Poll::Ready(Err(ReaderGone)) => {}
                 Poll::Pending => return Poll::Pending,

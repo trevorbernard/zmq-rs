@@ -478,7 +478,7 @@ impl Publisher {
         self.match_peers(&message);
         let mut full = false;
         self.for_each_wanted(peers, |peer| {
-            if peer.connection.tx.poll_ready(cx).is_pending() {
+            if peer.poll_ready(cx).is_pending() {
                 full = true;
             }
         });
@@ -1038,6 +1038,24 @@ mod tests {
         assert!(
             count.0.load(Ordering::SeqCst) > 0,
             "a subscription after a send still wakes it"
+        );
+    }
+
+    #[test]
+    fn a_non_blocking_send_to_all_keeps_the_waker_waiting_for_events() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut publisher = Publisher::with_events();
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        assert_eq!(publisher.poll_event(&mut peers, &mut cx), Poll::Pending);
+        let mut slot = Some(msg("x"));
+        let sent = publisher.poll_send_all(&mut peers, &mut slot, &mut crate::noop_context());
+        assert_eq!(sent, Poll::Ready(0));
+        sa.to_socket.try_send(subscribe("x")).unwrap();
+        assert!(
+            count.0.load(Ordering::SeqCst) > 0,
+            "a subscription after the send still wakes it"
         );
     }
 

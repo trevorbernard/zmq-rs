@@ -72,6 +72,17 @@ impl Peer {
         self.key
     }
 
+    /// Ready once the peer has room, or with `ReaderGone` once its session
+    /// has ended. `Pending` registers `cx`, unless it is
+    /// [`noop_context`]'s.
+    pub(crate) fn poll_ready(&mut self, cx: &mut TaskContext<'_>) -> Poll<Result<(), ReaderGone>> {
+        if registers(cx) {
+            self.connection.tx.poll_ready(cx)
+        } else {
+            self.connection.tx.ready()
+        }
+    }
+
     /// Sends `message` if the peer has room. `Full` hands it back with
     /// `cx` registered to hear when there is room; `Closed`, once the
     /// peer's session has ended.
@@ -80,9 +91,8 @@ impl Peer {
         message: Message,
         cx: &mut TaskContext<'_>,
     ) -> Result<(), TrySendError<Message>> {
-        let tx = &mut self.connection.tx;
-        match tx.poll_ready(cx) {
-            Poll::Ready(Ok(())) => tx.try_send(message),
+        match self.poll_ready(cx) {
+            Poll::Ready(Ok(())) => self.connection.tx.try_send(message),
             Poll::Ready(Err(ReaderGone)) => Err(TrySendError::Closed(message)),
             Poll::Pending => Err(TrySendError::Full(message)),
         }
@@ -271,6 +281,15 @@ pub fn noop_context() -> TaskContext<'static> {
     TaskContext::from_waker(NOOP_WAKER)
 }
 
+/// Whether to register `cx`: not if it is [`noop_context`]'s, which
+/// non-blocking calls pass. Registering it would replace the waker of a
+/// task that polled the socket earlier in the same turn, as a proxy does
+/// before sending into it, and that task would then miss what it waits
+/// for.
+pub(crate) fn registers(cx: &TaskContext<'_>) -> bool {
+    !std::ptr::eq(cx.waker(), NOOP_WAKER)
+}
+
 /// The connections a socket talks to: those it connected, and those its
 /// listeners accepted.
 #[derive(Debug)]
@@ -449,12 +468,9 @@ impl Peers {
 
     /// Adds peers that listeners have accepted. Registers `cx` with every
     /// listener, so a new peer wakes a task waiting for one, unless `cx` is
-    /// [`noop_context`]'s, as non-blocking calls pass: registering it would replace
-    /// the waker of a task that polled the socket earlier in the same turn,
-    /// as a proxy does before sending into it, and that task would then
-    /// miss the next peer.
+    /// [`noop_context`]'s.
     pub fn accept(&mut self, cx: &mut TaskContext<'_>) {
-        let register = !std::ptr::eq(cx.waker(), NOOP_WAKER);
+        let register = registers(cx);
         let (list, greeting) = (&mut self.list, self.greeting.as_ref());
         self.listeners.retain_mut(|(endpoint, queue)| {
             loop {
@@ -574,7 +590,7 @@ impl LoadBalancer {
     /// every peer if none has.
     pub fn poll_ready(&mut self, peers: &mut PeerList, cx: &mut TaskContext<'_>) -> Poll<()> {
         for peer in &mut peers.peers {
-            if let Poll::Ready(Ok(())) = peer.connection.tx.poll_ready(cx) {
+            if let Poll::Ready(Ok(())) = peer.poll_ready(cx) {
                 return Poll::Ready(());
             }
         }
@@ -694,7 +710,9 @@ impl FairQueue {
             }
             // Registered before looking again: a peer woken after the look
             // finds the task registered, and one woken before is seen.
-            self.ready.task.register(cx.waker());
+            if registers(cx) {
+                self.ready.task.register(cx.waker());
+            }
             if !self.ready.any.load(Ordering::Acquire) {
                 return Poll::Pending;
             }
@@ -722,7 +740,9 @@ impl FairQueue {
     ) {
         self.read_turn(peers, DRAIN_BATCH, f);
         // Registered before looking, as in `poll_recv`.
-        self.ready.task.register(cx.waker());
+        if registers(cx) {
+            self.ready.task.register(cx.waker());
+        }
         if !self.turn.is_empty() || self.ready.any.load(Ordering::Acquire) {
             cx.waker().wake_by_ref();
         }
@@ -1282,6 +1302,29 @@ mod tests {
         let mut lb = LoadBalancer::default();
         let mut peers = PeerList::default();
         assert_eq!(lb.poll_send(&mut peers, msg("x"), &mut cx), Err(msg("x")));
+    }
+
+    #[test]
+    fn a_non_blocking_send_keeps_the_waker_waiting_for_room() {
+        let (a, mut sa) = connection(1);
+        let mut peers = list(vec![a]);
+        let mut lb = LoadBalancer::default();
+        assert!(
+            lb.poll_send(&mut peers, msg("fills"), &mut noop_context())
+                .is_ok()
+        );
+        let (count, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        assert_eq!(lb.poll_ready(&mut peers, &mut cx), Poll::Pending);
+        assert_eq!(
+            lb.poll_send(&mut peers, msg("full"), &mut noop_context()),
+            Err(msg("full"))
+        );
+        assert_eq!(drain(&mut sa), [msg("fills")]);
+        assert!(
+            count.0.load(Ordering::SeqCst) > 0,
+            "room wakes the waiting task"
+        );
     }
 
     #[test]

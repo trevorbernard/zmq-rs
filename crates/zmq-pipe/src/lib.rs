@@ -342,7 +342,9 @@ impl<T> Writer<T> {
             .is_some_and(|hwm| self.written - self.peer_read >= hwm)
     }
 
-    fn ready(&mut self) -> Poll<Result<(), ReaderGone>> {
+    /// As [`poll_ready`](Self::poll_ready), registering no waker: `Pending`
+    /// means the pipe is full now.
+    pub fn ready(&mut self) -> Poll<Result<(), ReaderGone>> {
         if self.is_closed() {
             Poll::Ready(Err(ReaderGone))
         } else if self.is_full() {
