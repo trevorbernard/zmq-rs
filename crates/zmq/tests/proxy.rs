@@ -269,11 +269,14 @@ fn pausing_holds_messages_until_resumed() {
         assert_eq!(control.statistics(), ProxyStatistics::default());
         control.resume();
         assert_eq!(within(FIVE, move || sink.recv()), Message::from("held"));
-        let statistics = control.statistics();
+        // The proxy counts a send once it returns, which may be after the
+        // sink has the message: only the final statistics are settled.
+        control.terminate();
+        let statistics = running.join().unwrap();
         assert_eq!(statistics.frontend.received.messages, 1);
         assert_eq!(statistics.frontend.received.bytes, 4);
-        control.terminate();
-        assert_eq!(running.join().unwrap(), statistics);
+        assert_eq!(statistics.backend.sent.messages, 1);
+        assert_eq!(statistics.backend.sent.bytes, 4);
     });
 }
 
