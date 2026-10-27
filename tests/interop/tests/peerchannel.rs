@@ -26,18 +26,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
         .unwrap_or_else(|_| panic!("timed out after {limit:?}"))
 }
 
-/// Whether libzmq's draft sockets can be tested; says why not otherwise.
-fn libzmq_has_drafts() -> bool {
-    let has = libzmq::has("draft");
-    if !has {
-        eprintln!("skipped: this libzmq was built without draft sockets");
-    }
-    has
-}
-
 #[test]
 fn a_libzmq_peer_and_ours_address_each_other() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let context = Context::new().unwrap();
@@ -61,7 +52,7 @@ fn a_libzmq_peer_and_ours_address_each_other() {
 
 #[test]
 fn our_peer_connects_to_a_libzmq_peer() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let theirs = Socket::new(Kind::Peer);
@@ -83,7 +74,7 @@ fn our_peer_connects_to_a_libzmq_peer() {
 
 #[test]
 fn a_libzmq_channel_talks_to_ours() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let context = Context::new().unwrap();

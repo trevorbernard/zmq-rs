@@ -9,43 +9,45 @@ on:
 jobs:
   ci:
     name: CI
-    # Pinned so the libzmq the interop tests run against changes only on
-    # purpose.
     runs-on: ubuntu-24.04
 
     steps:
       - uses: actions/checkout@v5
 
-      - name: Install libzmq for interop tests
-        run: sudo apt-get update && sudo apt-get install -y libzmq3-dev pkg-config
+      # The dev shell, as locally: the toolchain, nextest, a libzmq with
+      # drafts and the legacy peers, all pinned by flake.lock. It sets
+      # ZMQ_INTEROP_STRICT, so an interop test fails rather than skips.
+      - name: Install Nix
+        # v35
+        uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+      - name: Cache Nix store
+        # v7.0.2
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569
         with:
-          toolchain: '1.99.1'
-          components: clippy, rustfmt
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'tests/interop/legacy/**', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 3G
 
-      - name: Cache
-        uses: Swatinem/rust-cache@v2
+      # Swatinem/rust-cache needs cargo outside the dev shell.
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
 
       - name: Format
-        run: cargo fmt --all --check
+        run: nix develop -c just fmt-check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-      - name: Install nextest
-        # v2.87.27
-        uses: taiki-e/install-action@ab6895351a88b908e96a4697860d4ffea5e57dbe
-        with:
-          tool: nextest
+        run: nix develop -c just clippy
 
       - name: Test
-        run: cargo nextest run --workspace --all-features
-
-      # nextest does not run doctests.
-      - name: Doctests
-        run: cargo test --workspace --all-features --doc
+        run: nix develop -c just test
 
   fuzz:
     name: Fuzz

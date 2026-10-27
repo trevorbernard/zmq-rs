@@ -86,6 +86,9 @@
           # interop tests of downgrading. They skip without these.
           ZMQ_LEGACY_PEER_2 = "${legacy.peer2}/bin/zmq-legacy-peer";
           ZMQ_LEGACY_PEER_3 = "${legacy.peer3}/bin/zmq-legacy-peer";
+          # The shell has the legacy peers and a libzmq with drafts, so an
+          # interop test that would skip for want of them fails instead.
+          ZMQ_INTEROP_STRICT = "1";
           nativeBuildInputs = [
             rust
             pkgs.cargo-audit

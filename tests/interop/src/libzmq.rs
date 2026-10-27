@@ -646,6 +646,15 @@ pub fn has(capability: &str) -> bool {
     unsafe { zmq_has(capability.as_ptr()) != 0 }
 }
 
+/// Whether libzmq's draft sockets can be tested; skips otherwise.
+pub fn has_drafts() -> bool {
+    let has = has("draft");
+    if !has {
+        crate::skip("this libzmq was built without draft sockets");
+    }
+    has
+}
+
 /// A ZAP handler (RFC 27) for `context` that answers one request with
 /// `status` and `user_id`, then returns the request frames it saw.
 pub fn zap_handler(

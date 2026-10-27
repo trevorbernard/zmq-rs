@@ -4,7 +4,8 @@
 //!
 //! Each runs as a process, `tests/interop/legacy/peer.c`, as two libzmqs
 //! cannot share one. The Nix dev shell sets `ZMQ_LEGACY_PEER_2` and
-//! `ZMQ_LEGACY_PEER_3` to them; without those, the tests skip.
+//! `ZMQ_LEGACY_PEER_3` to them; without those, the tests skip, or fail
+//! under `ZMQ_INTEROP_STRICT`.
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -59,10 +60,10 @@ impl Peer {
         options: &[&str],
     ) -> Option<Self> {
         let Some(path) = env::var_os(libzmq.variable()) else {
-            eprintln!(
-                "skipped: {} is not set; the Nix dev shell sets it",
+            zmq_interop::skip(&format!(
+                "{} is not set; the Nix dev shell sets it",
                 libzmq.variable()
-            );
+            ));
             return None;
         };
         let mut child = Command::new(path)

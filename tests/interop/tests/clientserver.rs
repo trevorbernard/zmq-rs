@@ -9,20 +9,11 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Client, Context, Frame, Server};
-use zmq_interop::libzmq::{Kind, Socket};
+use zmq_interop::libzmq::{self, Kind, Socket};
 use zmq_interop::{Peer, Security};
 use zmtp::{Identity, Message, SocketType};
 
 const FIVE: Duration = Duration::from_secs(5);
-
-/// Whether libzmq's draft sockets can be tested; says why not otherwise.
-fn libzmq_has_drafts() -> bool {
-    let has = zmq_interop::libzmq::has("draft");
-    if !has {
-        eprintln!("skipped: this libzmq was built without draft sockets");
-    }
-    has
-}
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -38,7 +29,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 
 #[test]
 fn a_libzmq_client_talks_to_our_server() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let context = Context::new().unwrap();
@@ -59,7 +50,7 @@ fn a_libzmq_client_talks_to_our_server() {
 
 #[test]
 fn our_client_reaches_a_libzmq_server() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let server = Socket::new(Kind::Server);
@@ -108,7 +99,7 @@ fn our_server_drops_multipart_messages() {
 
 #[test]
 fn a_libzmq_server_replies_to_our_client() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let server = Socket::new(Kind::Server);

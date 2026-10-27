@@ -31,15 +31,6 @@ fn group(name: &'static str) -> Group {
     Group::new(name).unwrap()
 }
 
-/// Whether libzmq's draft sockets can be tested; says why not otherwise.
-fn libzmq_has_drafts() -> bool {
-    let has = libzmq::has("draft");
-    if !has {
-        eprintln!("skipped: this libzmq was built without draft sockets");
-    }
-    has
-}
-
 /// The next command from `peer`, skipping heartbeats.
 fn next_command(peer: &mut Peer) -> Command {
     loop {
@@ -117,7 +108,7 @@ fn our_radio_sends_group_and_body_to_a_dish_that_joined() {
 
 #[test]
 fn a_libzmq_radio_reaches_our_dish() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let radio = Socket::new(Kind::Radio);
@@ -142,7 +133,7 @@ fn a_libzmq_radio_reaches_our_dish() {
 
 #[test]
 fn our_radio_reaches_a_libzmq_dish() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let context = Context::new().unwrap();

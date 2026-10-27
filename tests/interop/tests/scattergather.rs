@@ -26,18 +26,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
         .unwrap_or_else(|_| panic!("timed out after {limit:?}"))
 }
 
-/// Whether libzmq's draft sockets can be tested; says why not otherwise.
-fn libzmq_has_drafts() -> bool {
-    let has = libzmq::has("draft");
-    if !has {
-        eprintln!("skipped: this libzmq was built without draft sockets");
-    }
-    has
-}
-
 #[test]
 fn a_libzmq_scatter_feeds_our_gather() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let context = Context::new().unwrap();
@@ -54,7 +45,7 @@ fn a_libzmq_scatter_feeds_our_gather() {
 
 #[test]
 fn our_scatter_feeds_a_libzmq_gather() {
-    if !libzmq_has_drafts() {
+    if !libzmq::has_drafts() {
         return;
     }
     let gather = Socket::new(Kind::Gather);
