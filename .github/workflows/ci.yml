@@ -49,6 +49,31 @@ jobs:
       - name: Test
         run: nix develop -c just test
 
+      - name: Loom
+        run: nix develop -c just loom
+
+  miri:
+    name: Miri
+    runs-on: ubuntu-24.04
+    # Over the repository's rust-toolchain.toml: Miri needs nightly.
+    env:
+      RUSTUP_TOOLCHAIN: nightly
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Rust nightly
+        uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9
+        with:
+          toolchain: nightly
+          components: miri, rust-src
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Miri
+        run: cargo miri test -p zmq-pipe --lib
+
   fuzz:
     name: Fuzz
     runs-on: ubuntu-24.04

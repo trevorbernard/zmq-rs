@@ -11,6 +11,9 @@ publish.workspace = true
 [dependencies]
 atomic-waker.workspace = true
 
+[target.'cfg(loom)'.dependencies]
+loom.workspace = true
+
 [dev-dependencies]
 proptest.workspace = true
 

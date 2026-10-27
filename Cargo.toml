@@ -20,6 +20,7 @@ criterion = "0.8"
 dryoc = { version = "2", default-features = false, features = ["std"] }
 if-addrs = "0.15"
 libc = "0.2"
+loom = "0.7"
 mio = { version = "1", features = ["net", "os-ext", "os-poll"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
 # `all` for the TCP keepalive probe count.
@@ -33,6 +34,8 @@ zmq-core = { path = "crates/zmq-core" }
 unsafe_code = "deny"
 missing_debug_implementations = "warn"
 unreachable_pub = "warn"
+# `zmq-pipe`'s queue on loom's atomics, for its model tests.
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }

@@ -13,6 +13,15 @@ test *args:
     cargo nextest run --workspace --all-features {{args}}
     {{ if args == "" { "cargo test --workspace --all-features --doc" } else { "" } }}
 
+# zmq-pipe's queue on loom: every interleaving of its models. Its own
+# target directory, as `--cfg loom` rebuilds everything.
+loom *args:
+    RUSTFLAGS="--cfg loom" CARGO_TARGET_DIR=target/loom cargo test -p zmq-pipe --lib --release {{args}}
+
+# zmq-pipe's unit tests under Miri, for undefined behavior and data races.
+miri *args:
+    nix develop .#miri -c cargo miri test -p zmq-pipe --lib {{args}}
+
 # Interop tests against libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0).
 test-legacy *args:
     cargo nextest run -p zmq-interop --test legacy_peers {{args}}

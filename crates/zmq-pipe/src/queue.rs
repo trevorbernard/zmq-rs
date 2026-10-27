@@ -10,19 +10,56 @@
 //! rather than in one shared counter, means a message moves one cache line
 //! between the cores, not two, when the reader keeps up.
 //!
-//! This is the crate's only unsafe code.
+//! This is the crate's only unsafe code. Built with `--cfg loom`, it runs
+//! on [loom](https://docs.rs/loom)'s atomics, which check every
+//! interleaving of the models in `loom_tests`.
 #![allow(unsafe_code)]
 
-use std::cell::UnsafeCell;
 use std::fmt;
 use std::marker::PhantomData;
 use std::mem::MaybeUninit;
 use std::ptr;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicPtr, AtomicU8, AtomicU64, Ordering};
+
+use sync::atomic::{AtomicPtr, AtomicU8, AtomicU64, Ordering};
+use sync::{Arc, UnsafeCell};
+
+#[cfg(not(loom))]
+mod sync {
+    pub(super) use std::sync::{Arc, atomic};
+
+    /// `std`'s, with loom's interface.
+    #[derive(Debug)]
+    pub(super) struct UnsafeCell<T>(std::cell::UnsafeCell<T>);
+
+    impl<T> UnsafeCell<T> {
+        pub(super) const fn new(value: T) -> Self {
+            Self(std::cell::UnsafeCell::new(value))
+        }
+
+        #[inline]
+        pub(super) fn with<R>(&self, f: impl FnOnce(*const T) -> R) -> R {
+            f(self.0.get())
+        }
+
+        #[inline]
+        pub(super) fn with_mut<R>(&self, f: impl FnOnce(*mut T) -> R) -> R {
+            f(self.0.get())
+        }
+    }
+}
+
+#[cfg(loom)]
+mod sync {
+    pub(super) use loom::cell::UnsafeCell;
+    pub(super) use loom::sync::{Arc, atomic};
+}
 
 /// Slots per chunk: libzmq's `message_pipe_granularity`.
+#[cfg(not(loom))]
 const CHUNK: usize = 256;
+/// Two, so that a model crosses chunks and recycles them in a few steps.
+#[cfg(loom)]
+const CHUNK: usize = 2;
 
 /// Slot states.
 const EMPTY: u8 = 0;
@@ -43,13 +80,21 @@ struct Chunk<T> {
 
 impl<T> Chunk<T> {
     fn allocate() -> *mut Self {
+        #[cfg(not(loom))]
+        let slots = [const {
+            Slot {
+                state: AtomicU8::new(EMPTY),
+                item: UnsafeCell::new(MaybeUninit::uninit()),
+            }
+        }; CHUNK];
+        // Loom's atomics have no `const fn new`.
+        #[cfg(loom)]
+        let slots = std::array::from_fn(|_| Slot {
+            state: AtomicU8::new(EMPTY),
+            item: UnsafeCell::new(MaybeUninit::uninit()),
+        });
         Box::into_raw(Box::new(Self {
-            slots: [const {
-                Slot {
-                    state: AtomicU8::new(EMPTY),
-                    item: UnsafeCell::new(MaybeUninit::uninit()),
-                }
-            }; CHUNK],
+            slots,
             next: AtomicPtr::new(ptr::null_mut()),
         }))
     }
@@ -149,7 +194,7 @@ impl<T> Producer<T> {
         let slot = unsafe { Chunk::slot(self.back, self.written) };
         // SAFETY: the slot is empty (or the reader sleeps on it) and stays
         // so until the exchange below, so the reader does not touch it.
-        unsafe { (*slot.item.get()).write(item) };
+        slot.item.with_mut(|cell| unsafe { (*cell).write(item) });
         if is_last_slot(self.written) {
             let next = match self.shared.spare.swap(ptr::null_mut(), Ordering::Acquire) {
                 spare if spare.is_null() => Chunk::allocate(),
@@ -202,7 +247,7 @@ impl<T> Consumer<T> {
         }
         // SAFETY: the writer filled the slot and will not touch it again
         // until it is reset and recycled.
-        let item = unsafe { (*slot.item.get()).assume_init_read() };
+        let item = slot.item.with(|cell| unsafe { (*cell).assume_init_read() });
         // Published with the chunk, through the spare swap below.
         slot.state.store(EMPTY, Ordering::Relaxed);
         if is_last_slot(self.read) {
@@ -233,13 +278,16 @@ impl<T> Drop for Shared<T> {
     fn drop(&mut self) {
         // Both ends are gone; the `Arc`'s release and acquire order their
         // final stores before this.
-        let mut chunk = *self.front.get_mut();
-        let written = *self.written.get_mut();
-        for position in *self.read.get_mut()..written {
+        let mut chunk = self.front.load(Ordering::Relaxed);
+        let written = self.written.load(Ordering::Relaxed);
+        for position in self.read.load(Ordering::Relaxed)..written {
             // SAFETY: items between the reader's position and the writer's
             // count were written and never read. Each slot's chunk is
             // reached by following links, as the reader would.
-            unsafe { (*Chunk::slot(chunk, position).item.get()).assume_init_drop() };
+            let slot = unsafe { Chunk::slot(chunk, position) };
+            // SAFETY: as above.
+            slot.item
+                .with_mut(|cell| unsafe { (*cell).assume_init_drop() });
             if is_last_slot(position) {
                 // SAFETY: as in `Consumer::pop`; no other thread is left.
                 let next = unsafe { (*chunk).next.load(Ordering::Relaxed) };
@@ -256,7 +304,7 @@ impl<T> Drop for Shared<T> {
             // moves `back` past this chunk.
             drop(unsafe { Box::from_raw(chunk) });
         }
-        let spare = *self.spare.get_mut();
+        let spare = self.spare.load(Ordering::Relaxed);
         if !spare.is_null() {
             // SAFETY: as above.
             drop(unsafe { Box::from_raw(spare) });
@@ -264,7 +312,7 @@ impl<T> Drop for Shared<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
     use std::collections::HashSet;
@@ -399,5 +447,105 @@ mod tests {
             producer.push(Box::new(i));
         }
         reader.join().unwrap();
+    }
+}
+
+/// Every interleaving of a writer and a reader, with two-slot chunks so
+/// that items cross chunks and chunks are recycled:
+///
+/// ```sh
+/// RUSTFLAGS="--cfg loom" cargo test -p zmq-pipe --lib --release
+/// ```
+#[cfg(all(test, loom))]
+mod loom_tests {
+    use loom::sync::Notify;
+    use loom::sync::atomic::AtomicUsize;
+    use loom::thread;
+
+    use super::*;
+
+    /// Two chunks' worth and one more: the writer links a new chunk, the
+    /// reader hands the first back, and the writer takes it as its spare.
+    const ITEMS: usize = CHUNK * 2 + 1;
+
+    #[test]
+    fn items_arrive_in_order_across_chunks() {
+        loom::model(|| {
+            let (mut producer, mut consumer) = queue();
+            let writer = thread::spawn(move || {
+                for i in 0..ITEMS {
+                    producer.push(i);
+                }
+            });
+            let mut expected = 0;
+            while expected < ITEMS {
+                match consumer.pop(false) {
+                    Some(item) => {
+                        assert_eq!(item, expected);
+                        expected += 1;
+                    }
+                    None => thread::yield_now(),
+                }
+            }
+            writer.join().unwrap();
+        });
+    }
+
+    #[test]
+    fn a_waiting_reader_is_always_woken() {
+        loom::model(|| {
+            let (mut producer, mut consumer) = queue();
+            let woken = Arc::new(Notify::new());
+            let wake = woken.clone();
+            let writer = thread::spawn(move || {
+                for i in 0..ITEMS {
+                    if producer.push(i) {
+                        wake.notify();
+                    }
+                }
+            });
+            let mut expected = 0;
+            while expected < ITEMS {
+                match consumer.pop(true) {
+                    Some(item) => {
+                        assert_eq!(item, expected);
+                        expected += 1;
+                    }
+                    // A lost wakeup waits here for good: loom reports a deadlock.
+                    None => woken.wait(),
+                }
+            }
+            writer.join().unwrap();
+        });
+    }
+
+    struct Counted(Arc<AtomicUsize>);
+
+    impl Drop for Counted {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    #[test]
+    fn ends_dropped_on_their_own_threads_drop_every_item_once() {
+        loom::model(|| {
+            let dropped = Arc::new(AtomicUsize::new(0));
+            let (mut producer, mut consumer) = queue();
+            let count = dropped.clone();
+            let writer = thread::spawn(move || {
+                for _ in 0..ITEMS {
+                    producer.push(Counted(count.clone()));
+                }
+            });
+            let reader = thread::spawn(move || {
+                for _ in 0..CHUNK {
+                    drop(consumer.pop(false));
+                }
+            });
+            writer.join().unwrap();
+            reader.join().unwrap();
+            assert_eq!(dropped.load(Ordering::Relaxed), ITEMS);
+        });
     }
 }

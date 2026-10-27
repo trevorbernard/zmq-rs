@@ -624,7 +624,7 @@ impl fmt::Display for ReaderGone {
 
 impl std::error::Error for ReaderGone {}
 
-#[cfg(test)]
+#[cfg(all(test, not(loom)))]
 mod tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
