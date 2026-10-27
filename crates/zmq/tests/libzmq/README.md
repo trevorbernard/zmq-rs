@@ -45,7 +45,10 @@ Of 139 tests, these are left out.
 `capabilities`, `ancillaries`, `system`, `sodium`, `fork`,
 `thread_safe`, `many_sockets`, `issue_566`.
 
-**Fuzzers and stress tests,** covered by zmq-rs's own property tests
-and `fuzz/`: `bind_fuzzer`, `bind_null_fuzzer`, `bind_curve_fuzzer`,
-`connect_fuzzer`, `connect_null_fuzzer`, `connect_curve_fuzzer`,
-`socket_options_fuzzer`, `z85_decode_fuzzer`, `shutdown_stress`.
+**Fuzzers,** covered by `fuzz/`: `bind_fuzzer`, `bind_null_fuzzer`,
+`bind_curve_fuzzer`, `connect_fuzzer`, `connect_null_fuzzer` and
+`connect_curve_fuzzer` by `engine` and the `zmtp` wire targets, and
+`z85_decode_fuzzer` by `z85_decode`. `socket_options_fuzzer` feeds bytes
+to `zmq_setsockopt`, which typed `SocketOptions` have no counterpart to.
+
+**Stress tests,** not yet covered: `shutdown_stress`.

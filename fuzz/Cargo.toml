@@ -13,6 +13,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
+libc = "0.2"
+zmq = { path = "../crates/zmq" }
 zmtp = { path = "../crates/zmtp" }
 
 [[bin]]
@@ -81,6 +83,13 @@ bench = false
 [[bin]]
 name = "roundtrip"
 path = "fuzz_targets/roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "engine"
+path = "fuzz_targets/engine.rs"
 test = false
 doc = false
 bench = false

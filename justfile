@@ -62,7 +62,7 @@ example name *args:
 fuzz-seed *args:
     nix develop .#fuzz -c ./fuzz/seed.sh {{args}}
 
-# Fuzzes a zmtp target, e.g. `just fuzz null_handshake`.
+# Fuzzes one target, e.g. `just fuzz null_handshake`.
 fuzz target *args:
     cd fuzz && nix develop ..#fuzz -c cargo fuzz run {{target}} -- -dict=zmtp.dict {{args}}
 
@@ -70,6 +70,6 @@ fuzz target *args:
 fuzz-all seconds="60":
     nix develop .#fuzz -c ./fuzz/run-all.sh {{seconds}}
 
-# Line coverage of zmtp over the fuzz corpora.
+# Line coverage of zmtp and the sockets over the fuzz corpora.
 fuzz-coverage *args:
     nix develop .#fuzz -c ./fuzz/coverage.sh {{args}}

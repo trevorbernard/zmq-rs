@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Line coverage of zmtp over every target's corpus, combined: run the
-# targets first so the corpora hold what they found. Needs llvm-tools,
-# which the fuzz dev shell has.
+# Line coverage of zmtp and the sockets over every target's corpus,
+# combined: run the targets first so the corpora hold what they found.
+# Needs llvm-tools, which the fuzz dev shell has.
 set -euo pipefail
 cd "$(dirname "$0")"
 

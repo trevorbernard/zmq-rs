@@ -1,13 +1,14 @@
 # Fuzzing
 
-libFuzzer targets for the `zmtp` crate, run with
+libFuzzer targets for the `zmtp` crate and, through `engine`, the
+sockets above it, run with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) on nightly:
 
 ```sh
 just fuzz-seed --fetch     # or without --fetch to skip the downloads
 just fuzz null_handshake   # one target, until stopped
 just fuzz-all 300          # every target at once, five minutes each
-just fuzz-coverage         # zmtp's line coverage over the corpora
+just fuzz-coverage         # line coverage over the corpora
 ```
 
 | Target | Input |
@@ -22,10 +23,12 @@ just fuzz-coverage         # zmtp's line coverage over the corpora
 | `command_parse` | A command body; checks that parse, encode, parse is stable |
 | `roundtrip` | Messages, commands, subscriptions and memberships; checks they decode as encoded |
 | `z85_decode` | Z85 text; checks that accepted text re-encodes to itself |
+| `engine` | First octet picks a socket type, binding or connecting, a mechanism and heartbeats; the rest is raw traffic from a peer to a real socket over ipc, through the engine, I/O thread and routing. Fails on a panic on any thread, or if the engine never notices the peer close |
 
 Wire targets take the same input shape as libzmq's harnesses, and the
 CURVE ones its fixed keys, so libzmq's seed corpora and `zmtp.dict` apply
-as they are. Raw traffic cannot get past CURVE's authenticators without
+as they are; `engine` takes them behind its first octet, which `seed.sh
+--fetch` adds. Raw traffic cannot get past CURVE's authenticators without
 the client's transient secret, which is what `curve_session` is for.
 
 `seed.sh` writes hand-built traffic and the reproducers from libzmq's
