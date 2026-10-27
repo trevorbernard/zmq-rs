@@ -53,6 +53,7 @@ mod security_no_zap_handler;
 mod security_null;
 mod security_plain;
 mod security_zap;
+mod shutdown_stress;
 mod spec_dealer;
 mod spec_pushpull;
 mod spec_rep;

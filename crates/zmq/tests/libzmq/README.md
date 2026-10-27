@@ -50,5 +50,3 @@ Of 139 tests, these are left out.
 `connect_curve_fuzzer` by `engine` and the `zmtp` wire targets, and
 `z85_decode_fuzzer` by `z85_decode`. `socket_options_fuzzer` feeds bytes
 to `zmq_setsockopt`, which typed `SocketOptions` have no counterpart to.
-
-**Stress tests,** not yet covered: `shutdown_stress`.

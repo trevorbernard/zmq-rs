@@ -112,9 +112,9 @@
             pkgs.cargo-fuzz
           ];
         };
-        # Miri, nightly only, checks zmq-pipe's unsafe queue for undefined
-        # behavior and data races.
-        miri = pkgs.mkShell {
+        # Nightly with the standard library's source, for Miri and for
+        # ThreadSanitizer, which rebuilds the standard library.
+        nightly = pkgs.mkShell {
           nativeBuildInputs = [
             (pkgs.rust-bin.selectLatestNightlyWith (toolchain:
               toolchain.minimal.override {extensions = ["miri" "rust-src"];}))

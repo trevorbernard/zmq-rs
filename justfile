@@ -20,7 +20,19 @@ loom *args:
 
 # zmq-pipe's unit tests under Miri, for undefined behavior and data races.
 miri *args:
-    nix develop .#miri -c cargo miri test -p zmq-pipe --lib {{args}}
+    nix develop .#nightly -c cargo miri test -p zmq-pipe --lib {{args}}
+
+# zmq-pipe's tests and the shutdown stress tests under ThreadSanitizer.
+# Doctests are left out: rustdoc builds them without the sanitizer.
+tsan:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTFLAGS="-Zsanitizer=thread" CARGO_TARGET_DIR=target/tsan
+    target=$(rustc -vV | sed -n 's/host: //p')
+    tsan="nix develop .#nightly -c cargo test -Zbuild-std --target $target"
+    $tsan -p zmq-pipe --lib --tests
+    $tsan -p zmq --all-features --test shutdown_stress
+    $tsan -p zmq --all-features --test libzmq shutdown_stress
 
 # Interop tests against libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0).
 test-legacy *args:

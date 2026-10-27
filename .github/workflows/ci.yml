@@ -52,10 +52,11 @@ jobs:
       - name: Loom
         run: nix develop -c just loom
 
-  miri:
-    name: Miri
+  nightly:
+    name: Miri and ThreadSanitizer
     runs-on: ubuntu-24.04
-    # Over the repository's rust-toolchain.toml: Miri needs nightly.
+    # Over the repository's rust-toolchain.toml: Miri and the sanitizers
+    # need nightly.
     env:
       RUSTUP_TOOLCHAIN: nightly
 
@@ -73,6 +74,17 @@ jobs:
 
       - name: Miri
         run: cargo miri test -p zmq-pipe --lib
+
+      # As `just tsan`, without the dev shell.
+      - name: ThreadSanitizer
+        env:
+          RUSTFLAGS: -Zsanitizer=thread
+          CARGO_TARGET_DIR: target/tsan
+        run: |
+          tsan="cargo test -Zbuild-std --target x86_64-unknown-linux-gnu"
+          $tsan -p zmq-pipe --lib --tests
+          $tsan -p zmq --all-features --test shutdown_stress
+          $tsan -p zmq --all-features --test libzmq shutdown_stress
 
   fuzz:
     name: Fuzz
