@@ -92,6 +92,7 @@
           nativeBuildInputs = [
             rust
             pkgs.cargo-audit
+            pkgs.cargo-mutants
             pkgs.cargo-nextest
             pkgs.just
             pkgs.git

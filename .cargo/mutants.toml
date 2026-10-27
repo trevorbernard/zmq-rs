@@ -1,0 +1,3 @@
+# cargo-mutants skips `#[cfg(test)]` modules, but not ones gated on more,
+# such as `cfg(all(test, unix))` or zmq-pipe's `cfg(all(test, loom))`.
+exclude_re = ["tests::"]

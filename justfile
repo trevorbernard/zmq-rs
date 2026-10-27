@@ -34,6 +34,15 @@ tsan:
     $tsan -p zmq --all-features --test shutdown_stress
     $tsan -p zmq --all-features --test libzmq shutdown_stress
 
+# Mutation testing of one crate: the changes to its code that no test
+# notices, in target/mutants/<crate>/mutants.out. zmq-core is tested
+# mostly from above, so its mutants run zmq's and the interop tests too.
+mutants crate *args:
+    cargo mutants --package {{crate}} \
+        {{ if crate == "zmq-core" { "--test-package zmq-core,zmq,zmq-interop" } else { "" } }} \
+        --test-tool nextest --profile mutants --all-features \
+        --output target/mutants/{{crate}} {{args}}
+
 # Interop tests against libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0).
 test-legacy *args:
     cargo nextest run -p zmq-interop --test legacy_peers {{args}}

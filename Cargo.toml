@@ -40,3 +40,10 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
+
+# For `just mutants`: the property tests run forty times faster optimized,
+# and each mutant rebuilds little, so keep builds incremental and lean.
+[profile.mutants]
+inherits = "release"
+incremental = true
+debug = false
