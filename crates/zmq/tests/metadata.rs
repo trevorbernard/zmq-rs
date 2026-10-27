@@ -3,7 +3,10 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Identity, Message, MessageMetadata, Pull, Push, SocketOptions};
+use zmq::{
+    Context, Dealer, Identity, Message, MessageMetadata, MessageProperties, Pull, Push,
+    SocketOptions,
+};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -14,10 +17,22 @@ fn named(identity: &'static str) -> SocketOptions {
     }
 }
 
-/// A message sent from a DEALER named `id` over `transport`, as received.
+fn attaching() -> SocketOptions {
+    SocketOptions {
+        message_properties: MessageProperties::Attach,
+        ..SocketOptions::default()
+    }
+}
+
+/// A message sent from a DEALER named `id` over `transport`, as received by
+/// a socket that attaches metadata.
 fn received_over(transport: &str) -> (Message, Message) {
+    received_with(transport, attaching())
+}
+
+fn received_with(transport: &str, options: SocketOptions) -> (Message, Message) {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Dealer>();
+    let mut server = context.socket_with::<Dealer>(options);
     let endpoint = server.bind(transport).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(named("id"));
     client.connect(&endpoint).unwrap();
@@ -69,6 +84,13 @@ fn a_message_over_inproc_has_no_metadata() {
 }
 
 #[test]
+fn a_socket_attaches_no_metadata_unless_asked() {
+    let (first, second) = received_with("tcp://127.0.0.1:*", SocketOptions::default());
+    assert!(first.metadata().is_none());
+    assert!(second.metadata().is_none());
+}
+
+#[test]
 fn routing_id_is_an_alias_for_identity_only_one_way() {
     let metadata =
         MessageMetadata::new([(zmq::Frame::from("Routing-Id"), zmq::Frame::from("rid"))]);
@@ -95,7 +117,7 @@ fn of_two_properties_with_one_name_the_first_is_kept() {
 #[test]
 fn a_message_passed_on_drops_its_first_connections_metadata() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket_with::<Pull>(attaching());
     let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
@@ -117,7 +139,7 @@ fn a_message_passed_on_drops_its_first_connections_metadata() {
 #[test]
 fn a_conflated_message_carries_its_connections_metadata() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket_with::<Pull>(attaching());
     pull.set_conflate(true);
     let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let mut push = context.socket::<Push>();

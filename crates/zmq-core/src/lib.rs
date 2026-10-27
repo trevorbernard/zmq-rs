@@ -29,7 +29,7 @@ pub use context::IpcAbstractListener;
 pub use context::IpcListener;
 pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, Inbound, InprocListener, Linger, Listener,
-    ShutdownTimedOut, TcpKeepalive,
+    MessageProperties, ShutdownTimedOut, TcpKeepalive,
 };
 pub use monitor::{Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError};
 pub use pair::Pair;

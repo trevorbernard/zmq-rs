@@ -5,7 +5,7 @@ use std::num::NonZeroUsize;
 
 use std::time::Duration;
 
-use zmq_core::{Heartbeat, Linger, Reconnect, Security, TcpKeepalive};
+use zmq_core::{Heartbeat, Linger, MessageProperties, Reconnect, Security, TcpKeepalive};
 use zmq_pipe::Hwm;
 use zmtp::{Frame, Identity};
 
@@ -35,6 +35,11 @@ pub struct SocketOptions {
     /// The largest message accepted from peers, counting all its frames
     /// (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is disconnected.
     pub max_message_size: Option<u64>,
+    /// Whether received messages carry their connection's properties, read
+    /// with [`Message::property`](crate::Message::property) as libzmq's
+    /// `zmq_msg_gets`. Off by default, unlike libzmq, for the throughput of
+    /// small messages.
+    pub message_properties: MessageProperties,
     /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
     /// default.
     pub security: Security,
@@ -63,6 +68,7 @@ impl Default for SocketOptions {
             reconnect: Reconnect::default(),
             immediate: false,
             max_message_size: None,
+            message_properties: MessageProperties::default(),
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
@@ -144,6 +150,14 @@ mod tests {
         assert_eq!(options.recv_hwm, thousand);
         assert_eq!(options.linger, Linger::Forever);
         assert_eq!(options.identity, Identity::default());
+    }
+
+    #[test]
+    fn message_properties_are_off_by_default_unlike_libzmq() {
+        assert_eq!(
+            SocketOptions::default().message_properties,
+            MessageProperties::Off
+        );
     }
 
     #[test]

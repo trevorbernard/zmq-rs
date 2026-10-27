@@ -133,6 +133,8 @@ pub struct ConnectionConfig {
     pub conflate_outbound: bool,
     /// The largest message accepted from the peer, counting all its frames.
     pub max_message_size: Option<u64>,
+    /// Whether messages from the peer carry the connection's properties.
+    pub message_properties: MessageProperties,
     /// How a connecting session retries. Accepted connections never do.
     pub reconnect: Reconnect,
     /// Whether a TCP or IPC connection reaches the socket only once its
@@ -200,6 +202,19 @@ impl Heartbeat {
             ttl: Duration::ZERO,
         }
     }
+}
+
+/// Whether received messages carry the properties of the connection they
+/// arrived on, read with `Message::property` as libzmq's `zmq_msg_gets`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MessageProperties {
+    /// Messages carry none. The default, unlike libzmq, which always
+    /// attaches them: sharing them with every message costs about a
+    /// quarter of the throughput of small messages.
+    #[default]
+    Off,
+    /// Every message over tcp or ipc carries its connection's properties.
+    Attach,
 }
 
 /// How long a closed connection keeps delivering the messages queued on it,
@@ -650,6 +665,7 @@ impl ConnectionConfig {
             conflate_inbound: false,
             conflate_outbound: false,
             max_message_size: None,
+            message_properties: MessageProperties::default(),
             reconnect: Reconnect::default(),
             immediate: false,
             linger: Linger::default(),

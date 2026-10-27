@@ -230,7 +230,10 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
 /// announced no properties: there is no READY before ZMTP 3.0.
 fn we_pull_from_an_old_push(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket_with::<Pull>(SocketOptions {
+        message_properties: zmq::MessageProperties::Attach,
+        ..SocketOptions::default()
+    });
     let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;

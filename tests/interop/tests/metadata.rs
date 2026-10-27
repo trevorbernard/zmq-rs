@@ -3,15 +3,22 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Identity, SocketOptions};
+use zmq::{Context, Dealer, Identity, MessageProperties, SocketOptions};
 use zmq_interop::libzmq::{Kind, Msg, Socket};
 
 const FIVE: Duration = Duration::from_secs(5);
 
+fn attaching() -> SocketOptions {
+    SocketOptions {
+        message_properties: MessageProperties::Attach,
+        ..SocketOptions::default()
+    }
+}
+
 #[test]
 fn we_read_what_a_libzmq_peer_announces() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Dealer>();
+    let mut ours = context.socket_with::<Dealer>(attaching());
     let endpoint = ours.bind("tcp://127.0.0.1:*").unwrap();
     let theirs = Socket::new(Kind::Dealer);
     theirs.set_routing_id(b"theirs");
@@ -61,6 +68,7 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     let addr = first.bind_loopback();
     let context = Context::new().unwrap();
     let mut ours = context.socket_with::<zmq::Pull>(SocketOptions {
+        message_properties: MessageProperties::Attach,
         reconnect: zmq::Reconnect::Fixed {
             interval: Duration::from_millis(10),
         },

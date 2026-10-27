@@ -27,8 +27,8 @@ use crate::context::PeerSlot;
 use crate::output::Output;
 use crate::transport::Stream;
 use crate::{
-    Authenticator, ConnectionConfig, HandshakeFailure, ProtocolError, Security, Topics,
-    ZapResponder,
+    Authenticator, ConnectionConfig, HandshakeFailure, MessageProperties, ProtocolError, Security,
+    Topics, ZapResponder,
 };
 
 /// The shortest PING interval, so a zero interval cannot spin.
@@ -106,7 +106,9 @@ enum State {
         pending: Option<Message>,
         /// What `zmq_msg_gets` reads on every message from this peer, until
         /// attached to the first: the socket's [`Inbound`] gives it to the
-        /// rest. Empty if the connection has none, so that is known too.
+        /// rest. Empty if the connection has none, so that is known too;
+        /// `None` from the start unless the socket attaches message
+        /// properties.
         ///
         /// [`Inbound`]: crate::Inbound
         metadata: Option<MessageMetadata>,
@@ -665,7 +667,8 @@ impl Engine {
             }
             Step::Established(established, codec) => {
                 let version = established.version;
-                let metadata = Some(connection_metadata(&self.stream, &established));
+                let metadata = (self.config.message_properties == MessageProperties::Attach)
+                    .then(|| connection_metadata(&self.stream, &established));
                 self.curve = codec.map(|mut codec| {
                     codec.set_max_message_size(self.config.max_message_size);
                     codec

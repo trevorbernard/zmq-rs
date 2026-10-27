@@ -126,9 +126,9 @@ pub use socket::{
     XPub, XSub,
 };
 pub use zmq_core::{
-    Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, Monitor, PeerGone,
-    ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError, TcpKeepalive,
-    TryRecvError, Verbosity, XPubEvent, ZapResponder,
+    Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
+    Monitor, PeerGone, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security,
+    SendError, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{

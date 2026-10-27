@@ -669,6 +669,7 @@ impl<T: SocketType> Socket<T> {
             linger: options.linger,
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
+            message_properties: options.message_properties,
             security: options.security,
             heartbeat: options.heartbeat,
             tcp_keepalive: options.tcp_keepalive,
