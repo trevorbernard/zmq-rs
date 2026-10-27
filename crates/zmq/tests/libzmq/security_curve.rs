@@ -240,21 +240,39 @@ fn curve_security_with_bogus_client_credentials() {
     assert!(fixture.zap_requests.load(Ordering::SeqCst) >= 1);
 }
 
+fn is_mechanism_mismatch(event: &EventKind) -> bool {
+    matches!(
+        event,
+        EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Greeting(
+            GreetingError::MechanismMismatch { .. }
+        )))
+    )
+}
+
 /// A client speaking another mechanism is refused by the greeting, without
 /// asking ZAP.
+///
+/// libzmq asserts that the server reports the mismatch. But whichever end
+/// sees the other's mechanism first closes without sending the rest of
+/// its own greeting, in libzmq as here (`stream_engine_base_t::error`
+/// drops queued output), so the other end may see only the connection
+/// drop. Either way, one end reports the mismatch.
 fn expect_zmtp_mechanism_mismatch(security: Security) {
     let mut fixture = Fixture::new();
-    let (mut client, _) = fixture.client(security);
+    let (mut client, mut client_monitor) = fixture.client(security);
     fixture.expect_bounce_fail(&mut client);
-    let events = handshake_events(&mut fixture.server_monitor, FIVE);
+    let server = handshake_events(&mut fixture.server_monitor, FIVE);
+    let client = handshake_events(&mut client_monitor, FIVE);
+    let dropped = EventKind::HandshakeFailed(HandshakeFailure::NoDetail);
     assert!(
-        events.iter().any(|event| matches!(
-            event,
-            EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Greeting(
-                GreetingError::MechanismMismatch { .. }
-            )))
-        )),
-        "{events:?}"
+        server
+            .iter()
+            .all(|event| is_mechanism_mismatch(event) || *event == dropped),
+        "{server:?}"
+    );
+    assert!(
+        server.iter().chain(&client).any(is_mechanism_mismatch),
+        "server {server:?}, client {client:?}"
     );
     assert_eq!(fixture.zap_requests.load(Ordering::SeqCst), 0);
 }
