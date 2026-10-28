@@ -712,6 +712,35 @@ mod tests {
     }
 
     #[test]
+    fn a_conflated_pipe_wakes_a_waiting_reader_once() {
+        let (mut writer, mut reader) = pipe_conflated();
+        let (count, waker) = counting_waker();
+        assert!(
+            reader
+                .poll_recv(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        writer.try_send(1).unwrap();
+        writer.try_send(2).unwrap();
+        assert_eq!(wakes(&count), 1, "until the reader waits again");
+    }
+
+    #[test]
+    fn a_conflated_pipe_wakes_a_reader_waiting_for_close_only_on_close() {
+        let (mut writer, mut reader) = pipe_conflated();
+        let (count, waker) = counting_waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(reader.poll_recv(&mut cx).is_pending());
+        writer.try_send(1).unwrap();
+        assert_eq!(reader.try_recv(), Ok(1));
+        assert!(reader.poll_closed(&mut cx).is_pending());
+        writer.try_send(2).unwrap();
+        assert_eq!(wakes(&count), 1);
+        drop(writer);
+        assert_eq!(wakes(&count), 2);
+    }
+
+    #[test]
     fn handles_are_send() {
         fn assert_send<T: Send>() {}
         assert_send::<Writer<Vec<u8>>>();
@@ -768,6 +797,22 @@ mod tests {
         writer.try_send(1).unwrap();
         writer.try_send(2).unwrap();
         assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+    }
+
+    #[test]
+    fn a_raised_mark_counts_only_what_is_queued() {
+        let (mut writer, mut reader) = pipe(hwm(2));
+        for i in 0..100 {
+            writer.try_send(i).unwrap();
+            assert_eq!(reader.try_recv(), Ok(i));
+        }
+        writer.try_send(100).unwrap();
+        writer.try_send(101).unwrap();
+        assert_eq!(writer.try_send(102), Err(TrySendError::Full(102)));
+        reader.raise_hwm(hwm(4));
+        writer.try_send(102).unwrap();
+        writer.try_send(103).unwrap();
+        assert_eq!(writer.try_send(104), Err(TrySendError::Full(104)));
     }
 
     #[test]
