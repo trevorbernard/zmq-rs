@@ -177,6 +177,11 @@ fn dropping_the_connection_closes_the_tcp_stream() {
     )
     .unwrap();
     assert_eq!(peer.established.peer_identity, Frame::from("bye"));
+    // Closing with the peer's READY still unread would reset the stream, so
+    // the connection reads past it first.
+    peer.send(&message(&[b"read"])).unwrap();
+    let (connection, read) = recv(connection);
+    assert_eq!(read, Some(message(&[b"read"])));
     drop(connection);
     let result = within(Duration::from_secs(5), move || peer.recv());
     assert!(matches!(result, Err(ConnectError::Closed)), "{result:?}");
