@@ -41,9 +41,18 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
-# For `just mutants`: the property tests run forty times faster optimized,
-# and each mutant rebuilds little, so keep builds incremental and lean.
+# For `just mutants`: unoptimized for quick rebuilds, without debug info
+# for quick links, but optimizing what the property tests spend their time
+# in, which runs them forty times faster.
 [profile.mutants]
-inherits = "release"
-incremental = true
+inherits = "dev"
 debug = false
+
+[profile.mutants.package.zmtp]
+opt-level = 3
+
+[profile.mutants.package.proptest]
+opt-level = 3
+
+[profile.mutants.package.dryoc]
+opt-level = 3

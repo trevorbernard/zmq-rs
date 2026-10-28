@@ -35,11 +35,16 @@ tsan:
     $tsan -p zmq --all-features --test libzmq shutdown_stress
 
 # Mutation testing of one crate: the changes to its code that no test
-# notices, in target/mutants/<crate>/mutants.out. zmq-core is tested
-# mostly from above, so its mutants run zmq's and the interop tests too.
+# notices, in target/mutants/<crate>/mutants.out; `--iterate` retests only
+# what earlier runs left. zmq-core is tested mostly from above, so its
+# mutants run zmq's tests too; the interop tests would double each run.
+# cargo-mutants 27 ignores --test-package under --package, or without
+# --test-workspace=false, so the crate is picked by its files. Its baseline
+# still runs only the crate's own tests, so zmq-core's timeout, which would
+# follow from those, is set.
 mutants crate *args:
-    cargo mutants --package {{crate}} \
-        {{ if crate == "zmq-core" { "--test-package zmq-core,zmq,zmq-interop" } else { "" } }} \
+    cargo mutants --file 'crates/{{crate}}/**' --test-workspace=false \
+        {{ if crate == "zmq-core" { "--test-package zmq-core --test-package zmq --timeout 90" } else { "--test-package " + crate } }} \
         --test-tool nextest --profile mutants --all-features \
         --output target/mutants/{{crate}} {{args}}
 
