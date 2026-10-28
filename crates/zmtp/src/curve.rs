@@ -1088,6 +1088,103 @@ mod tests {
     }
 
     #[test]
+    fn welcome_nonces_and_cookies_are_fresh_for_each_connection() {
+        let welcome_nonce = |run: &Run| commands(&run.wire[1])[0][8..][..LONG_NONCE].to_vec();
+        let cookie_nonce = |run: &Run| commands(&run.wire[2])[0][9..][..LONG_NONCE].to_vec();
+        let first = run_to_zap(SocketType::Dealer, SocketType::Router);
+        let second = run_to_zap(SocketType::Dealer, SocketType::Router);
+        assert_ne!(welcome_nonce(&first), welcome_nonce(&second));
+        assert_ne!(cookie_nonce(&first), cookie_nonce(&second));
+    }
+
+    #[test]
+    fn long_nonces_are_a_prefix_then_sixteen_octets() {
+        let nonce = long_nonce(b"WELCOME-", &[7; LONG_NONCE]);
+        assert_eq!(nonce[..8], *b"WELCOME-");
+        assert_eq!(nonce[8..], [7; LONG_NONCE]);
+    }
+
+    /// A command named `name` whose data is `len` zero octets.
+    fn zeroed(name: &[u8], len: usize) -> Incoming {
+        let mut body = vec![name.len() as u8];
+        body.extend_from_slice(name);
+        body.resize(body.len() + len, 0);
+        Incoming::Command(Frame::from(body))
+    }
+
+    fn server_awaiting_initiate() -> CurveServer {
+        let server_keys = Keypair::generate();
+        let mut hello = Vec::new();
+        let _client = CurveClient::start(
+            SocketType::Dealer,
+            Identity::default(),
+            &Keypair::generate(),
+            server_keys.public(),
+            &V3_1,
+            &mut hello,
+        )
+        .unwrap();
+        let server =
+            CurveServer::start(server_config(SocketType::Router), &server_keys, &V3_1).unwrap();
+        let CurveServerStep::Continue(server) =
+            server.receive(only(&hello), &mut Vec::new()).unwrap()
+        else {
+            panic!("expected WELCOME");
+        };
+        server
+    }
+
+    #[test]
+    fn a_ready_too_short_for_its_box_is_malformed() {
+        let shortest = SHORT_NONCE + TAG;
+        let client = run_to_zap(SocketType::Dealer, SocketType::Router).client;
+        assert_eq!(
+            client
+                .receive(zeroed(b"READY", shortest - 1), &mut Vec::new())
+                .unwrap_err(),
+            malformed("READY")
+        );
+        let client = run_to_zap(SocketType::Dealer, SocketType::Router).client;
+        assert_eq!(
+            client
+                .receive(zeroed(b"READY", shortest), &mut Vec::new())
+                .unwrap_err(),
+            HandshakeError::Cryptographic
+        );
+    }
+
+    #[test]
+    fn an_initiate_too_short_for_its_boxes_is_malformed() {
+        let shortest = COOKIE + SHORT_NONCE + KEY + LONG_NONCE + VOUCH + TAG;
+        assert_eq!(
+            server_awaiting_initiate()
+                .receive(zeroed(b"INITIATE", shortest - 1), &mut Vec::new())
+                .unwrap_err(),
+            malformed("INITIATE")
+        );
+        assert_eq!(
+            server_awaiting_initiate()
+                .receive(zeroed(b"INITIATE", shortest), &mut Vec::new())
+                .unwrap_err(),
+            HandshakeError::Cryptographic
+        );
+    }
+
+    #[test]
+    fn a_message_too_short_for_its_box_and_flags_is_malformed() {
+        let (_, mut server) = established();
+        let shortest = SHORT_NONCE + TAG + 1;
+        assert_eq!(
+            server.decode(zeroed(b"MESSAGE", shortest - 1)),
+            Err(CurveError::Malformed)
+        );
+        assert_ne!(
+            server.decode(zeroed(b"MESSAGE", shortest)),
+            Err(CurveError::Malformed)
+        );
+    }
+
+    #[test]
     fn a_command_framed_message_is_accepted_too() {
         let (mut client, mut server) = established();
         let frames = boxed(&mut client, &Message::from("as RFC 25 frames it"));

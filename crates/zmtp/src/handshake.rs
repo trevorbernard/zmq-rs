@@ -731,6 +731,20 @@ mod tests {
     }
 
     #[test]
+    fn zmtp_2_identity_frames_may_hold_255_octets() {
+        let peer = PeerGreeting::Zmtp2 { socket_type: 6 };
+        let identity = |len| Incoming::Message(Message::new(vec![b'x'; len]));
+        let (handshake, _) = start(SocketType::Dealer, &peer);
+        let established = handshake.receive(identity(255), &mut Vec::new()).unwrap();
+        assert_eq!(established.peer_identity.len(), 255);
+        let (handshake, _) = start(SocketType::Dealer, &peer);
+        assert_eq!(
+            handshake.receive(identity(256), &mut Vec::new()),
+            Err(HandshakeError::InvalidPeerIdentity)
+        );
+    }
+
+    #[test]
     fn zmtp_2_incompatible_peer_is_refused_silently() {
         let mut out = Vec::new();
         let peer = PeerGreeting::Zmtp2 { socket_type: 1 };

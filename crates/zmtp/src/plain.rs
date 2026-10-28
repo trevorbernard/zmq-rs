@@ -377,6 +377,17 @@ mod tests {
     }
 
     #[test]
+    fn client_waiting_for_welcome_refuses_another_command() {
+        let (client, _) = client();
+        let mut out = Vec::new();
+        assert_eq!(
+            client.receive(raw("WELCOMX", b""), &mut out).unwrap_err(),
+            HandshakeError::UnexpectedCommand(Frame::from("WELCOMX"))
+        );
+        assert!(out.is_empty(), "no INITIATE");
+    }
+
+    #[test]
     fn client_is_established_by_ready() {
         let client = welcomed_client();
         let ready = metadata_command("READY", &[("Socket-Type", "ROUTER"), ("Identity", "srv")]);
