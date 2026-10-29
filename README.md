@@ -1,6 +1,7 @@
 # zmq-rs
 
 [![CI](https://github.com/trevorbernard/zmq-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/trevorbernard/zmq-rs/actions/workflows/ci.yml)
+[![Fuzz](https://github.com/trevorbernard/zmq-rs/actions/workflows/fuzz.yml/badge.svg?branch=main)](https://github.com/trevorbernard/zmq-rs/actions/workflows/fuzz.yml)
 
 An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
 
@@ -13,6 +14,7 @@ An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
   and message properties (`zmq_msg_gets`, opt-in).
 
 See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
+[docs/architecture.md](docs/architecture.md) compares the runtime with libzmq's.
 [docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
 Requires Rust 1.99.
 
@@ -276,13 +278,16 @@ disconnect messages, and a few other options. The full list is in
   tcp and ipc, with zmq-rs on either side (`tests/interop`).
 - **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
   separate processes the Nix dev shell builds (`just test-legacy`).
-- **libzmq's own regression tests,** 65 of its 139 ported, the rest listed
+- **libzmq's own regression tests,** 66 of its 139 ported, the rest listed
   with why (`crates/zmq/tests/libzmq`).
 - **Property tests against models:** subscription matching, XPUB events,
   ROUTER routing, pipes, the codec and handshakes.
-- **Fuzzing** of every handshake and the framing, seeded with libzmq's
-  corpora and its security advisories' reproducers, in CI and weekly
-  ([fuzz/README.md](fuzz/README.md)).
+- **Fuzzing** of every handshake and the framing, and of the sockets
+  through a real connection, seeded with libzmq's corpora and its security
+  advisories' reproducers, in CI and weekly ([fuzz/README.md](fuzz/README.md)).
+- **Concurrency checks:** `zmq-pipe`'s queue under loom and Miri, and its
+  tests and the shutdown stress tests under ThreadSanitizer, in CI.
+- **Mutation testing** with cargo-mutants, per crate (`just mutants zmtp`).
 - **The ZeroMQ Guide's examples,** 76 of them, in [examples](examples).
 
 ## Development
@@ -290,8 +295,10 @@ disconnect messages, and a few other options. The full list is in
 ```sh
 nix develop        # or `direnv allow`
 just               # lists the workflows
-just ci            # rustfmt, clippy, tests, as CI runs them
+just ci            # rustfmt, clippy, tests, loom, as CI runs them
 just test-legacy   # against libzmq 2.2 and 3.2
+just loom          # zmq-pipe's queue, every interleaving; also miri, tsan
+just mutants zmtp  # changes to a crate's code that no test notices
 just perf          # throughput and latency next to libzmq
 just fuzz-all      # every fuzz target, a minute each
 nix flake check    # tests, clippy, rustfmt, as Nix builds them
