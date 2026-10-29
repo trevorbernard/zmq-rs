@@ -5,8 +5,8 @@
 default:
     @just --list
 
-# Everything CI checks.
-ci: fmt-check clippy test
+# CI's main job; its nightly ones are `just miri`, `just tsan` and `just fuzz-all`.
+ci: fmt-check clippy test loom
 
 # Tests; arguments filter, as for nextest. Doctests run only unfiltered.
 test *args:
