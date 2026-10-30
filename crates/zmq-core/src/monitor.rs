@@ -178,4 +178,24 @@ mod tests {
         assert!(monitor.try_recv().is_ok());
         assert_eq!(monitor.try_recv(), Err(TryRecvError::Closed));
     }
+
+    #[test]
+    fn each_way_of_waiting_gets_the_next_event_then_none_once_closed() {
+        let sink = MonitorSink::default();
+        let mut monitor = sink.monitor();
+        for _ in 0..3 {
+            sink.emit("tcp://127.0.0.1:1", EventKind::Closed);
+        }
+        drop(sink);
+        let (_, waker) = crate::test_support::waker();
+        let mut cx = Context::from_waker(&waker);
+        assert!(matches!(monitor.poll_recv(&mut cx), Poll::Ready(Some(_))));
+        assert!(monitor.recv().is_some());
+        {
+            let next = std::pin::pin!(monitor.recv_async());
+            assert!(matches!(next.poll(&mut cx), Poll::Ready(Some(_))));
+        }
+        assert!(matches!(monitor.poll_recv(&mut cx), Poll::Ready(None)));
+        assert_eq!(monitor.recv(), None);
+    }
 }

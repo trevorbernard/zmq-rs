@@ -1298,6 +1298,19 @@ mod tests {
     }
 
     #[test]
+    fn peers_count_their_connections() {
+        let context = crate::Context::new().unwrap();
+        let mut peers = Peers::new(context, ConnectionConfig::new(zmtp::SocketType::Push));
+        assert!(peers.is_empty());
+        let (first, _) = peers.connect_inproc("one");
+        peers.connect_inproc("two");
+        assert_eq!(peers.len(), 2);
+        assert!(!peers.is_empty());
+        peers.close(first);
+        assert_eq!(peers.len(), 1);
+    }
+
+    #[test]
     fn load_balancer_waits_when_every_peer_is_full() {
         let (a, mut sa) = connection(1);
         let mut peers = list(vec![a]);

@@ -1112,4 +1112,187 @@ mod tests {
         assert_eq!(hwm_sum(two, Hwm::Unlimited), Hwm::Unlimited);
         assert_eq!(hwm_sum(Hwm::Unlimited, two), Hwm::Unlimited);
     }
+
+    /// Polls `poll` until it is ready, failing after five seconds.
+    fn ready<T>(mut poll: impl FnMut(&mut std::task::Context<'_>) -> Poll<T>) -> T {
+        let (_, waker) = crate::test_support::waker();
+        let mut cx = std::task::Context::from_waker(&waker);
+        let started = Instant::now();
+        loop {
+            if let Poll::Ready(value) = poll(&mut cx) {
+                return value;
+            }
+            assert!(started.elapsed() < Duration::from_secs(5), "never ready");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn a_tcp_listener_accepts_by_polling_and_blocking() {
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind("127.0.0.1:0".parse().unwrap(), config(SocketType::Pull))
+            .unwrap();
+        let _first = context.connect(listener.local_addr(), config(SocketType::Push));
+        let _second = context.connect(listener.local_addr(), config(SocketType::Push));
+        assert!(ready(|cx| listener.poll_accept(cx)).is_some());
+        assert!(listener.accept_blocking().is_some());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_ipc_listener_accepts_by_polling_and_waiting() {
+        let context = Context::new().unwrap();
+        let mut listener = context.bind_ipc_anywhere(config(SocketType::Pull)).unwrap();
+        let _first = context.connect_ipc(listener.path(), config(SocketType::Push));
+        let _second = context.connect_ipc(listener.path(), config(SocketType::Push));
+        assert!(ready(|cx| listener.poll_accept(cx)).is_some());
+        let mut accept = std::pin::pin!(listener.accept());
+        assert!(ready(|cx| accept.as_mut().poll(cx)).is_some());
+    }
+
+    #[test]
+    fn listeners_know_their_names() {
+        let context = Context::new().unwrap();
+        let inproc = context
+            .bind_inproc("named", config(SocketType::Pull))
+            .unwrap();
+        assert_eq!(inproc.name(), "named");
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        {
+            let name = format!("zmq-core-named-{}", std::process::id());
+            let abstract_ipc = context
+                .bind_ipc_abstract(&name, config(SocketType::Pull))
+                .unwrap();
+            assert_eq!(abstract_ipc.name(), name);
+        }
+    }
+
+    #[test]
+    fn inbound_is_closed_once_its_peer_is_gone() {
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind_inproc("closing", config(SocketType::Pair))
+            .unwrap();
+        let client = context.connect_inproc("closing", config(SocketType::Pair));
+        let server = listener.try_accept().unwrap();
+        assert!(!server.rx.is_closed());
+        drop(client);
+        assert!(server.rx.is_closed());
+    }
+
+    /// Sends a message too large for the kernel's socket buffers to take at
+    /// once, then shuts the sending context down, with the connection still
+    /// held or dropped first.
+    fn shutdown_delivers_a_large_message_whole(hold_connection: bool) {
+        const LEN: usize = 32 << 20;
+        let receiving = Context::new().unwrap();
+        let mut listener = receiving
+            .bind("127.0.0.1:0".parse().unwrap(), config(SocketType::Pull))
+            .unwrap();
+        let sending = Context::new().unwrap();
+        let mut connection = sending.connect(listener.local_addr(), config(SocketType::Push));
+        connection
+            .tx
+            .try_send(Message::new(vec![7u8; LEN]))
+            .unwrap();
+        let held = hold_connection.then_some(connection);
+        sending.shutdown(Duration::from_secs(5)).unwrap();
+        drop(held);
+        let mut accepted = listener.accept_blocking().unwrap();
+        let message = accepted.rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(message.last().len(), LEN);
+    }
+
+    #[test]
+    fn shutdown_delivers_a_large_message_whole_on_an_open_connection() {
+        shutdown_delivers_a_large_message_whole(true);
+    }
+
+    #[test]
+    fn shutdown_delivers_a_large_message_whole_on_a_dropped_connection() {
+        shutdown_delivers_a_large_message_whole(false);
+    }
+
+    #[test]
+    fn a_connect_made_while_shutting_down_is_closed() {
+        let unreachable = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let context = Context::new().unwrap();
+        // Holds the shutdown open for its linger: nobody can take it.
+        let mut lingering = context.connect(
+            unreachable,
+            ConnectionConfig {
+                linger: Linger::For(Duration::from_secs(1)),
+                ..config(SocketType::Push)
+            },
+        );
+        lingering
+            .tx
+            .try_send(Message::new("never delivered"))
+            .unwrap();
+        drop(lingering);
+        let shutting = context.clone();
+        let shutdown = std::thread::spawn(move || shutting.shutdown(Duration::from_secs(5)));
+        std::thread::sleep(Duration::from_millis(100));
+        let mut late = context.connect(unreachable, config(SocketType::Pull));
+        assert_eq!(
+            late.rx.recv_timeout(Duration::from_millis(500)),
+            Err(zmq_pipe::RecvTimeoutError::Closed)
+        );
+        assert_eq!(shutdown.join().unwrap(), Ok(()));
+    }
+
+    #[test]
+    fn a_linger_shorter_than_the_shutdown_timeout_ends_the_shutdown_sooner() {
+        let unreachable = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let context = Context::new().unwrap();
+        let mut connection = context.connect(
+            unreachable,
+            ConnectionConfig {
+                linger: Linger::For(Duration::from_millis(100)),
+                ..config(SocketType::Push)
+            },
+        );
+        connection
+            .tx
+            .try_send(Message::new("never delivered"))
+            .unwrap();
+        let started = Instant::now();
+        let _ = context.shutdown(Duration::from_secs(10));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    #[test]
+    fn empty_metadata_clears_what_earlier_messages_carried() {
+        let (mut writer, reader) = pipe(Hwm::Unlimited);
+        let mut inbound = Inbound::new(reader);
+        let mut first = Message::new("first");
+        first.set_metadata(Some(MessageMetadata::new([(
+            Frame::from("Socket-Type"),
+            Frame::from("PUSH"),
+        )])));
+        let mut reconnected = Message::new("reconnected");
+        reconnected.set_metadata(Some(MessageMetadata::new(std::iter::empty())));
+        for message in [
+            first,
+            Message::new("second"),
+            reconnected,
+            Message::new("third"),
+        ] {
+            writer.try_send(message).unwrap();
+        }
+        assert!(inbound.try_recv().unwrap().metadata().is_some());
+        assert!(
+            inbound.try_recv().unwrap().metadata().is_some(),
+            "carried on"
+        );
+        assert!(inbound.try_recv().unwrap().metadata().is_none());
+        assert!(inbound.try_recv().unwrap().metadata().is_none());
+    }
 }

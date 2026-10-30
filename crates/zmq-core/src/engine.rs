@@ -1063,3 +1063,17 @@ fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, every
         message.set_metadata(attached);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn an_error_reason_is_a_zap_status_only_if_it_is_a_failure() {
+        for status in [300, 400, 500] {
+            assert_eq!(zap_status(status.to_string().as_bytes()), Some(status));
+        }
+        assert_eq!(zap_status(b"200"), None);
+        assert_eq!(zap_status(b"Invalid client public key"), None);
+    }
+}

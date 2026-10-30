@@ -408,6 +408,22 @@ mod tests {
         assert!(peers.is_empty(), "the closed peer is removed");
     }
 
+    #[test]
+    fn a_peer_dropped_from_the_list_ends_the_wait() {
+        let (a, _sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut requester = Requester::default();
+        let (_, waker) = waker();
+        let mut cx = TaskContext::from_waker(&waker);
+        let outstanding = requester.poll_send(&mut peers, msg("q"), &mut cx).unwrap();
+        // As a disconnect drops it, with its session still open.
+        peers.retain_mut(|_| false);
+        assert_eq!(
+            requester.poll_reply(&mut peers, &outstanding, &mut cx),
+            Poll::Ready(Err(PeerGone))
+        );
+    }
+
     // ---- Replier ----
 
     #[test]

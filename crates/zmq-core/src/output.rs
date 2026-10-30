@@ -327,4 +327,156 @@ mod tests {
         assert_eq!(stream.written, expected);
         assert!(stream.vectored >= 200 * 2 / MAX_SLICES);
     }
+
+    #[test]
+    fn each_write_takes_a_full_batch_of_slices() {
+        let mut output = Output::default();
+        for i in 0..192u8 {
+            output.buf.push(i);
+            output.push_shared(Bytes::from(vec![i; 4]));
+        }
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: usize::MAX,
+            vectored: 0,
+        };
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(stream.vectored, 192 * 2 / MAX_SLICES);
+    }
+
+    #[test]
+    fn copied_octets_after_a_batch_of_slices_wait_for_the_next_write() {
+        let mut output = Output::default();
+        let mut expected = Vec::new();
+        for i in 0..(MAX_SLICES / 2) as u8 {
+            output.buf.push(i);
+            output.push_shared(Bytes::from(vec![i; 4]));
+            expected.push(i);
+            expected.extend_from_slice(&[i; 4]);
+        }
+        output.buf.extend_from_slice(b"tail");
+        expected.extend_from_slice(b"tail");
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: usize::MAX,
+            vectored: 0,
+        };
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(stream.written, expected);
+    }
+
+    #[test]
+    fn payloads_without_copied_octets_between_them_fill_a_batch() {
+        // One slice, then pairs: an odd count when the batch fills.
+        let mut output = Output::default();
+        let mut expected = Vec::new();
+        output.push_shared(Bytes::from_static(b"first"));
+        expected.extend_from_slice(b"first");
+        for i in 0..MAX_SLICES as u8 {
+            output.buf.push(i);
+            output.push_shared(Bytes::from(vec![i; 4]));
+            expected.push(i);
+            expected.extend_from_slice(&[i; 4]);
+        }
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: usize::MAX,
+            vectored: 0,
+        };
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(stream.written, expected);
+    }
+
+    #[test]
+    fn copied_octets_after_the_last_payload_go_in_its_write() {
+        let mut output = Output::default();
+        output.push_shared(Bytes::from_static(b"payload"));
+        output.buf.extend_from_slice(b"tail");
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: usize::MAX,
+            vectored: 0,
+        };
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(stream.written, b"payloadtail");
+        assert_eq!(stream.vectored, 1);
+    }
+
+    #[test]
+    fn written_octets_are_dropped_once_they_are_half_the_buffer() {
+        let mut output = Output::default();
+        output.buf.extend_from_slice(&[7; 100]);
+        let mut stream = Trickle {
+            written: Vec::new(),
+            limit: usize::MAX,
+            budget: 40,
+            vectored: 0,
+        };
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(output.buf.len(), 100, "kept while under half is written");
+        stream.budget = 20;
+        output.write_to(&mut stream).unwrap();
+        assert_eq!(output.buf.len(), 40);
+        assert_eq!(output.len(), 40);
+    }
+
+    #[test]
+    fn an_interrupted_write_is_retried() {
+        struct Interrupted(bool, Vec<u8>);
+
+        impl Write for Interrupted {
+            fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+                if std::mem::take(&mut self.0) {
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                self.1.write(buf)
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut output = Output::default();
+        output.buf.extend_from_slice(b"abc");
+        let mut stream = Interrupted(true, Vec::new());
+        assert!(output.write_to(&mut stream).unwrap());
+        assert_eq!(stream.1, b"abc");
+    }
+
+    #[test]
+    fn a_failed_write_is_returned() {
+        struct Broken;
+
+        impl Write for Broken {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::ErrorKind::BrokenPipe.into())
+            }
+
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+
+        let mut output = Output::default();
+        output.buf.extend_from_slice(b"abc");
+        let err = output.write_to(&mut Broken).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::BrokenPipe);
+        assert_eq!(output.len(), 3);
+    }
+
+    #[test]
+    fn payloads_of_a_batch_or_more_are_sent_from_their_own_buffers() {
+        // libzmq's 8 KiB batch.
+        let encoder = Encoder::new(zmtp::Version::V3_1);
+        let mut output = Output::default();
+        output.encode(encoder, Message::new(vec![0u8; 8 * 1024 - 1]));
+        assert!(output.shared.is_empty());
+        output.encode(encoder, Message::new(vec![0u8; 8 * 1024]));
+        assert_eq!(output.shared.len(), 1);
+    }
 }
