@@ -91,7 +91,8 @@ fn a_denied_peer_hears_400_and_gets_nothing_through() {
     let mut push = context.socket::<Push>();
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
-    push.send("keep out");
+    // A refused client has no pipe left, so `send` could block for good.
+    let _ = push.try_send("keep out");
     let denied = EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 });
     assert_eq!(expect(&mut server, |kind| *kind == denied), denied);
     assert_eq!(expect(&mut client, |kind| *kind == denied), denied);

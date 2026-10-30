@@ -112,7 +112,8 @@ fn the_authenticator_sees_the_clients_public_key() {
         server_key,
     )));
     stranger.connect(&bound.to_string()).unwrap();
-    stranger.send("me too");
+    // A refused client has no pipe left, so `send` could block for good.
+    let _ = stranger.try_send("me too");
 
     let (from, message, mut router) = within(FIVE, move || {
         let (from, message) = router.recv();
@@ -158,7 +159,8 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
         ..SocketOptions::default()
     });
     push.connect(&bound.to_string()).unwrap();
-    push.send("in the clear");
+    // A refused client has no pipe left, so `send` could block for good.
+    let _ = push.try_send("in the clear");
     thread::sleep(Duration::from_millis(300));
     assert_eq!(pull.try_recv(), None);
 }
