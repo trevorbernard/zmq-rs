@@ -9,7 +9,6 @@
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpListener;
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
@@ -158,8 +157,7 @@ fn unhex(hex: &str) -> Vec<u8> {
 
 /// A TCP endpoint nothing listens on: libzmq 2.x cannot bind port 0.
 fn free_endpoint() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("tcp://{}", listener.local_addr().unwrap())
+    format!("tcp://{}", zmq_interop::free_port())
 }
 
 fn named(identity: &'static str) -> SocketOptions {
