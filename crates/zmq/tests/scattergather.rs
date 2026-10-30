@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Frame, Gather, Scatter};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -26,7 +27,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn scatter_and_gather_over_tcp() {
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
-    let bound = gather.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = gather.bind(&free_endpoint()).unwrap();
     let mut scatter = context.socket::<Scatter>();
     scatter.connect(&bound.to_string()).unwrap();
     for i in 0..10 {

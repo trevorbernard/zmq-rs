@@ -8,6 +8,7 @@ use zmq::{
     SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_interop::libzmq::{self, Kind, Socket};
+use zmq_test_ports::{free_endpoint, free_port};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -41,7 +42,7 @@ fn we_authenticate_a_libzmq_null_peer() {
         }),
         ..SocketOptions::default()
     });
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     push.send(&[b"from libzmq"]).unwrap();
@@ -66,7 +67,7 @@ fn we_refuse_a_libzmq_null_peer() {
         ..SocketOptions::default()
     });
     let mut monitor = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     push.send(&[b"keep out"]).unwrap();
@@ -116,7 +117,7 @@ fn the_connection_records_whom_zap_accepted() {
     let core = Core::new().unwrap();
     let mut listener = core
         .bind(
-            "127.0.0.1:0".parse().unwrap(),
+            free_port(),
             ConnectionConfig {
                 security: Security::null_authenticated("lan", |_: &ZapRequest| ZapReply::Ok {
                     user_id: Frame::from("trusted host"),

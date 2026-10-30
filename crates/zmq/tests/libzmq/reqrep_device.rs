@@ -2,6 +2,7 @@
 //! passed by hand through a ROUTER-DEALER device.
 
 use zmq::{Context, Dealer, Frame, Message, Rep, Req, Router, RoutingId};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, Requesting, msg};
 
@@ -10,9 +11,9 @@ fn roundtrip() {
     // Create a req/rep device.
     let context = Context::new().unwrap();
     let mut dealer = context.socket::<Dealer>();
-    let endpoint1 = dealer.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint1 = dealer.bind(&free_endpoint()).unwrap().to_string();
     let mut router = context.socket::<Router>();
-    let endpoint2 = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint2 = router.bind(&free_endpoint()).unwrap().to_string();
 
     // Create a worker.
     let mut rep = context.socket::<Rep>();

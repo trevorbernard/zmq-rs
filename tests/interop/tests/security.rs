@@ -9,6 +9,7 @@ use zmq_core::{
     Connection, ConnectionConfig, Context, Listener, Reconnect, Security, ZapResponder,
 };
 use zmq_interop::libzmq::{self, Kind, Socket};
+use zmq_test_ports::free_port;
 use zmtp::{
     Credential, Frame, Identity, Message, Metadata, PlainCredentials, SocketType, ZapCredentials,
     ZapReply, ZapRequest,
@@ -63,9 +64,7 @@ fn plain_server(security: Security) -> (Context, Listener) {
         security,
         ..ConnectionConfig::new(SocketType::Router)
     };
-    let listener = context
-        .bind("127.0.0.1:0".parse().unwrap(), config)
-        .unwrap();
+    let listener = context.bind(free_port(), config).unwrap();
     (context, listener)
 }
 

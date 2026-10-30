@@ -11,6 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Dish, Frame, Group, Radio, Socket};
+use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, settle, within};
 
@@ -53,7 +54,7 @@ fn join_too_long_fails() {
 fn long_group() {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let endpoint = radio.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = radio.bind(&free_endpoint()).unwrap().to_string();
 
     let mut dish = context.socket::<Dish>();
     let long = "0123456789ABCDEFGH";
@@ -77,7 +78,7 @@ fn radio_dish_tcp_poll(loopback: &str) {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
     let endpoint = radio
-        .bind(&format!("tcp://{loopback}:*"))
+        .bind(&format!("tcp://{loopback}:{}", free_port().port()))
         .unwrap()
         .to_string();
 

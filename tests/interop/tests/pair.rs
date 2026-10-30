@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use zmq::{Context, Message, Pair};
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -41,7 +42,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
 fn a_libzmq_pair_talks_to_ours() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
-    let bound = ours.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = ours.bind(&free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Pair);
     theirs.set_receive_timeout(FIVE);
     theirs.connect(bound);
@@ -56,7 +57,7 @@ fn a_libzmq_pair_talks_to_ours() {
 fn a_second_libzmq_pair_waits_its_turn() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
-    let bound = ours.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = ours.bind(&free_endpoint()).unwrap();
     let first = Socket::new(Kind::Pair);
     first.connect(bound.clone());
     first.send(&[b"first"]).unwrap();

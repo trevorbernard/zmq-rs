@@ -8,6 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Hwm, Identity, Linger, Router, RoutingId, SendError, SocketOptions};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::FIVE;
 
@@ -35,7 +36,7 @@ fn router_mandatory_hwm() {
         linger: Linger::For(Duration::from_millis(1)),
         ..SocketOptions::default()
     });
-    let endpoint = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(SocketOptions {
         identity: Identity::new("X").unwrap(),

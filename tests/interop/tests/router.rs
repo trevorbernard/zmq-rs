@@ -8,6 +8,7 @@ use zmq::{
     Context, Dealer, Frame, Identity, Message, Router, RoutingId, SocketOptions, UnknownPeer,
 };
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -59,7 +60,7 @@ fn our_dealer_talks_to_a_libzmq_router() {
 fn our_router_talks_to_a_libzmq_dealer() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_routing_id(b"lib");
     dealer.connect(addr);
@@ -81,7 +82,7 @@ fn router_keeps_the_envelope_for_the_application() {
     // A REQ peer prefixes an empty delimiter; ROUTER hands it over intact.
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let req = Socket::new(Kind::Req);
     req.set_routing_id(b"client");
     req.connect(addr);
@@ -100,7 +101,7 @@ fn router_keeps_the_envelope_for_the_application() {
 fn router_generates_routing_ids_for_anonymous_peers() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let dealers: Vec<Socket> = (0..2)
         .map(|i| {
             let dealer = Socket::new(Kind::Dealer);
@@ -134,7 +135,7 @@ fn router_generates_routing_ids_for_anonymous_peers() {
 fn router_drops_what_it_cannot_route_without_blocking() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    router.bind("tcp://127.0.0.1:*").unwrap();
+    router.bind(&free_endpoint()).unwrap();
     assert_eq!(
         router.send(&id("nobody"), "lost"),
         Err(UnknownPeer(Message::from("lost")))
@@ -145,7 +146,7 @@ fn router_drops_what_it_cannot_route_without_blocking() {
 fn router_ignores_a_peer_reusing_an_identity() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let first = Socket::new(Kind::Dealer);
     first.set_routing_id(b"same");
     first.connect(addr.clone());
@@ -209,7 +210,7 @@ fn dealer_load_balances_and_fair_queues() {
 fn our_router_and_dealer_talk_to_each_other() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let mut dealer = context.socket_with::<Dealer>(identity("ours"));
     dealer.connect(&addr.to_string()).unwrap();
     dealer.send("ping");
@@ -267,7 +268,7 @@ fn plain_secured_dealer_and_router() {
         security: Security::plain_server("", authenticator),
         ..SocketOptions::default()
     });
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let mut dealer = context.socket_with::<Dealer>(SocketOptions {
         security: Security::PlainClient(expected),
         ..identity("secure")
@@ -286,7 +287,7 @@ fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.set_handover(true);
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let first = Socket::new(Kind::Dealer);
     first.set_routing_id(b"same");
     first.connect(addr.clone());
@@ -313,7 +314,7 @@ fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
 fn a_probing_libzmq_dealer_is_known_to_our_router_at_once() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let addr = router.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = router.bind(&free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_routing_id(b"prober");
     dealer.set_probe_router();

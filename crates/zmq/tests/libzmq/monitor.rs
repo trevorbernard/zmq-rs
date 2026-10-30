@@ -17,6 +17,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Event, EventKind, Linger, Monitor, RecvTimeoutError, SocketOptions};
+use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, bounce_dealer, within};
 
@@ -97,12 +98,12 @@ fn monitor_basic(bind: &str) {
 
 #[test]
 fn monitor_basic_tcp() {
-    monitor_basic("tcp://127.0.0.1:*");
+    monitor_basic(&free_endpoint());
 }
 
 #[test]
 fn monitor_versioned_basic_tcp_ipv4() {
-    monitor_basic("tcp://127.0.0.1:*");
+    monitor_basic(&free_endpoint());
 }
 
 #[test]
@@ -111,7 +112,7 @@ fn monitor_versioned_basic_tcp_ipv6() {
         eprintln!("ipv6 is not available");
         return;
     }
-    monitor_basic("tcp://[::1]:*");
+    monitor_basic(&format!("tcp://[::1]:{}", free_port().port()));
 }
 
 #[cfg(unix)]

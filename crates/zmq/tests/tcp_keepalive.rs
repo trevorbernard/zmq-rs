@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 use zmq::{Context, Message, Pull, Push, SocketOptions, TcpKeepalive};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -18,7 +19,7 @@ fn connections_with_keepalive_carry_messages_both_ways_of_connecting() {
     };
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(keepalive.clone());
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let bound = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(keepalive);
     push.connect(&bound).unwrap();
     push.send("probed");

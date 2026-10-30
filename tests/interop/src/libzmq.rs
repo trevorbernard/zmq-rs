@@ -17,7 +17,6 @@ const ZMQ_RCVHWM: c_int = 24;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RCVTIMEO: c_int = 27;
-const ZMQ_LAST_ENDPOINT: c_int = 32;
 const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
 const ZMQ_PLAIN_PASSWORD: c_int = 46;
@@ -51,12 +50,6 @@ unsafe extern "C" {
         option: c_int,
         value: *const c_void,
         len: usize,
-    ) -> c_int;
-    fn zmq_getsockopt(
-        socket: *mut c_void,
-        option: c_int,
-        value: *mut c_void,
-        len: *mut usize,
     ) -> c_int;
     fn zmq_bind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_connect(socket: *mut c_void, endpoint: *const c_char) -> c_int;
@@ -458,32 +451,11 @@ impl Socket {
         self.set_bytes(ZMQ_UNSUBSCRIBE, topic);
     }
 
-    /// Binds to an ephemeral TCP port on loopback and returns its address.
+    /// Binds to a free TCP port on loopback and returns its address.
     pub fn bind_loopback(&self) -> SocketAddr {
-        let endpoint = CString::new("tcp://127.0.0.1:*").unwrap();
-        // SAFETY: `endpoint` is a valid C string for the call.
-        check(unsafe { zmq_bind(self.raw.as_ptr(), endpoint.as_ptr()) })
-            .unwrap_or_else(|err| panic!("zmq_bind: {err}"));
-        let mut buf = [0u8; 256];
-        let mut len = buf.len();
-        // SAFETY: `buf` and `len` describe a writable buffer.
-        check(unsafe {
-            zmq_getsockopt(
-                self.raw.as_ptr(),
-                ZMQ_LAST_ENDPOINT,
-                buf.as_mut_ptr().cast(),
-                &mut len,
-            )
-        })
-        .unwrap_or_else(|err| panic!("zmq_getsockopt(LAST_ENDPOINT): {err}"));
-        let endpoint = CStr::from_bytes_until_nul(&buf[..len])
-            .expect("LAST_ENDPOINT is NUL-terminated")
-            .to_str()
-            .expect("LAST_ENDPOINT is ASCII");
-        endpoint
-            .strip_prefix("tcp://")
-            .and_then(|addr| addr.parse().ok())
-            .unwrap_or_else(|| panic!("unexpected endpoint {endpoint}"))
+        let addr = zmq_test_ports::free_port();
+        self.bind(&format!("tcp://{addr}"));
+        addr
     }
 
     /// Sends a multipart message.

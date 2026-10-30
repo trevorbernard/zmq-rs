@@ -3,14 +3,13 @@
 use std::collections::HashSet;
 
 use zmq::{Context, Dealer, Rep, Req};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, Requesting, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_rep_{name}")
 }
-
-const TCP: &str = "tcp://127.0.0.1:*";
 
 /// SHALL receive incoming messages from its peers using a fair-queuing
 /// strategy.
@@ -67,7 +66,7 @@ fn fair_queue_in_inproc() {
 
 #[test]
 fn fair_queue_in_tcp() {
-    fair_queue_in(TCP);
+    fair_queue_in(&free_endpoint());
 }
 
 /// For an incoming message: SHALL remove and store the address envelope,
@@ -104,5 +103,5 @@ fn envelope_inproc() {
 
 #[test]
 fn envelope_tcp() {
-    envelope(TCP);
+    envelope(&free_endpoint());
 }

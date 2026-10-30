@@ -2,6 +2,7 @@
 //! subscription upstream and a message downstream, as a device does.
 
 use zmq::{Context, Message, Pub, Sub, XPub, XSub};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle};
 
@@ -10,9 +11,9 @@ fn test() {
     let context = Context::new().unwrap();
     // First, create an intermediate device
     let mut xpub = context.socket::<XPub>();
-    let endpoint1 = xpub.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint1 = xpub.bind(&free_endpoint()).unwrap().to_string();
     let mut xsub = context.socket::<XSub>();
-    let endpoint2 = xsub.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint2 = xsub.bind(&free_endpoint()).unwrap().to_string();
 
     let mut publisher = context.socket::<Pub>();
     publisher.connect(&endpoint2).unwrap();

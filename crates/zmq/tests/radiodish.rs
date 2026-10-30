@@ -8,6 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Dish, Frame, Group, Hwm, Radio, SocketOptions};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -70,7 +71,7 @@ fn leaving_stops_delivery_even_of_queued_messages() {
 fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let bound = radio.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = radio.bind(&free_endpoint()).unwrap();
     let dishes: Vec<_> = (0..3)
         .map(|_| {
             let mut dish = context.socket::<Dish>();

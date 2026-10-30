@@ -16,6 +16,7 @@ draft = ["zmq/draft"]
 zmq = { path = "../../crates/zmq" }
 zmq-core.workspace = true
 zmq-pipe.workspace = true
+zmq-test-ports.workspace = true
 zmtp.workspace = true
 
 [build-dependencies]

@@ -20,6 +20,7 @@ use zmq::{
     Linger, Message, Monitor, PlainCredentials, Security, Socket, SocketOptions, ZapReply,
     ZapRequest, ZapResponder,
 };
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE};
 
@@ -99,7 +100,7 @@ fn connect(context: &Context, mechanism: Mechanism, authenticator: impl Authenti
     let (server_options, client_options) = options(mechanism, authenticator);
     let mut server = context.socket_with::<Dealer>(server_options);
     let server_monitor = server.monitor();
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(client_options);
     let client_monitor = client.monitor();
     client.connect(&endpoint).unwrap();

@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use zmq::{Context, Message, Pull, Push};
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -28,7 +29,7 @@ fn text(message: &Message) -> String {
 fn our_push_feeds_a_libzmq_pull() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    let addr = push.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = push.bind(&free_endpoint()).unwrap();
     let pull = Socket::new(Kind::Pull);
     pull.connect(addr);
     for i in 0..10 {
@@ -86,7 +87,7 @@ fn push_round_robins_across_pull_peers() {
 fn pull_fair_queues_across_push_peers() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let addr = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = pull.bind(&free_endpoint()).unwrap();
     let pushes: Vec<Socket> = (0..3)
         .map(|peer| {
             let push = Socket::new(Kind::Push);
@@ -133,7 +134,7 @@ fn try_operations_do_not_block() {
 fn async_push_and_pull_between_our_sockets() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let addr = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&addr.to_string()).unwrap();
     let received = within(Duration::from_secs(5), move || {
@@ -164,7 +165,7 @@ fn bind_and_connect_report_bad_endpoints() {
         push.connect("pgm://eth0;239.192.1.1:5555"),
         Err(zmq::Error::UnsupportedTransport(_))
     ));
-    let addr = push.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = push.bind(&free_endpoint()).unwrap();
     assert!(matches!(
         push.bind(&addr.to_string()),
         Err(zmq::Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse

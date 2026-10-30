@@ -11,6 +11,7 @@ use std::time::Duration;
 use zmq::{Client, Context, Frame, Server};
 use zmq_interop::libzmq::{self, Kind, Socket};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
 use zmtp::{Identity, Message, SocketType};
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -34,7 +35,7 @@ fn a_libzmq_client_talks_to_our_server() {
     }
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = server.bind(&free_endpoint()).unwrap();
     let client = Socket::new(Kind::Client);
     client.set_receive_timeout(FIVE);
     client.connect(bound);
@@ -65,7 +66,7 @@ fn our_client_reaches_a_libzmq_server() {
 
 #[test]
 fn our_client_drops_multipart_messages() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
     client
@@ -88,7 +89,7 @@ fn our_client_drops_multipart_messages() {
 fn our_server_drops_multipart_messages() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = server.bind(&free_endpoint()).unwrap();
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Client, b"").unwrap();
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();

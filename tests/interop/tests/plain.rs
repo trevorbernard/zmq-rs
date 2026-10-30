@@ -6,6 +6,7 @@ use std::thread;
 
 use zmq_interop::libzmq::{Context, Kind, Socket, zap_handler};
 use zmq_interop::{ConnectError, Peer, Security};
+use zmq_test_ports::free_port;
 use zmtp::{
     Credential, ErrorReason, Frame, HandshakeError, Identity, Message, Metadata, PlainCredentials,
     SocketType, ZapCredentials, ZapFailure, ZapReply,
@@ -92,7 +93,7 @@ fn our_client_is_rejected_by_libzmq_server() {
 
 #[test]
 fn libzmq_client_authenticates_with_our_server() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_plain_client(b"admin", b"hunter2");
     dealer.set_routing_id(b"lib");
@@ -133,7 +134,7 @@ fn libzmq_client_authenticates_with_our_server() {
 
 #[test]
 fn our_server_rejects_libzmq_client() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_plain_client(b"admin", b"wrong");
     dealer.connect(listener.local_addr().unwrap());

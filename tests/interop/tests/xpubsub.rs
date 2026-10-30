@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{Context, Frame, Message, XPub, XPubEvent, XSub};
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -25,7 +26,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn our_xpub_hears_a_libzmq_sub() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
     subscriber.subscribe(b"b");
@@ -55,7 +56,7 @@ fn our_xpub_hears_a_libzmq_sub() {
 fn our_xpub_hears_what_a_libzmq_xsub_sends_upstream() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let xsub = Socket::new(Kind::XSub);
     xsub.connect(bound);
     xsub.send(&[b"hello", b"upstream"]).unwrap();

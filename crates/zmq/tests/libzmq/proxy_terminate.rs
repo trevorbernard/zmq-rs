@@ -10,6 +10,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Proxy, Pub, Push, Sub};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle, within};
 
@@ -23,10 +24,10 @@ fn proxy_terminate() {
         move || {
             let mut frontend = context.socket::<Sub>();
             frontend.subscribe("");
-            let bound = frontend.bind("tcp://127.0.0.1:*").unwrap();
+            let bound = frontend.bind(&free_endpoint()).unwrap();
             // A PUSH that is never read
             let mut backend = context.socket::<Push>();
-            backend.bind("tcp://127.0.0.1:*").unwrap();
+            backend.bind(&free_endpoint()).unwrap();
             endpoints.send(bound.to_string()).unwrap();
 
             let mut proxy = Proxy::new(&mut frontend, &mut backend);

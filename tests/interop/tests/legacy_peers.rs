@@ -19,6 +19,7 @@ use zmq::{
     Context, Dealer, Identity, Message, Pub, Pull, Push, Rep, Req, Router, RoutingId, Security,
     SocketOptions, Sub, XPub, XPubEvent, ZapReply, ZapRequest,
 };
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -155,11 +156,6 @@ fn unhex(hex: &str) -> Vec<u8> {
         .collect()
 }
 
-/// A TCP endpoint nothing listens on: libzmq 2.x cannot bind port 0.
-fn free_endpoint() -> String {
-    format!("tcp://{}", zmq_interop::free_port())
-}
-
 fn named(identity: &'static str) -> SocketOptions {
     SocketOptions {
         identity: Identity::new(identity).unwrap(),
@@ -233,7 +229,7 @@ fn we_pull_from_an_old_push(libzmq: Libzmq) {
         message_properties: zmq::MessageProperties::Attach,
         ..SocketOptions::default()
     });
-    let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;
     };
@@ -288,7 +284,7 @@ fn our_req_asks_an_old_rep(libzmq: Libzmq) {
 fn an_old_req_asks_our_rep(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let endpoint = rep.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut req) = Peer::start(libzmq, "REQ", "connect", &endpoint, &[]) else {
         return;
     };
@@ -303,7 +299,7 @@ fn an_old_req_asks_our_rep(libzmq: Libzmq) {
 fn our_router_answers_an_old_dealer_by_its_identity(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut dealer) = Peer::start(
         libzmq,
         "DEALER",
@@ -343,7 +339,7 @@ fn an_old_router_answers_our_dealer_by_its_identity(libzmq: Libzmq) {
 fn an_old_sub_gets_only_its_topic_from_our_pub(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let endpoint = publisher.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = publisher.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut sub) = Peer::start(
         libzmq,
         "SUB",
@@ -407,7 +403,7 @@ fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
         }),
         ..SocketOptions::default()
     });
-    let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;
     };

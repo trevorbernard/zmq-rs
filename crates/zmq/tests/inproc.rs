@@ -10,6 +10,7 @@ use zmq::{
     Context, Dealer, Endpoint, Error, Frame, Hwm, Identity, Message, Pull, Push, Rep, Req, Router,
     RoutingId, SocketOptions,
 };
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -32,7 +33,7 @@ fn bind_returns_the_endpoint() {
     let bound = pull.bind("inproc://work").unwrap();
     assert_eq!(bound, Endpoint::Inproc("work".to_owned()));
     assert_eq!(bound.to_string(), "inproc://work");
-    let tcp = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let tcp = pull.bind(&free_endpoint()).unwrap();
     assert!(tcp.to_string().starts_with("tcp://127.0.0.1:"));
     assert!(tcp.tcp_addr().is_some());
     assert_eq!(bound.tcp_addr(), None);

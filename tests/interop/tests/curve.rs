@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{ConnectError, Peer, Security};
+use zmq_test_ports::free_port;
 use zmtp::{
     Frame, HandshakeError, Identity, Keypair, Message, Metadata, PublicKey, SecretKey, SocketType,
     ZapCredentials, ZapFailure, ZapReply,
@@ -76,7 +77,7 @@ fn a_libzmq_curve_client_talks_to_our_curve_server() {
         PublicKey::from_z85("Yne@$w-vo<fVvi]a<NY6T1ed:M$fCG*[IaLV{hID").unwrap()
     );
     let server_keys = Keypair::generate();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_receive_timeout(FIVE);
     dealer.set_routing_id(b"libzmq");
@@ -119,7 +120,7 @@ fn a_libzmq_curve_client_talks_to_our_curve_server() {
 
 #[test]
 fn a_client_with_the_wrong_server_key_is_refused() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let client_keys = Keypair::generate();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_curve_client(
@@ -148,7 +149,7 @@ fn a_client_with_the_wrong_server_key_is_refused() {
 
 #[test]
 fn a_denied_libzmq_client_never_gets_through() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let server_keys = Keypair::generate();
     let client_keys = Keypair::generate();
     let dealer = Socket::new(Kind::Dealer);

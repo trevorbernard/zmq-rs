@@ -7,6 +7,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use zmq::{Context, Pair, Reconnect, Socket, SocketOptions};
+use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, bounce_content, bounce_pair, within};
 
@@ -64,7 +65,7 @@ fn reconnect_ivl_ipc() {
 
 #[test]
 fn reconnect_ivl_tcp_ipv4() {
-    reconnect_ivl("tcp://127.0.0.1:*");
+    reconnect_ivl(&free_endpoint());
 }
 
 #[test]
@@ -73,5 +74,5 @@ fn reconnect_ivl_tcp_ipv6() {
         eprintln!("ipv6 is not available");
         return;
     }
-    reconnect_ivl("tcp://[::1]:*");
+    reconnect_ivl(&format!("tcp://[::1]:{}", free_port().port()));
 }

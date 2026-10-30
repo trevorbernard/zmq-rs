@@ -10,6 +10,7 @@
 use zmq::{
     Authenticator, Context, Dealer, Security, Socket, SocketOptions, ZapRequest, ZapResponder,
 };
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, bounce_content, zero_linger};
 
@@ -19,7 +20,7 @@ fn pair(context: &Context, security: Security) -> (Socket<Dealer>, Socket<Dealer
         security,
         ..zero_linger()
     });
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(zero_linger());
     client.connect(&endpoint).unwrap();
     (server, client)

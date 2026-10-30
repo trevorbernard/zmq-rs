@@ -11,6 +11,7 @@ use zmq::{
     Context, Dealer, Frame, Linger, Message, MessageProperties, Metadata, Req, Router, Security,
     Socket, SocketOptions, SocketType, ZapCredentials, ZapReply, ZapRequest,
 };
+use zmq_test_ports::free_endpoint;
 use zmtp::PropertyName;
 
 use crate::support::{FIVE, settle, within};
@@ -44,7 +45,7 @@ fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receive
         linger: Linger::For(Duration::ZERO),
         ..SocketOptions::default()
     });
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
 

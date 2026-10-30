@@ -6,6 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Channel, Context, Frame, Peer, PeerId, SendError, UnknownPeer};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -25,7 +26,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn peers_address_each_other_by_id() {
     let context = Context::new().unwrap();
     let mut alice = context.socket::<Peer>();
-    let bound = alice.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = alice.bind(&free_endpoint()).unwrap();
     let mut bob = context.socket::<Peer>();
     let to_alice = bob.connect_peer(&bound.to_string()).unwrap();
     bob.send(to_alice, "hello alice").unwrap();
@@ -101,7 +102,7 @@ fn a_bad_endpoint_is_an_error() {
 fn a_channel_talks_both_ways() {
     let context = Context::new().unwrap();
     let mut left = context.socket::<Channel>();
-    let bound = left.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = left.bind(&free_endpoint()).unwrap();
     let mut right = context.socket::<Channel>();
     right.connect(&bound.to_string()).unwrap();
     right.send("ping");

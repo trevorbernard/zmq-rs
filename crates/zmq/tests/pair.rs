@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Message, Pair};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -24,7 +25,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn a_pair_talks_both_ways_over_tcp() {
     let context = Context::new().unwrap();
     let mut left = context.socket::<Pair>();
-    let bound = left.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = left.bind(&free_endpoint()).unwrap();
     let mut right = context.socket::<Pair>();
     right.connect(&bound.to_string()).unwrap();
     right.send("ping");

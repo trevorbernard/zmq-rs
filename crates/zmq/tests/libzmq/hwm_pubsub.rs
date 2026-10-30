@@ -10,6 +10,7 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use zmq::{Context, Hwm, Message, Pub, Socket, SocketOptions, Sub, XPub, XPubEvent};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle};
 
@@ -125,7 +126,7 @@ fn reset_hwm() {
         send_hwm: hwm_value,
         ..SocketOptions::default()
     });
-    let endpoint = pub_socket.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = pub_socket.bind(&free_endpoint()).unwrap().to_string();
     let mut sub_socket = context.socket_with::<Sub>(SocketOptions {
         recv_hwm: hwm_value,
         ..SocketOptions::default()
@@ -178,7 +179,7 @@ macro_rules! regular_test_cases {
     };
 }
 
-regular_test_cases!(tcp, "tcp://127.0.0.1:*", false);
+regular_test_cases!(tcp, &free_endpoint(), false);
 regular_test_cases!(inproc, "inproc://libzmq-hwm-pubsub", true);
 #[cfg(unix)]
 regular_test_cases!(ipc, "ipc://*", false);

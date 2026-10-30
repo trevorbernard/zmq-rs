@@ -12,6 +12,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Identity, Linger, Message, Proxy, Pub, Router, SocketOptions, Sub};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::within;
 
@@ -138,7 +139,7 @@ fn proxy() {
 
         // Frontend talks to clients over TCP, backend to workers over inproc
         let mut frontend = context.socket_with::<Router>(no_linger());
-        let endpoint = frontend.bind("tcp://127.0.0.1:*").unwrap().to_string();
+        let endpoint = frontend.bind(&free_endpoint()).unwrap().to_string();
         let mut backend = context.socket_with::<Dealer>(no_linger());
         backend.bind("inproc://backend").unwrap();
 

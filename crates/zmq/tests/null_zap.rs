@@ -11,6 +11,7 @@ use zmq::{
     Context, EventKind, Frame, HandshakeFailure, Message, Metadata, Monitor, Pull, Push, Security,
     SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
+use zmq_test_ports::free_endpoint;
 
 use zmq::ProtocolError;
 
@@ -69,7 +70,7 @@ fn an_accepted_peer_talks_and_zap_saw_its_address() {
         let _ = seen.send(request.clone());
         accepted()
     }));
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
     push.send("let in");
@@ -87,7 +88,7 @@ fn a_denied_peer_hears_400_and_gets_nothing_through() {
     let mut pull =
         context.socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::AuthenticationFailure));
     let mut server = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
@@ -104,7 +105,7 @@ fn a_temporary_failure_closes_without_a_word() {
     let context = Context::new().unwrap();
     let mut pull =
         context.socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::TemporaryFailure));
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
@@ -119,7 +120,7 @@ fn a_zmtp_1_0_peer_is_refused() {
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(guarded(|_: &ZapRequest| accepted()));
     let mut server = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut legacy = TcpStream::connect(bound.tcp_addr().unwrap()).unwrap();
     legacy.write_all(b"\x01\x00\x06\x00hello").unwrap();
     // Refused at the greeting, as libzmq refuses it, before any handshake.

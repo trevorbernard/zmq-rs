@@ -10,6 +10,7 @@ use zmq::{
     Context, Dealer, EventKind, Heartbeat, Keypair, Monitor, Pair, Pub, PublicKey, Pull, Push, Rep,
     Req, Router, SecretKey, Security, Socket, SocketOptions, SocketType, Sub,
 };
+use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, SETTLE, settle};
 
@@ -72,7 +73,7 @@ fn server<T: SocketType>(
         ..SocketOptions::default()
     });
     let monitor = server.monitor();
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     (server, monitor, endpoint)
 }
 
@@ -243,7 +244,7 @@ mod draft {
 /// The TTL, in deciseconds, of the first PING a PAIR client heartbeating
 /// with `ttl` sends to a hand-written ZMTP 3.1 server.
 fn announced_ttl(ttl: Duration) -> u16 {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let endpoint = format!("tcp://{}", listener.local_addr().unwrap());
     let context = Context::new().unwrap();
     let mut client = context.socket_with::<Pair>(SocketOptions {

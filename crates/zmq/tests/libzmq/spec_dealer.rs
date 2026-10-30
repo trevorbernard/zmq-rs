@@ -3,14 +3,13 @@
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Message, Rep};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_dealer_{name}")
 }
-
-const TCP: &str = "tcp://127.0.0.1:*";
 
 /// SHALL route outgoing messages to available peers using a round-robin
 /// strategy.
@@ -47,7 +46,7 @@ fn round_robin_out_inproc() {
 
 #[test]
 fn round_robin_out_tcp() {
-    round_robin_out(TCP);
+    round_robin_out(&free_endpoint());
 }
 
 /// SHALL receive incoming messages from its peers using a fair-queuing
@@ -89,7 +88,7 @@ fn fair_queue_in_inproc() {
 
 #[test]
 fn fair_queue_in_tcp() {
-    fair_queue_in(TCP);
+    fair_queue_in(&free_endpoint());
 }
 
 /// SHALL create a double queue when a peer connects to it. If this peer
@@ -134,7 +133,7 @@ fn destroy_queue_on_disconnect_inproc() {
 
 #[test]
 fn destroy_queue_on_disconnect_tcp() {
-    destroy_queue_on_disconnect(TCP);
+    destroy_queue_on_disconnect(&free_endpoint());
 }
 
 /// SHALL block on sending, or return a suitable error, when it has no

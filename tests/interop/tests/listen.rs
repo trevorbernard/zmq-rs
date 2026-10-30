@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use zmq_core::{Connection, ConnectionConfig, Context, Listener};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_pipe::TryRecvError;
+use zmq_test_ports::free_port;
 use zmtp::{Frame, Identity, Message, SocketType};
 
 /// Runs `f` on another thread and fails the test if it takes longer than
@@ -162,7 +163,7 @@ fn peers_that_fail_the_handshake_are_never_delivered() {
 #[test]
 fn dropping_the_listener_closes_the_port() {
     let context = Context::new().unwrap();
-    let listener = context.bind(loopback(), router()).unwrap();
+    let listener = context.bind(free_port(), router()).unwrap();
     let addr = listener.local_addr();
     drop(listener);
     let deadline = Instant::now() + Duration::from_secs(5);

@@ -8,6 +8,7 @@ use zmq::{
     Pull, Push, Reconnect, Security, SocketOptions,
 };
 use zmq_interop::libzmq::{self, Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -77,7 +78,7 @@ fn a_libzmq_client_is_accepted_then_disconnects() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound.clone());
     let accepted = expect(&mut monitor, |kind| *kind == EventKind::Accepted);

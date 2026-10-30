@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, EventKind, Monitor, Pull};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -58,7 +59,7 @@ fn a_listener_out_of_file_descriptors_accepts_once_some_are_free() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let address = bound.tcp_addr().unwrap();
     // Once listening, the I/O thread opens nothing more until it accepts.
     expect(&mut monitor, |kind| *kind == EventKind::Listening);

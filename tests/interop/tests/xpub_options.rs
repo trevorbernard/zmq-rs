@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{Context, ManualXPub, Message, Sub, XPub, XPubEvent};
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -13,7 +14,7 @@ fn our_xpub_welcomes_a_libzmq_sub() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
     xpub.set_welcome(Some(Message::from("WELCOME")));
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let sub = Socket::new(Kind::Sub);
     sub.subscribe(b"WELCOME");
     sub.connect(bound);
@@ -48,7 +49,7 @@ fn a_libzmq_xpub_welcomes_our_sub() {
 fn our_manual_xpub_decides_a_libzmq_subs_topics() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<ManualXPub>();
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let sub = Socket::new(Kind::Sub);
     sub.subscribe(b"");
     sub.connect(bound);

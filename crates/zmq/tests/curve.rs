@@ -8,6 +8,7 @@ use zmq::{
     Context, Dealer, Frame, Heartbeat, Keypair, Linger, Message, Metadata, Pub, Pull, Push, Router,
     Security, SocketOptions, Sub, ZapCredentials, ZapReply, ZapRequest,
 };
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -36,7 +37,7 @@ fn push_and_pull_over_curve() {
     let server_key = server.public();
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(secured(Security::curve_server(server)));
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(secured(Security::curve_client(
         Keypair::generate(),
         server_key,
@@ -59,7 +60,7 @@ fn max_message_size_counts_every_frame_of_a_curve_message() {
         max_message_size: Some(1000),
         ..secured(Security::curve_server(server))
     });
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(secured(Security::curve_client(
         Keypair::generate(),
         server_key,
@@ -101,7 +102,7 @@ fn the_authenticator_sees_the_clients_public_key() {
         "domain",
         authenticator,
     )));
-    let bound = router.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = router.bind(&free_endpoint()).unwrap();
 
     let mut trusted =
         context.socket_with::<Dealer>(secured(Security::curve_client(client, server_key)));
@@ -134,7 +135,7 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
     let context = Context::new().unwrap();
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         linger: Linger::For(Duration::ZERO),
         ..secured(Security::curve_client(
@@ -153,7 +154,7 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
     let context = Context::new().unwrap();
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         linger: Linger::For(Duration::ZERO),
         ..SocketOptions::default()
@@ -175,7 +176,7 @@ fn heartbeats_and_subscriptions_travel_boxed() {
         heartbeat: Some(Heartbeat::every(Duration::from_millis(20))),
         ..SocketOptions::default()
     });
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let mut subscriber = context.socket_with::<Sub>(SocketOptions {
         security: Security::curve_client(Keypair::generate(), server_key),
         heartbeat: Some(Heartbeat::every(Duration::from_millis(20))),

@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Frame, Message, Pub, Sub, XPub, XPubEvent, XSub};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -113,7 +114,7 @@ fn xsub_sending_a_subscription_subscribes() {
 fn a_proxy_forwards_subscriptions_up_and_messages_down() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let upstream = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let upstream = publisher.bind(&free_endpoint()).unwrap();
     let mut frontend = context.socket::<XSub>();
     frontend.connect(&upstream.to_string()).unwrap();
     let mut backend = context.socket::<XPub>();

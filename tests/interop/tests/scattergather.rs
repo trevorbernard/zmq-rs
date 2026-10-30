@@ -10,6 +10,7 @@ use std::time::Duration;
 use zmq::{Context, Frame, Gather, Scatter};
 use zmq_interop::libzmq::{self, Kind, Socket};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
 use zmtp::{Identity, Message, SocketType};
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -33,7 +34,7 @@ fn a_libzmq_scatter_feeds_our_gather() {
     }
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
-    let bound = gather.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = gather.bind(&free_endpoint()).unwrap();
     let scatter = Socket::new(Kind::Scatter);
     scatter.connect(bound);
     for i in 0..3 {
@@ -60,7 +61,7 @@ fn our_scatter_feeds_a_libzmq_gather() {
 
 #[test]
 fn our_gather_drops_multipart_messages() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
     gather

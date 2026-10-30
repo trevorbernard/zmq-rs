@@ -2,6 +2,7 @@
 //! latest of the messages sent to it.
 
 use zmq::{Context, Pull, Push};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle};
 
@@ -10,7 +11,7 @@ fn conflate() {
     let context = Context::new().unwrap();
     let mut s_in = context.socket::<Pull>();
     s_in.set_conflate(true);
-    let endpoint = s_in.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = s_in.bind(&free_endpoint()).unwrap().to_string();
     let mut s_out = context.socket::<Push>();
     s_out.connect(&endpoint).unwrap();
 

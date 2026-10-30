@@ -11,6 +11,7 @@ use std::time::Duration;
 use std::{panic, thread};
 
 use zmq::{Context, Dealer, Linger, Message, Pub, Pull, Push, Router, SocketOptions, Sub};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 const ROUNDS: usize = 5;
@@ -43,14 +44,14 @@ fn origin(message: &Message) -> (usize, usize) {
 /// queue a run of messages and drop their sockets at once, lingering
 /// forever; the receiver gets every message, each sender's in order, and
 /// the context ends with its last handle, the receiver.
-fn lingering_messages_survive_concurrent_drops(address: &'static str) {
+fn lingering_messages_survive_concurrent_drops(address: fn() -> String) {
     const SENDERS: usize = 16;
     const MESSAGES: usize = 200;
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut pull = context.socket::<Pull>();
-            let endpoint = pull.bind(address).unwrap().to_string();
+            let endpoint = pull.bind(&address()).unwrap().to_string();
             let senders: Vec<_> = (0..SENDERS)
                 .map(|sender| {
                     let context = context.clone();
@@ -84,13 +85,13 @@ fn lingering_messages_survive_concurrent_drops(address: &'static str) {
 /// workers still connecting, each holding a handle, send a message that
 /// can no longer be delivered and drop theirs. Whichever drops last ends
 /// the context, waiting out the bounded linger.
-fn the_last_handle_ends_the_context_on_any_thread(address: &'static str) {
+fn the_last_handle_ends_the_context_on_any_thread(address: fn() -> String) {
     const WORKERS: usize = 32;
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut router = context.socket::<Router>();
-            let endpoint = router.bind(address).unwrap().to_string();
+            let endpoint = router.bind(&address()).unwrap().to_string();
             let workers: Vec<_> = (0..WORKERS)
                 .map(|worker| {
                     let context = context.clone();
@@ -120,14 +121,14 @@ fn the_last_handle_ends_the_context_on_any_thread(address: &'static str) {
 /// drop, over and over, while a publisher on another sends without pause.
 /// Each subscriber gets a message, and everything ends once the publisher
 /// stops.
-fn subscribers_come_and_go_while_a_publisher_sends(address: &'static str) {
+fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
     const SUBSCRIBERS: usize = 8;
     const VISITS: usize = 20;
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut publisher = context.socket::<Pub>();
-            let endpoint = publisher.bind(address).unwrap().to_string();
+            let endpoint = publisher.bind(&address()).unwrap().to_string();
             let stop = Arc::new(AtomicBool::new(false));
             let publishing = {
                 let stop = stop.clone();
@@ -163,59 +164,63 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: &'static str) {
 }
 
 mod tcp {
-    const ADDRESS: &str = "tcp://127.0.0.1:*";
+    use super::free_endpoint as address;
 
     #[test]
     fn lingering_messages_survive_concurrent_drops() {
-        super::lingering_messages_survive_concurrent_drops(ADDRESS);
+        super::lingering_messages_survive_concurrent_drops(address);
     }
 
     #[test]
     fn the_last_handle_ends_the_context_on_any_thread() {
-        super::the_last_handle_ends_the_context_on_any_thread(ADDRESS);
+        super::the_last_handle_ends_the_context_on_any_thread(address);
     }
 
     #[test]
     fn subscribers_come_and_go_while_a_publisher_sends() {
-        super::subscribers_come_and_go_while_a_publisher_sends(ADDRESS);
+        super::subscribers_come_and_go_while_a_publisher_sends(address);
     }
 }
 
 #[cfg(unix)]
 mod ipc {
-    const ADDRESS: &str = "ipc://*";
+    fn address() -> String {
+        "ipc://*".to_owned()
+    }
 
     #[test]
     fn lingering_messages_survive_concurrent_drops() {
-        super::lingering_messages_survive_concurrent_drops(ADDRESS);
+        super::lingering_messages_survive_concurrent_drops(address);
     }
 
     #[test]
     fn the_last_handle_ends_the_context_on_any_thread() {
-        super::the_last_handle_ends_the_context_on_any_thread(ADDRESS);
+        super::the_last_handle_ends_the_context_on_any_thread(address);
     }
 
     #[test]
     fn subscribers_come_and_go_while_a_publisher_sends() {
-        super::subscribers_come_and_go_while_a_publisher_sends(ADDRESS);
+        super::subscribers_come_and_go_while_a_publisher_sends(address);
     }
 }
 
 mod inproc {
-    const ADDRESS: &str = "inproc://shutdown-stress";
+    fn address() -> String {
+        "inproc://shutdown-stress".to_owned()
+    }
 
     #[test]
     fn lingering_messages_survive_concurrent_drops() {
-        super::lingering_messages_survive_concurrent_drops(ADDRESS);
+        super::lingering_messages_survive_concurrent_drops(address);
     }
 
     #[test]
     fn the_last_handle_ends_the_context_on_any_thread() {
-        super::the_last_handle_ends_the_context_on_any_thread(ADDRESS);
+        super::the_last_handle_ends_the_context_on_any_thread(address);
     }
 
     #[test]
     fn subscribers_come_and_go_while_a_publisher_sends() {
-        super::subscribers_come_and_go_while_a_publisher_sends(ADDRESS);
+        super::subscribers_come_and_go_while_a_publisher_sends(address);
     }
 }

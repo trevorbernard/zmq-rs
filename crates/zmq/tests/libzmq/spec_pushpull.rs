@@ -5,14 +5,13 @@ use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use zmq::{Context, Frame, Hwm, Linger, Message, Pull, Push, SocketOptions};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, msg, settle};
 
 fn inproc(name: &str) -> String {
     format!("inproc://spec_pushpull_{name}")
 }
-
-const TCP: &str = "tcp://127.0.0.1:*";
 
 /// A high-water mark of one message both ways, and no linger, as the
 /// cases below set with `ZMQ_SNDHWM`, `ZMQ_RCVHWM` and `ZMQ_LINGER`.
@@ -64,7 +63,7 @@ fn push_round_robin_out_inproc() {
 
 #[test]
 fn push_round_robin_out_tcp() {
-    push_round_robin_out(TCP);
+    push_round_robin_out(&free_endpoint());
 }
 
 /// PULL: SHALL receive incoming messages from its peers using a
@@ -116,7 +115,7 @@ fn pull_fair_queue_in_inproc() {
 
 #[test]
 fn pull_fair_queue_in_tcp() {
-    pull_fair_queue_in(TCP);
+    pull_fair_queue_in(&free_endpoint());
 }
 
 /// PUSH: SHALL block on sending, or return a suitable error, when it has
@@ -252,10 +251,10 @@ fn push_multipart_atomic_drop_non_block_inproc() {
 
 #[test]
 fn push_multipart_atomic_drop_block_tcp() {
-    push_multipart_atomic_drop(TCP, true);
+    push_multipart_atomic_drop(&free_endpoint(), true);
 }
 
 #[test]
 fn push_multipart_atomic_drop_non_block_tcp() {
-    push_multipart_atomic_drop(TCP, false);
+    push_multipart_atomic_drop(&free_endpoint(), false);
 }

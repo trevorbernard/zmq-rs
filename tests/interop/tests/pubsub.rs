@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use zmq::{Context, Message, Pub, Sub};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
 use zmtp::{Decoder, DecoderConfig, Frame, Identity, Incoming, SocketType, Version};
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -75,7 +76,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
 fn a_libzmq_sub_receives_its_topics_from_our_pub() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.set_receive_timeout(FIVE);
     subscriber.subscribe(b"news");
@@ -92,7 +93,7 @@ fn a_libzmq_sub_receives_its_topics_from_our_pub() {
 fn a_libzmq_sub_unsubscribing_stops_our_pub() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
     subscriber.connect(bound);
@@ -107,7 +108,7 @@ fn a_libzmq_sub_unsubscribing_stops_our_pub() {
 
 #[test]
 fn our_sub_filters_what_a_careless_publisher_sends() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("news");
@@ -137,7 +138,7 @@ fn a_zmtp_1_0_subscriber_gets_everything() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
     let addr = publisher
-        .bind("tcp://127.0.0.1:*")
+        .bind(&free_endpoint())
         .unwrap()
         .tcp_addr()
         .unwrap();

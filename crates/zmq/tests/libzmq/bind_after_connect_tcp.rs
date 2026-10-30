@@ -1,18 +1,10 @@
 //! libzmq's `tests/test_bind_after_connect_tcp.cpp`: messages sent before
 //! anything listens are delivered once something binds.
 
-use std::net::TcpListener;
-
 use zmq::{Context, Dealer, Message};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, within};
-
-/// A TCP endpoint on a port free now, standing in for libzmq's fixed
-/// `ENDPOINT_3`.
-fn free_endpoint() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("tcp://{}", listener.local_addr().unwrap())
-}
 
 #[test]
 fn x() {

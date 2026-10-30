@@ -8,21 +8,22 @@
 //! three connections; here all three connect plainly.
 
 use zmq::{Context, Rep, Req};
+use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::bounce_req_rep;
 
-fn loopback(ipv6: bool) -> &'static str {
+fn loopback(ipv6: bool) -> String {
     if ipv6 {
-        "tcp://[::1]:*"
+        format!("tcp://[::1]:{}", free_port().port())
     } else {
-        "tcp://127.0.0.1:*"
+        free_endpoint()
     }
 }
 
 fn single_connect(ipv6: bool) {
     let context = Context::new().unwrap();
     let mut sb = context.socket::<Rep>();
-    let my_endpoint = sb.bind(loopback(ipv6)).unwrap().to_string();
+    let my_endpoint = sb.bind(&loopback(ipv6)).unwrap().to_string();
     let mut sc = context.socket::<Req>();
     sc.connect(&my_endpoint).unwrap();
     let mut sc = bounce_req_rep(&mut sb, sc);
@@ -39,7 +40,7 @@ fn multi_connect(ipv6: bool) {
     let mut sbs: Vec<_> = (0..3).map(|_| context.socket::<Rep>()).collect();
     let endpoints: Vec<_> = sbs
         .iter_mut()
-        .map(|sb| sb.bind(loopback(ipv6)).unwrap().to_string())
+        .map(|sb| sb.bind(&loopback(ipv6)).unwrap().to_string())
         .collect();
     let mut sc = context.socket::<Req>();
     for endpoint in &endpoints {

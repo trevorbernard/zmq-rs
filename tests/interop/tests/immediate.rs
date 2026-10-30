@@ -1,18 +1,15 @@
 //! `ZMQ_IMMEDIATE` connections against libzmq.
 
-use std::net::TcpListener;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Push, Reconnect, SocketOptions};
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_port;
 
 #[test]
 fn our_immediate_push_sends_only_to_the_libzmq_pull_that_is_up() {
-    let dead = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
+    let dead = free_port();
     let pull = Socket::new(Kind::Pull);
     let alive = pull.bind_loopback();
     let context = Context::new().unwrap();

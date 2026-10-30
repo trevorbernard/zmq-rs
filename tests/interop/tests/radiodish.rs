@@ -11,6 +11,7 @@ use std::time::{Duration, Instant};
 use zmq::{Context, Dish, Frame, Group, Radio, Reconnect, SocketOptions};
 use zmq_interop::libzmq::{self, Kind, Socket};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
 use zmtp::{Command, Identity, Incoming, Message, SocketType};
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -46,7 +47,7 @@ fn next_command(peer: &mut Peer) -> Command {
 
 #[test]
 fn our_dish_sends_join_and_leave_and_rejoins_after_reconnecting() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut dish = context.socket_with::<Dish>(SocketOptions {
         reconnect: Reconnect::Fixed {
@@ -94,7 +95,7 @@ fn our_dish_sends_join_and_leave_and_rejoins_after_reconnecting() {
 fn our_radio_sends_group_and_body_to_a_dish_that_joined() {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let bound = radio.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = radio.bind(&free_endpoint()).unwrap();
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Dish, b"").unwrap();
     peer.send_command(&Command::Join(group("news"))).unwrap();
     let started = Instant::now();
@@ -138,7 +139,7 @@ fn our_radio_reaches_a_libzmq_dish() {
     }
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let bound = radio.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = radio.bind(&free_endpoint()).unwrap();
     let dish = Socket::new(Kind::Dish);
     dish.set_receive_timeout(FIVE);
     dish.join("weather");

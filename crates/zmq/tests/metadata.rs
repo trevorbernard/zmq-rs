@@ -7,6 +7,7 @@ use zmq::{
     Context, Dealer, Identity, Message, MessageMetadata, MessageProperties, Pull, Push,
     SocketOptions,
 };
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -45,7 +46,7 @@ fn received_with(transport: &str, options: SocketOptions) -> (Message, Message) 
 
 #[test]
 fn a_message_over_tcp_carries_its_connections_properties() {
-    let (message, _) = received_over("tcp://127.0.0.1:*");
+    let (message, _) = received_over(&free_endpoint());
     assert_eq!(message.property("Socket-Type"), Some(b"DEALER".as_slice()));
     assert_eq!(message.property("Identity"), Some(b"id".as_slice()));
     assert_eq!(
@@ -57,14 +58,14 @@ fn a_message_over_tcp_carries_its_connections_properties() {
 
 #[test]
 fn names_are_matched_exactly_as_libzmq_matches_them() {
-    let (message, _) = received_over("tcp://127.0.0.1:*");
+    let (message, _) = received_over(&free_endpoint());
     assert_eq!(message.property("socket-type"), None);
     assert_eq!(message.property("SOCKET-TYPE"), None);
 }
 
 #[test]
 fn every_message_from_a_connection_shares_its_metadata() {
-    let (first, second) = received_over("tcp://127.0.0.1:*");
+    let (first, second) = received_over(&free_endpoint());
     let (first, second) = (first.metadata().unwrap(), second.metadata().unwrap());
     assert!(first.ptr_eq(second));
 }
@@ -85,7 +86,7 @@ fn a_message_over_inproc_has_no_metadata() {
 
 #[test]
 fn a_socket_attaches_no_metadata_unless_asked() {
-    let (first, second) = received_with("tcp://127.0.0.1:*", SocketOptions::default());
+    let (first, second) = received_with(&free_endpoint(), SocketOptions::default());
     assert!(first.metadata().is_none());
     assert!(second.metadata().is_none());
 }
@@ -118,7 +119,7 @@ fn of_two_properties_with_one_name_the_first_is_kept() {
 fn a_message_passed_on_drops_its_first_connections_metadata() {
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(attaching());
-    let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     push.send("passed on");
@@ -141,7 +142,7 @@ fn a_conflated_message_carries_its_connections_metadata() {
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(attaching());
     pull.set_conflate(true);
-    let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     for i in 0..100 {

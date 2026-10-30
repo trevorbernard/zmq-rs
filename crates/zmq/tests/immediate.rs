@@ -1,11 +1,11 @@
 //! Queueing only on completed connections, as libzmq's `ZMQ_IMMEDIATE`.
 
-use std::net::TcpListener;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Message, Pub, Pull, Push, Reconnect, SocketOptions, Sub, XPub, XPubEvent};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -27,12 +27,6 @@ fn immediate() -> SocketOptions {
         },
         ..SocketOptions::default()
     }
-}
-
-/// A TCP endpoint nothing listens on.
-fn unused_endpoint() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("tcp://{}", listener.local_addr().unwrap())
 }
 
 /// Sends `message` until a peer takes it.
@@ -57,7 +51,7 @@ fn rebind<T: zmq::SocketType>(socket: &mut zmq::Socket<T>, endpoint: &zmq::Endpo
 fn nothing_queues_before_the_connection_is_up() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(immediate());
-    push.connect(&unused_endpoint()).unwrap();
+    push.connect(&free_endpoint()).unwrap();
     assert_eq!(push.try_send("early"), Err(Message::from("early")));
 }
 
@@ -65,9 +59,9 @@ fn nothing_queues_before_the_connection_is_up() {
 fn messages_go_only_to_connections_that_are_up() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(immediate());
-    push.connect(&unused_endpoint()).unwrap();
+    push.connect(&free_endpoint()).unwrap();
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "0");
     for i in 1..10 {
@@ -84,7 +78,7 @@ fn messages_go_only_to_connections_that_are_up() {
 fn a_broken_connection_stops_queueing_until_it_is_back() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(immediate());
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "first");
@@ -111,7 +105,7 @@ fn a_broken_connection_stops_queueing_until_it_is_back() {
 fn subscriptions_survive_a_reconnection() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let mut subscriber = context.socket_with::<Sub>(immediate());
     subscriber.subscribe("news");
     subscriber.connect(&bound.to_string()).unwrap();
@@ -138,7 +132,7 @@ fn a_dropped_socket_stops_reconnecting() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(immediate());
     let mut monitor = push.monitor();
-    push.connect(&unused_endpoint()).unwrap();
+    push.connect(&free_endpoint()).unwrap();
     thread::sleep(Duration::from_millis(30));
     drop(push);
     // The monitor closes once the socket and all its connections are gone.
@@ -149,7 +143,7 @@ fn a_dropped_socket_stops_reconnecting() {
 fn a_dropped_socket_still_delivers_what_it_queued() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(immediate());
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "0");
@@ -184,7 +178,7 @@ fn next_event(xpub: &mut zmq::Socket<XPub>, subscriber: &mut zmq::Socket<Sub>) -
 fn a_reconnected_subscriber_subscribes_once() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let mut subscriber = context.socket_with::<Sub>(immediate());
     subscriber.subscribe("a");
     subscriber.connect(&bound.to_string()).unwrap();
@@ -207,7 +201,7 @@ fn a_reconnected_subscriber_subscribes_once() {
 fn a_topic_dropped_while_disconnected_is_not_resubscribed() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = xpub.bind(&free_endpoint()).unwrap();
     let mut subscriber = context.socket_with::<Sub>(immediate());
     subscriber.subscribe("old");
     subscriber.connect(&bound.to_string()).unwrap();

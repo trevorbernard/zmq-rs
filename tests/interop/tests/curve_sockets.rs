@@ -9,6 +9,7 @@ use zmq::{
     Router, Security, SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::{free_endpoint, free_port};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -73,7 +74,7 @@ fn a_libzmq_curve_dealer_is_authenticated_by_our_router() {
             }
         },
     )));
-    let bound = router.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = router.bind(&free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_receive_timeout(FIVE);
     dealer.set_curve_client(
@@ -99,7 +100,7 @@ fn a_libzmq_curve_sub_subscribes_through_the_box() {
     let server_key = server.public();
     let context = Context::new().unwrap();
     let mut publisher = context.socket_with::<Pub>(secured(Security::curve_server(server)));
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let client = Keypair::generate();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.set_receive_timeout(FIVE);
@@ -185,7 +186,7 @@ fn a_connection_records_who_authenticated_it() {
         let core = Core::new().unwrap();
         let mut listener = core
             .bind(
-                "127.0.0.1:0".parse().unwrap(),
+                free_port(),
                 ConnectionConfig {
                     security,
                     ..ConnectionConfig::new(SocketType::Router)

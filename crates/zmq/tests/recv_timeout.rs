@@ -9,6 +9,7 @@ use zmq::{
     Context, Dealer, EventKind, Frame, ManualXPub, Message, Pair, Pub, Pull, Push,
     RecvTimeoutError, Rep, Req, RequestError, Router, Sub, XPub, XSub,
 };
+use zmq_test_ports::free_endpoint;
 
 const SHORT: Duration = Duration::from_millis(100);
 /// How late a timed-out receive may return on a busy machine.
@@ -272,7 +273,7 @@ fn a_monitor_times_out_then_sees_events_then_the_end() {
         Err(RecvTimeoutError::Timeout)
     );
     assert!(start.elapsed() >= SHORT);
-    pull.bind("tcp://127.0.0.1:*").unwrap();
+    pull.bind(&free_endpoint()).unwrap();
     assert_eq!(
         monitor.recv_timeout(FIVE).map(|e| e.kind),
         Ok(EventKind::Listening)

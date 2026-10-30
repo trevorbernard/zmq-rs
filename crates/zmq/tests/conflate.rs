@@ -5,6 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Message, Pub, Pull, Push, Sub};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -54,7 +55,7 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
     for i in 1..=100 {
@@ -70,7 +71,7 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
 fn a_conflating_pull_that_connects_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    let bound = push.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = push.bind(&free_endpoint()).unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
     pull.connect(&bound.to_string()).unwrap();

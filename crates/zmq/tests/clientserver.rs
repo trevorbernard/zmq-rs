@@ -11,6 +11,7 @@ use std::time::Duration;
 use zmq::{
     Client, ClientId, Context, Dealer, Frame, Hwm, SendError, Server, SocketOptions, UnknownPeer,
 };
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -30,7 +31,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn a_server_answers_each_client_by_its_id() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = server.bind(&free_endpoint()).unwrap();
     let mut clients: Vec<_> = (0..3)
         .map(|n| {
             let mut client = context.socket::<Client>();

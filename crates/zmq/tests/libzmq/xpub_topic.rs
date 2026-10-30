@@ -2,6 +2,7 @@
 //! cancels to topics whose subscribe command is 255 octets and longer.
 
 use zmq::{Context, Socket, Sub, XPub, XPubEvent};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::FIVE;
 
@@ -41,7 +42,7 @@ fn subscribe_cancel(xpub: &mut Socket<XPub>, sub: &mut Socket<Sub>, topic: &[u8]
 fn xpub_subscribe_long_topic() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let endpoint = xpub.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = xpub.bind(&free_endpoint()).unwrap().to_string();
     let mut sub = context.socket::<Sub>();
     sub.connect(&endpoint).unwrap();
 

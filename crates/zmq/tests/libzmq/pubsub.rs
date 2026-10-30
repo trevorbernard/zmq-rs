@@ -5,6 +5,7 @@
 //! runs here over the transports zmq-rs does.
 
 use zmq::{Context, Message, Pub, Sub};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle};
 
@@ -25,7 +26,7 @@ fn test(address: &str) {
 
 #[test]
 fn tcp() {
-    test("tcp://127.0.0.1:*");
+    test(&free_endpoint());
 }
 
 #[cfg(unix)]

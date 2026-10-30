@@ -4,12 +4,13 @@ use std::net::TcpListener;
 use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect, ShutdownTimedOut};
 use zmq_interop::libzmq::{Kind, Socket};
-use zmq_interop::{ConnectError, Peer, Security, free_port};
+use zmq_interop::{ConnectError, Peer, Security};
 use zmq_pipe::Hwm;
+use zmq_test_ports::free_port;
 use zmtp::{Frame, Identity, Message, SocketType};
 
 /// Runs `f` on another thread and fails the test if it takes longer than
@@ -45,6 +46,19 @@ fn recv(connection: Connection) -> (Connection, Option<Message>) {
         let message = connection.rx.recv_blocking();
         (connection, message)
     })
+}
+
+/// The I/O thread closes the send pipe just after the receive pipe, so a
+/// reader that saw the latter close can be ahead of it.
+fn wait_for_send_pipe_to_close(connection: &Connection) {
+    let started = Instant::now();
+    while !connection.tx.is_closed() {
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "send pipe stayed open"
+        );
+        thread::sleep(Duration::from_millis(1));
+    }
 }
 
 #[test]
@@ -160,12 +174,12 @@ fn peer_disconnect_closes_the_pipes() {
     drop(router);
     let (connection, next) = recv(connection);
     assert_eq!(next, None, "receive pipe closed");
-    assert!(connection.tx.is_closed(), "send pipe closed");
+    wait_for_send_pipe_to_close(&connection);
 }
 
 #[test]
 fn dropping_the_connection_closes_the_tcp_stream() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let connection = context.connect(listener.local_addr().unwrap(), dealer("bye"));
     let mut peer = Peer::accept(
@@ -198,11 +212,7 @@ fn incompatible_peer_closes_the_pipes() {
 
 #[test]
 fn refused_connection_closes_the_pipes() {
-    let addr = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
-    // The listener is dropped, so nothing accepts on `addr`.
+    let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
         reconnect: Reconnect::Never,
@@ -251,7 +261,8 @@ fn dropping_the_context_stops_threads_and_closes_connections() {
 #[test]
 fn reconnects_after_the_peer_restarts_and_delivers_queued_messages() {
     let first = Socket::new(Kind::Router);
-    let addr = first.bind_loopback();
+    let addr = free_port();
+    first.bind(&format!("tcp://{addr}"));
     let context = Context::new().unwrap();
     let mut connection = context.connect(addr, dealer("back"));
     connection.tx.send_blocking(message(&[b"before"])).unwrap();
@@ -276,10 +287,7 @@ fn reconnects_after_the_peer_restarts_and_delivers_queued_messages() {
 
 #[test]
 fn keeps_retrying_until_a_peer_listens() {
-    let addr = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap();
+    let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
         reconnect: Reconnect::Backoff {
@@ -307,7 +315,7 @@ fn protocol_errors_do_not_reconnect() {
     let connection = context.connect(addr, ConnectionConfig::new(SocketType::Sub));
     let (connection, next) = recv(connection);
     assert_eq!(next, None);
-    assert!(connection.tx.is_closed());
+    wait_for_send_pipe_to_close(&connection);
 }
 
 fn eager(identity: &str) -> ConnectionConfig {
@@ -459,10 +467,7 @@ fn concurrent_shutdowns_each_report_what_was_abandoned() {
 fn shutdown_closes_listeners_and_later_work() {
     let context = Context::new().unwrap();
     let listener = context
-        .bind(
-            "127.0.0.1:0".parse().unwrap(),
-            ConnectionConfig::new(SocketType::Router),
-        )
+        .bind(free_port(), ConnectionConfig::new(SocketType::Router))
         .unwrap();
     let shut = context.clone();
     within(Duration::from_secs(5), move || {
@@ -499,10 +504,7 @@ fn a_connection_learns_its_peer_from_the_handshake() {
 fn an_accepted_connection_knows_its_peer_on_arrival() {
     let context = Context::new().unwrap();
     let mut listener = context
-        .bind(
-            "127.0.0.1:0".parse().unwrap(),
-            ConnectionConfig::new(SocketType::Router),
-        )
+        .bind(free_port(), ConnectionConfig::new(SocketType::Router))
         .unwrap();
     let libzmq = Socket::new(Kind::Dealer);
     libzmq.set_routing_id(b"client");

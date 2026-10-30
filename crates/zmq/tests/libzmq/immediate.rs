@@ -3,11 +3,11 @@
 //! connections take messages, and a broken one stops taking them until it
 //! is back.
 
-use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Linger, Message, Pull, Push, Socket, SocketOptions};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle};
 
@@ -17,13 +17,6 @@ fn options(immediate: bool) -> SocketOptions {
         immediate,
         ..SocketOptions::default()
     }
-}
-
-/// A TCP endpoint nothing listens on, where libzmq uses a fixed port it
-/// hopes is free.
-fn unused_endpoint() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("tcp://{}", listener.local_addr().unwrap())
 }
 
 /// Receives until nothing arrives for 250 ms, as libzmq's `ZMQ_RCVTIMEO`
@@ -43,10 +36,10 @@ fn count_received(socket: &mut Socket<Pull>) -> usize {
 fn immediate_1() {
     let context = Context::new().unwrap();
     let mut to = context.socket_with::<Pull>(options(false));
-    let endpoint = to.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = to.bind(&free_endpoint()).unwrap().to_string();
 
     let mut from = context.socket_with::<Push>(options(false));
-    from.connect(&unused_endpoint()).unwrap();
+    from.connect(&free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
     settle();
 
@@ -62,10 +55,10 @@ fn immediate_1() {
 fn immediate_2() {
     let context = Context::new().unwrap();
     let mut to = context.socket_with::<Pull>(options(false));
-    let endpoint = to.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = to.bind(&free_endpoint()).unwrap().to_string();
 
     let mut from = context.socket_with::<Push>(options(true));
-    from.connect(&unused_endpoint()).unwrap();
+    from.connect(&free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
 
     for _ in 0..10 {
@@ -80,7 +73,7 @@ fn immediate_3() {
     let context = Context::new().unwrap();
     let mut backend = context.socket_with::<Dealer>(options(false));
     let mut frontend = context.socket_with::<Dealer>(options(true));
-    let endpoint = backend.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = backend.bind(&free_endpoint()).unwrap().to_string();
     frontend.connect(&endpoint).unwrap();
 
     // Ping backend to frontend so we know when the connection is up

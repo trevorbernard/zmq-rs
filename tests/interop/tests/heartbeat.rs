@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use zmq_core::{Connection, ConnectionConfig, Context, Heartbeat, Reconnect};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::free_port;
 use zmtp::{Command, Identity, Incoming, Message, Ping, PingContext, SocketType, Ttl};
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -62,7 +63,7 @@ fn closes(connection: Connection) -> Duration {
 
 #[test]
 fn pings_go_out_at_the_interval_with_our_ttl() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let heartbeat = Heartbeat {
         interval: Duration::from_millis(50),
@@ -88,7 +89,7 @@ fn pings_go_out_at_the_interval_with_our_ttl() {
 
 #[test]
 fn a_silent_peer_times_out() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let connection = context.connect(
         listener.local_addr().unwrap(),
@@ -101,7 +102,7 @@ fn a_silent_peer_times_out() {
 
 #[test]
 fn a_timed_out_connection_reconnects() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
         reconnect: Reconnect::Fixed {
@@ -118,7 +119,7 @@ fn a_timed_out_connection_reconnects() {
 
 #[test]
 fn a_peer_answering_pings_keeps_the_connection() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut connection = context.connect(
         listener.local_addr().unwrap(),
@@ -158,7 +159,7 @@ fn a_peer_answering_pings_keeps_the_connection() {
 
 #[test]
 fn we_answer_pings_and_honour_the_peers_ttl() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let connection = context.connect(listener.local_addr().unwrap(), dealer(None));
     let mut peer = accept(&listener);
@@ -181,10 +182,7 @@ fn we_answer_pings_and_honour_the_peers_ttl() {
 fn libzmq_heartbeats_keep_its_connection_to_us() {
     let context = Context::new().unwrap();
     let mut listener = context
-        .bind(
-            "127.0.0.1:0".parse().unwrap(),
-            ConnectionConfig::new(SocketType::Router),
-        )
+        .bind(free_port(), ConnectionConfig::new(SocketType::Router))
         .unwrap();
     let libzmq = Socket::new(Kind::Dealer);
     libzmq.set_heartbeat(
@@ -232,7 +230,7 @@ fn our_heartbeats_are_answered_by_libzmq() {
 
 #[test]
 fn a_stalled_handshake_times_out() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
         handshake_timeout: Some(Duration::from_millis(100)),

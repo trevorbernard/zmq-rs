@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Hwm, Message, Pub, SocketOptions, Sub};
+use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -40,7 +41,7 @@ fn publish_until(publisher: &mut zmq::Socket<Pub>, message: &str, subscribers: u
 fn subscribers_receive_only_their_topics_over_tcp() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("news");
     subscriber.connect(&bound.to_string()).unwrap();
@@ -176,7 +177,7 @@ fn a_bound_subscriber_tells_publishers_that_connect() {
     let context = Context::new().unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("x");
-    let bound = subscriber.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = subscriber.bind(&free_endpoint()).unwrap();
     let mut publisher = context.socket::<Pub>();
     publisher.connect(&bound.to_string()).unwrap();
     let (done, received) = mpsc::channel();

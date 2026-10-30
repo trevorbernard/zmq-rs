@@ -7,10 +7,10 @@
 //! usable and turns correlation on (README, "Differences from libzmq").
 //! libzmq's checks of `ZMQ_EVENTS` have no counterpart: a REQ is not polled.
 
-use std::net::TcpListener;
 use std::thread::{self, JoinHandle};
 
 use zmq::{Context, Frame, Message, Rep, Req, RequestError, Router, Socket};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle, within};
 
@@ -48,7 +48,7 @@ fn finish<T: Send + 'static>(asking: JoinHandle<(Socket<Req>, T)>) -> (Socket<Re
 fn set_up(context: &Context) -> (Socket<Req>, [Socket<Rep>; SERVICES]) {
     let mut req = context.socket::<Req>();
     req.set_correlation(true);
-    let endpoint = req.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = req.bind(&free_endpoint()).unwrap().to_string();
     let rep = [(); SERVICES].map(|()| {
         let mut rep = context.socket::<Rep>();
         rep.connect(&endpoint).unwrap();
@@ -147,10 +147,7 @@ fn case_3_abandoned_peers_stay_in_turn() {
 /// there are answered in turn, and only the last one's reply is taken.
 #[test]
 fn case_4_replies_to_earlier_requests_are_discarded() {
-    let endpoint = {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        format!("tcp://{}", listener.local_addr().unwrap())
-    };
+    let endpoint = free_endpoint();
     let context = Context::new().unwrap();
     let mut req = context.socket::<Req>();
     req.set_correlation(true);

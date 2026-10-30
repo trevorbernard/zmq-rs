@@ -15,12 +15,13 @@
 use std::time::Duration;
 
 use zmq::{Context, Message, Pull, Push};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::FIVE;
 
 fn pipeline(context: &Context) -> (zmq::Socket<Push>, zmq::Socket<Pull>) {
     let mut vent = context.socket::<Push>();
-    let endpoint = vent.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = vent.bind(&free_endpoint()).unwrap().to_string();
     let mut sink = context.socket::<Pull>();
     sink.connect(&endpoint).unwrap();
     (vent, sink)
@@ -95,7 +96,7 @@ fn poll_client_server() {
 
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     let mut client = context.socket::<Client>();
     client.connect(&endpoint).unwrap();
 

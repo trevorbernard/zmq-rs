@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use zmq_core::{ConnectionConfig, Context, Reconnect};
 use zmq_interop::{Peer, Security};
+use zmq_test_ports::free_port;
 use zmtp::{
     Command, Decoder, DecoderConfig, Encoder, Frame, Identity, Incoming, Message, Metadata,
     PropertyName, SocketType, Subscription, Version,
@@ -63,7 +64,7 @@ fn next_command(peer: &mut Peer) -> Command {
 
 #[test]
 fn a_sub_sends_subscribe_and_cancel_commands_to_zmtp_3_1_peers() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut connection = context.connect(
         listener.local_addr().unwrap(),
@@ -86,10 +87,7 @@ fn a_sub_sends_subscribe_and_cancel_commands_to_zmtp_3_1_peers() {
 fn a_pub_receives_subscribe_and_cancel_commands_as_messages() {
     let context = Context::new().unwrap();
     let mut listener = context
-        .bind(
-            "127.0.0.1:0".parse().unwrap(),
-            ConnectionConfig::new(SocketType::Pub),
-        )
+        .bind(free_port(), ConnectionConfig::new(SocketType::Pub))
         .unwrap();
     let mut peer = Peer::connect(listener.local_addr(), SocketType::Sub, b"").unwrap();
     peer.send_command(&Command::Subscribe(Frame::from("news")))
@@ -109,10 +107,7 @@ fn a_pub_receives_subscribe_and_cancel_commands_as_messages() {
 fn other_sockets_ignore_subscribe_commands() {
     let context = Context::new().unwrap();
     let mut listener = context
-        .bind(
-            "127.0.0.1:0".parse().unwrap(),
-            ConnectionConfig::new(SocketType::Dealer),
-        )
+        .bind(free_port(), ConnectionConfig::new(SocketType::Dealer))
         .unwrap();
     let mut peer = Peer::connect(listener.local_addr(), SocketType::Dealer, b"").unwrap();
     peer.send_command(&Command::Subscribe(Frame::from("news")))
@@ -127,7 +122,7 @@ fn other_sockets_ignore_subscribe_commands() {
 
 #[test]
 fn subscriptions_are_replayed_after_reconnecting() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut connection = context.connect(
         listener.local_addr().unwrap(),
@@ -162,7 +157,7 @@ fn subscriptions_are_replayed_after_reconnecting() {
 
 #[test]
 fn zmtp_3_0_peers_get_subscriptions_as_messages() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut connection = context.connect(
         listener.local_addr().unwrap(),
@@ -210,7 +205,7 @@ fn zmtp_3_0_peers_get_subscriptions_as_messages() {
 
 #[test]
 fn other_sockets_send_subscription_shaped_messages_as_messages() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut connection = context.connect(
         listener.local_addr().unwrap(),

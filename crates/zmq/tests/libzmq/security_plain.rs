@@ -10,6 +10,7 @@ use zmq::{
     Context, Credential, Dealer, Frame, Identity, Metadata, PlainCredentials, Security, Socket,
     SocketOptions, ZapCredentials, ZapReply, ZapRequest,
 };
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, bounce_content, bounce_dealer, zero_linger};
 
@@ -50,7 +51,7 @@ fn set_up(context: &Context) -> (Socket<Dealer>, String, mpsc::Receiver<ZapReque
         }),
         ..zero_linger()
     });
-    let endpoint = server.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
 

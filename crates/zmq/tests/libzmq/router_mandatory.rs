@@ -11,6 +11,7 @@ use std::num::NonZeroUsize;
 use zmq::{
     Context, Dealer, Hwm, Identity, Message, Router, RoutingId, SendError, Socket, SocketOptions,
 };
+use zmq_test_ports::free_endpoint;
 
 use crate::support::FIVE;
 
@@ -29,7 +30,7 @@ fn dealer_called(
 fn basic() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
 
     // libzmq's default silently drops a message for an unknown peer;
     // zmq-rs reports it, as libzmq does with mandatory routing.

@@ -4,6 +4,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Identity, Message, Rep, Req, RequestError, Router, RoutingId, SocketOptions};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, Requesting, SETTLE, msg, settle};
 
@@ -11,8 +12,6 @@ use crate::support::{FIVE, Requesting, SETTLE, msg, settle};
 fn inproc(name: &str) -> String {
     format!("inproc://spec_req_{name}")
 }
-
-const TCP: &str = "tcp://127.0.0.1:*";
 
 /// SHALL route outgoing messages to connected peers using a round-robin
 /// strategy.
@@ -50,7 +49,7 @@ fn round_robin_out_inproc() {
 
 #[test]
 fn round_robin_out_tcp() {
-    round_robin_out(TCP);
+    round_robin_out(&free_endpoint());
 }
 
 /// The request and reply messages SHALL have this format on the wire: a
@@ -84,7 +83,7 @@ fn req_message_format_inproc() {
 
 #[test]
 fn req_message_format_tcp() {
-    req_message_format(TCP);
+    req_message_format(&free_endpoint());
 }
 
 /// SHALL block on sending, or return a suitable error, when it has no
@@ -161,5 +160,5 @@ fn req_only_listens_to_current_peer_inproc() {
 
 #[test]
 fn req_only_listens_to_current_peer_tcp() {
-    req_only_listens_to_current_peer(TCP);
+    req_only_listens_to_current_peer(&free_endpoint());
 }

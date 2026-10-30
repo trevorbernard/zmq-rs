@@ -5,6 +5,7 @@ use std::net::TcpListener;
 use std::time::Duration;
 
 use zmq::{Context, Error, Message, Pull, Push, Reconnect, SocketOptions};
+use zmq_test_ports::{free_endpoint, free_port};
 
 const FIVE: Duration = Duration::from_secs(5);
 const BRIEFLY: Duration = Duration::from_millis(200);
@@ -18,19 +19,13 @@ fn fast_reconnect() -> SocketOptions {
     }
 }
 
-/// A TCP endpoint nothing listens on.
-fn unused_endpoint() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("tcp://{}", listener.local_addr().unwrap())
-}
-
 #[test]
 fn connections_spread_over_several_io_threads() {
     let context = Context::with_io_threads(3).unwrap();
     let mut pulls: Vec<_> = (0..3).map(|_| context.socket::<Pull>()).collect();
     let mut push = context.socket::<Push>();
     for pull in &mut pulls {
-        let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+        let bound = pull.bind(&free_endpoint()).unwrap();
         push.connect(&bound.to_string()).unwrap();
     }
     for i in 0..3 {
@@ -51,7 +46,7 @@ fn a_context_needs_an_io_thread() {
 fn an_unbound_port_can_be_bound_again_at_once() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
-    let bound = first.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let bound = first.bind(&free_endpoint()).unwrap().to_string();
     first.unbind(&bound).unwrap();
     let mut second = context.socket::<Pull>();
     second.bind(&bound).expect("the port is free");
@@ -61,7 +56,7 @@ fn an_unbound_port_can_be_bound_again_at_once() {
 fn unbinding_closes_accepted_connections() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
-    let bound = first.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let bound = first.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(fast_reconnect());
     let mut monitor = push.monitor();
     push.connect(&bound).unwrap();
@@ -81,11 +76,7 @@ fn unbinding_closes_accepted_connections() {
 
 #[test]
 fn a_wildcard_host_names_the_same_bind() {
-    let port = TcpListener::bind("0.0.0.0:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    let port = free_port().port();
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     pull.bind(&format!("tcp://*:{port}")).unwrap();
@@ -142,9 +133,9 @@ fn an_unbound_inproc_name_is_free() {
 fn a_disconnected_peer_gets_no_more() {
     let context = Context::new().unwrap();
     let mut kept = context.socket::<Pull>();
-    let kept_at = kept.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let kept_at = kept.bind(&free_endpoint()).unwrap().to_string();
     let mut dropped = context.socket::<Pull>();
-    let dropped_at = dropped.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let dropped_at = dropped.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&kept_at).unwrap();
     push.connect(&dropped_at).unwrap();
@@ -164,7 +155,7 @@ fn a_disconnected_peer_gets_no_more() {
 #[test]
 fn a_disconnected_endpoint_is_not_retried() {
     let context = Context::new().unwrap();
-    let endpoint = unused_endpoint();
+    let endpoint = free_endpoint();
     let mut push = context.socket_with::<Push>(fast_reconnect());
     push.connect(&endpoint).unwrap();
     push.disconnect(&endpoint).unwrap();
@@ -178,7 +169,7 @@ fn a_disconnected_endpoint_is_not_retried() {
 fn a_connection_can_be_named_by_its_address() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let port = match pull.bind("tcp://127.0.0.1:*").unwrap() {
+    let port = match pull.bind(&free_endpoint()).unwrap() {
         zmq::Endpoint::Tcp(addr) => addr.port(),
         other => panic!("a tcp endpoint, not {other}"),
     };
@@ -195,7 +186,7 @@ fn a_connection_can_be_named_by_its_address() {
 fn an_immediate_connection_can_be_disconnected() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let bound = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(SocketOptions {
         immediate: true,
         ..fast_reconnect()
@@ -250,12 +241,8 @@ fn a_socket_binds_an_interface_by_name() {
 
 #[test]
 fn a_connection_leaves_from_its_source() {
-    let source_port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let source_port = free_port().port();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let address = listener.local_addr().unwrap();
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();

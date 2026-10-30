@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*", "examples", "tests/interop"]
+members = ["crates/*", "examples", "tests/interop", "tests/ports"]
 exclude = ["fuzz"]
 
 [workspace.package]
@@ -29,6 +29,7 @@ zeroize = "1"
 zmtp = { path = "crates/zmtp" }
 zmq-pipe = { path = "crates/zmq-pipe" }
 zmq-core = { path = "crates/zmq-core" }
+zmq-test-ports = { path = "tests/ports" }
 
 [workspace.lints.rust]
 unsafe_code = "deny"

@@ -5,6 +5,7 @@
 use std::thread;
 
 use zmq::{Context, Frame, Message, Req, Router};
+use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, within};
 
@@ -24,7 +25,7 @@ fn req_correlate() {
     let mut req = context.socket::<Req>();
     let mut router = context.socket::<Router>();
     req.set_correlation(true);
-    let endpoint = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
     req.connect(&endpoint).unwrap();
 
     // A multipart request.

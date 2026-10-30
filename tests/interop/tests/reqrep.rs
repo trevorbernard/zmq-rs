@@ -10,6 +10,7 @@ use zmq::{
     SocketOptions,
 };
 use zmq_interop::libzmq::{Kind, Socket};
+use zmq_test_ports::free_endpoint;
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -62,7 +63,7 @@ fn our_req_asks_a_libzmq_rep() {
 fn our_rep_answers_a_libzmq_req() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let addr = rep.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = rep.bind(&free_endpoint()).unwrap();
     let req = Socket::new(Kind::Req);
     req.connect(addr);
     req.send(&[b"question"]).unwrap();
@@ -79,7 +80,7 @@ fn our_rep_answers_a_libzmq_req() {
 fn our_req_and_rep_talk_to_each_other() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let addr = rep.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = rep.bind(&free_endpoint()).unwrap();
     let server = spawn(move || {
         for _ in 0..3 {
             let request = rep.recv();
@@ -119,7 +120,7 @@ fn rep_returns_the_whole_envelope_for_multi_hop_requests() {
     // its client's address.
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let addr = rep.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = rep.bind(&free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.connect(addr);
     dealer.send(&[b"client-7", b"", b"q1", b"q2"]).unwrap();
@@ -197,25 +198,30 @@ fn abandon_request(req: &mut zmq::Socket<Req>, body: &'static str) {
     assert!(future.as_mut().poll(&mut cx).is_pending(), "no reply yet");
 }
 
-/// A REP that answers `stale` to the first request and `fresh` to the second.
-fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Receiver<()>) {
+/// A REP that answers `stale` to the first request, once told it was
+/// abandoned, and `fresh` to the second.
+fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Sender<()>, mpsc::Receiver<()>) {
     let mut rep = context.socket::<Rep>();
-    let addr = rep.bind("tcp://127.0.0.1:*").unwrap();
+    let addr = rep.bind(&free_endpoint()).unwrap();
+    let (abandoned, heard) = mpsc::channel();
     let done = spawn(move || {
-        rep.recv().reply("stale");
+        let first = rep.recv();
+        heard.recv().unwrap();
+        first.reply("stale");
         rep.recv().reply("fresh");
     });
-    (addr.to_string(), done)
+    (addr.to_string(), abandoned, done)
 }
 
 #[test]
 fn correlation_drops_the_reply_to_an_abandoned_request() {
     let context = Context::new().unwrap();
-    let (endpoint, done) = answer_stale_then_fresh(&context);
+    let (endpoint, abandoned, done) = answer_stale_then_fresh(&context);
     let mut req = context.socket::<Req>();
     req.set_correlation(true);
     req.connect(&endpoint).unwrap();
     abandon_request(&mut req, "first");
+    abandoned.send(()).unwrap();
     let answer = within(FIVE, move || req.request("second"));
     assert_eq!(answer, Ok(Message::from("fresh")));
     done.recv_timeout(FIVE).unwrap();
@@ -226,10 +232,11 @@ fn without_correlation_an_abandoned_reply_can_be_taken() {
     // The documented hazard of cancelling without correlation, as with
     // libzmq's ZMQ_REQ_RELAXED alone.
     let context = Context::new().unwrap();
-    let (endpoint, done) = answer_stale_then_fresh(&context);
+    let (endpoint, abandoned, done) = answer_stale_then_fresh(&context);
     let mut req = context.socket::<Req>();
     req.connect(&endpoint).unwrap();
     abandon_request(&mut req, "first");
+    abandoned.send(()).unwrap();
     let answer = within(FIVE, move || req.request("second"));
     assert_eq!(answer, Ok(Message::from("stale")));
     done.recv_timeout(FIVE).unwrap();

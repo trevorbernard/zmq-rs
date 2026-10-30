@@ -9,6 +9,7 @@ use zmq::{
     Context, Credential, Event, EventKind, HandshakeFailure, Monitor, PlainCredentials,
     ProtocolError, Pull, Push, Reconnect, Security, SocketOptions, ZapReply, ZapRequest,
 };
+use zmq_test_ports::{free_endpoint, free_port};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -54,7 +55,7 @@ fn binding_reports_listening_or_bind_failed() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
     let mut monitor = first.monitor();
-    let bound = first.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = first.bind(&free_endpoint()).unwrap();
     let event = expect(&mut monitor, |kind| *kind == EventKind::Listening);
     assert_eq!(event.endpoint, bound.to_string());
 
@@ -72,7 +73,7 @@ fn both_ends_report_a_connection_and_its_handshake() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut server = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
@@ -89,7 +90,7 @@ fn both_ends_report_a_connection_and_its_handshake() {
 fn a_lost_peer_is_reported_and_retried() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         reconnect: Reconnect::Fixed {
             interval: Duration::from_millis(30),
@@ -115,7 +116,7 @@ fn closing_a_listener_reports_closed() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     drop(pull);
     let event = expect(&mut monitor, |kind| *kind == EventKind::Closed);
     assert_eq!(event.endpoint, bound.to_string());
@@ -126,7 +127,7 @@ fn an_incompatible_peer_fails_the_handshake_on_both_sides() {
     let context = Context::new().unwrap();
     let mut server_socket = context.socket::<Push>();
     let mut server = server_socket.monitor();
-    let bound = server_socket.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = server_socket.bind(&free_endpoint()).unwrap();
     let mut client_socket = context.socket::<Push>();
     let mut client = client_socket.monitor();
     client_socket.connect(&bound.to_string()).unwrap();
@@ -158,7 +159,7 @@ fn a_denied_client_is_reported_as_an_authentication_failure() {
         ..SocketOptions::default()
     });
     let mut server = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         security: Security::PlainClient(PlainCredentials {
             username: Credential::new("who").unwrap(),
@@ -175,7 +176,7 @@ fn a_denied_client_is_reported_as_an_authentication_failure() {
 
 #[test]
 fn a_silent_server_fails_the_handshake_without_detail() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         handshake_timeout: Some(Duration::from_millis(50)),
@@ -195,7 +196,7 @@ fn a_silent_server_fails_the_handshake_without_detail() {
 
 #[test]
 fn backoff_starts_over_once_a_connection_is_made() {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let listener = TcpListener::bind(free_port()).unwrap();
     let address = listener.local_addr().unwrap();
     // Accepts each connection and drops it before any handshake.
     thread::spawn(move || {
@@ -233,7 +234,7 @@ fn a_zero_handshake_timeout_means_none() {
     };
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(no_limit());
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(no_limit());
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
@@ -248,7 +249,7 @@ fn every_monitor_hears_every_event() {
     let mut pull = context.socket::<Pull>();
     let mut first = pull.monitor();
     let mut second = pull.monitor();
-    pull.bind("tcp://127.0.0.1:*").unwrap();
+    pull.bind(&free_endpoint()).unwrap();
     expect(&mut first, |kind| *kind == EventKind::Listening);
     expect(&mut second, |kind| *kind == EventKind::Listening);
 }
@@ -271,7 +272,7 @@ fn an_accepted_connection_is_not_also_reported_as_connected() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut server = pull.monitor();
-    let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
+    let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
     let seen = events_until(&mut server, |kind| *kind == EventKind::HandshakeSucceeded);
@@ -287,12 +288,6 @@ fn an_accepted_connection_is_not_also_reported_as_connected() {
 
 #[test]
 fn an_attempt_that_never_connects_only_retries() {
-    // A port with nobody listening: grab one, then free it.
-    let port = TcpListener::bind("127.0.0.1:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
         reconnect: Reconnect::Fixed {
@@ -301,7 +296,7 @@ fn an_attempt_that_never_connects_only_retries() {
         ..SocketOptions::default()
     });
     let mut monitor = push.monitor();
-    push.connect(&format!("tcp://127.0.0.1:{port}")).unwrap();
+    push.connect(&free_endpoint()).unwrap();
     let mut seen = Vec::new();
     for _ in 0..3 {
         seen.extend(events_until(&mut monitor, |kind| {
