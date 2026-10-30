@@ -10,6 +10,7 @@ jobs:
   ci:
     name: CI
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
       - uses: actions/checkout@v5
@@ -55,6 +56,7 @@ jobs:
   nightly:
     name: Miri and ThreadSanitizer
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     # Over the repository's rust-toolchain.toml: Miri and the sanitizers
     # need nightly.
     env:
@@ -89,6 +91,7 @@ jobs:
   fuzz:
     name: Fuzz
     runs-on: ubuntu-24.04
+    timeout-minutes: 20
     # Over the repository's rust-toolchain.toml, which rustup would
     # otherwise pick inside fuzz/: cargo-fuzz needs nightly.
     env:

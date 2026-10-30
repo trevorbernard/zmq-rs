@@ -1,0 +1,9 @@
+# A test that hangs is killed rather than holding up the run for good. Long
+# enough for the tests' own 60 s limits to report what they were waiting for.
+[profile.default]
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# Unoptimized, these property tests take two minutes.
+[[profile.default.overrides]]
+filter = 'package(zmtp) & binary(codec_properties)'
+slow-timeout = { period = "120s", terminate-after = 3 }
