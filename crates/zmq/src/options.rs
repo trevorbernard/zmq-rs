@@ -37,8 +37,7 @@ pub struct SocketOptions {
     pub max_message_size: Option<u64>,
     /// Whether received messages carry their connection's properties, read
     /// with [`Message::property`](crate::Message::property) as libzmq's
-    /// `zmq_msg_gets`. Off by default, unlike libzmq, for the throughput of
-    /// small messages.
+    /// `zmq_msg_gets`. On by default, as in libzmq.
     pub message_properties: MessageProperties,
     /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
     /// default.
@@ -153,10 +152,10 @@ mod tests {
     }
 
     #[test]
-    fn message_properties_are_off_by_default_unlike_libzmq() {
+    fn message_properties_are_attached_by_default_as_in_libzmq() {
         assert_eq!(
             SocketOptions::default().message_properties,
-            MessageProperties::Off
+            MessageProperties::Attach
         );
     }
 

@@ -11,7 +11,7 @@ An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
   its pattern allows.
 - Every libzmq socket type but STREAM, the draft ones behind the `draft` feature, over
   tcp, ipc and inproc, with libzmq's proxies, monitor events, `zmq_poll`
-  and message properties (`zmq_msg_gets`, opt-in).
+  and message properties (`zmq_msg_gets`).
 
 See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
 [docs/architecture.md](docs/architecture.md) compares the runtime with libzmq's.

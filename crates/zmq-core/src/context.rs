@@ -208,13 +208,13 @@ impl Heartbeat {
 /// arrived on, read with `Message::property` as libzmq's `zmq_msg_gets`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum MessageProperties {
-    /// Messages carry none. The default, unlike libzmq, which always
-    /// attaches them: sharing them with every message costs about a
-    /// quarter of the throughput of small messages.
-    #[default]
-    Off,
     /// Every message over tcp or ipc carries its connection's properties.
+    /// The default, as libzmq always attaches them.
+    #[default]
     Attach,
+    /// Messages carry none, which libzmq has no way to ask for. Saves
+    /// sharing them with every message, a cost felt only by small messages.
+    Off,
 }
 
 /// How long a closed connection keeps delivering the messages queued on it,

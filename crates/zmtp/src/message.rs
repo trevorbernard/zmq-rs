@@ -183,8 +183,7 @@ impl Message {
 
     /// The metadata of the connection this message arrived on, if it came
     /// over one that has any: never for `inproc`, which has no connection,
-    /// as in libzmq, nor unless the receiving socket attaches it, which it
-    /// does not by default.
+    /// as in libzmq, nor if the receiving socket has turned it off.
     #[inline]
     pub fn metadata(&self) -> Option<&MessageMetadata> {
         self.metadata.as_ref()

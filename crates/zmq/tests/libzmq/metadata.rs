@@ -8,8 +8,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Linger, Message, MessageProperties, Metadata, Req, Router, Security,
-    Socket, SocketOptions, SocketType, ZapCredentials, ZapReply, ZapRequest,
+    Context, Dealer, Frame, Linger, Message, Metadata, Req, Router, Security, Socket,
+    SocketOptions, SocketType, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
 use zmtp::PropertyName;
@@ -37,7 +37,6 @@ fn zap_handler(request: &ZapRequest) -> ZapReply {
 fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receiver<ZapRequest>) {
     let (seen, requests) = mpsc::channel();
     let mut server = context.socket_with::<T>(SocketOptions {
-        message_properties: MessageProperties::Attach,
         security: Security::null_authenticated("DOMAIN", move |request: &ZapRequest| {
             let _ = seen.send(request.clone());
             zap_handler(request)
