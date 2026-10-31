@@ -204,6 +204,15 @@ mod tests {
     use crate::test_support::*;
 
     #[test]
+    fn a_send_error_says_why_the_send_failed() {
+        assert_eq!(
+            SendError::UnknownPeer(()).to_string(),
+            "no peer has that id"
+        );
+        assert_eq!(SendError::Full(()).to_string(), "the peer's queue is full");
+    }
+
+    #[test]
     fn a_router_send_drops_a_peer_that_is_gone() {
         let (a, sa) = connection(10);
         sa.establish("alice");
