@@ -352,7 +352,7 @@ Rules shared by every pattern:
   - A cancel for a topic the peer never subscribed to is ignored. libzmq notifies anyway (`rm_result == not_found`; its code marks this with a TODO).
   - A ZMTP 1.0 subscriber's implicit subscription is reported as `Subscribe("")`. libzmq reports nothing on arrival, yet still sends the cancel when the peer leaves.
 - XSUB `send`: a single frame starting with `01` or `00` subscribes or unsubscribes, as libzmq does, so the topics stay counted. Multi-frame messages are always user messages. libzmq would also read a subscription from their first frame.
-- XSUB, like SUB, queues without limit towards its peers, so neither subscriptions nor upstream messages are dropped at the HWM. libzmq's `dist_t` drops at the HWM.
+- XSUB, like SUB, never drops a subscription at the HWM: it goes to peers past it, where libzmq's `dist_t` drops it. An XSUB's other messages are dropped for a peer at the HWM, as libzmq's are.
 - `set_verbosity(Verbosity::Subscriptions)` is `XPUB_VERBOSE`, and `Verbosity::Everything` is `XPUB_VERBOSER`. As in libzmq, a peer that leaves under `Everything` cancels each of its topics even if others remain.
 - `ManualXPub` is `XPUB_MANUAL`. Each subscription or cancel arrives as a `SubscriptionRequest` tied to the peer that sent it. It has no effect until `accept`, or until `subscribe`/`unsubscribe` set something else for that peer. `SubscriptionRequest::send` is `XPUB_MANUAL_LAST_VALUE`: to that peer alone. Every request is reported, whatever the verbosity; a departed peer's requested topics come as cancels with nobody to act on.
 - `set_welcome` is `XPUB_WELCOME_MSG`, sent to each new peer.
@@ -405,8 +405,9 @@ A libzmq built without drafts still creates these sockets, but aborts on
 their first handshake (`mechanism.cpp`: the socket-type name table only
 lists them in a drafts build). The flake therefore uses
 `zeromq.override { enableDrafts = true; }`; the draft interop tests check
-`zmq_has("draft")` and skip themselves on a libzmq without them, as in
-GitHub CI, which installs Ubuntu's.
+`zmq_has("draft")` and skip themselves on a libzmq without them. GitHub CI
+uses the same dev shell with `ZMQ_INTEROP_STRICT` set, so a skip there is a
+failure.
 
 - Single-part only. Received multipart messages MUST be discarded, and the peer MAY be disconnected.
 - **SERVER and PEER**
