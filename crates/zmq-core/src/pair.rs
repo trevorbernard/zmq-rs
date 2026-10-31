@@ -6,7 +6,7 @@ use std::task::{Context as TaskContext, Poll};
 use zmq_pipe::{ReaderGone, TrySendError};
 use zmtp::Message;
 
-use crate::socket::{PeerKey, PeerList};
+use crate::peers::{PeerKey, PeerList};
 
 /// PAIR's routing. The oldest peer is the socket's one peer; any other is
 /// rejected by closing its connection, as libzmq does. Once the peer's

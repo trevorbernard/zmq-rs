@@ -1538,6 +1538,7 @@ impl<T: fmt::Debug> std::error::Error for UnknownPeer<T> {}
 
 /// Why [`Socket::request_timeout`] got no reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RequestError {
     /// The peer the request went to closed before replying.
     PeerGone,

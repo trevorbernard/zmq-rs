@@ -5,7 +5,7 @@
 use std::fmt;
 use std::io;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -56,6 +56,7 @@ pub enum EventKind {
 
 /// Why a handshake failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum HandshakeFailure {
     /// Authentication refused the peer, with ZAP status 300 (try later),
     /// 400 (denied) or 500 (internal error). A client learns the status
@@ -69,6 +70,7 @@ pub enum HandshakeFailure {
 
 /// The protocol error that ended a handshake.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ProtocolError {
     Greeting(GreetingError),
     Handshake(HandshakeError),
@@ -118,7 +120,7 @@ impl MonitorSink {
 
     /// Ignores poisoning: a panic mid-`retain` or mid-send can at worst
     /// leave a closed monitor in the list, which the next `emit` drops.
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<Writer<Event>>> {
+    fn lock(&self) -> MutexGuard<'_, Vec<Writer<Event>>> {
         self.monitors.lock().unwrap_or_else(PoisonError::into_inner)
     }
 }

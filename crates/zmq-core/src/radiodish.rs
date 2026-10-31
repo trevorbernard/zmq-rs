@@ -9,7 +9,7 @@ use std::task::{Context as TaskContext, Poll};
 use zmtp::{Frame, Group, Membership, Message};
 
 use crate::FairQueue;
-use crate::socket::{PeerCursor, PeerList, PeerSet};
+use crate::peers::{PeerCursor, PeerList, PeerSet};
 
 /// RADIO's routing: the peers in each group, and fan-out to them.
 #[derive(Debug, Default)]

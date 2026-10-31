@@ -5,7 +5,7 @@ use std::thread;
 use std::time::Duration;
 
 use zguide::{body, sleep_ms};
-use zmq::{Context, Linger, Req, RequestError, Socket, SocketOptions};
+use zmq::{Context, Linger, Req, Socket, SocketOptions};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(1000);
 const SETTLE_DELAY: Duration = Duration::from_millis(2000); // Before failing over
@@ -48,7 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // again. In Binary Star, it's the client vote that decides
                 // which server is primary; the client must therefore try
                 // to connect to each server in turn
-                Err(RequestError::TimedOut | RequestError::PeerGone) => {
+                Err(_) => {
                     println!("W: no response from server, failing over");
 
                     // Old socket is confused; close it and open a new one

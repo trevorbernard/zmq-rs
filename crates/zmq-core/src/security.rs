@@ -9,6 +9,7 @@ use zmtp::{Frame, Keypair, PlainCredentials, PublicKey, ZapReply, ZapRequest};
 
 /// How a connection secures itself. Both ends must agree on the mechanism.
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub enum Security {
     /// No security (the default).
     #[default]

@@ -290,7 +290,7 @@ impl Ttl {
 
     /// The time-to-live as a `Duration`.
     #[must_use]
-    pub fn as_duration(self) -> Duration {
+    pub fn to_duration(self) -> Duration {
         Duration::from_millis(u64::from(self.0) * 100)
     }
 }
@@ -736,7 +736,7 @@ mod tests {
     #[test]
     fn ttl_converts_without_overflow() {
         assert_eq!(
-            Ttl::from_deciseconds(u16::MAX).as_duration(),
+            Ttl::from_deciseconds(u16::MAX).to_duration(),
             Duration::from_millis(6_553_500)
         );
         assert_eq!(Ttl::from_duration(Duration::ZERO), Ttl::ZERO);

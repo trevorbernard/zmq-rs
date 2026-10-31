@@ -6,7 +6,7 @@ use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
-use std::{mem, slice};
+use std::{mem, slice, vec};
 
 use crate::Frame;
 
@@ -231,7 +231,7 @@ impl Hash for Message {
 #[derive(Debug, Clone)]
 pub struct Iter<'a> {
     first: Option<&'a Frame>,
-    rest: std::slice::Iter<'a, Frame>,
+    rest: slice::Iter<'a, Frame>,
 }
 
 impl<'a> Iterator for Iter<'a> {
@@ -257,7 +257,7 @@ pub struct IntoIter {
     first: Option<Frame>,
     /// A second frame held inline.
     second: Option<Frame>,
-    rest: std::vec::IntoIter<Frame>,
+    rest: vec::IntoIter<Frame>,
 }
 
 impl Iterator for IntoIter {

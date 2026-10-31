@@ -10,7 +10,7 @@ use zmq_pipe::{Hwm, Reader, Writer, pipe};
 use zmtp::{Established, Frame, Message, Metadata, SocketType, Subscription, Version};
 
 use crate::context::PeerSlot;
-use crate::socket::PeerList;
+use crate::peers::PeerList;
 use crate::{Connection, Inbound};
 
 /// The session's ends of a hand-built connection.

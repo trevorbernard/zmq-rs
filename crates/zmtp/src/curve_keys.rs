@@ -25,6 +25,7 @@ pub struct Keypair {
 
 /// Why a key could not be read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum KeyError {
     /// Not 40 Z85 characters.
     Length,

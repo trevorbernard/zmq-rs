@@ -13,7 +13,7 @@ use std::task::{Context as TaskContext, Poll};
 use zmtp::{Frame, Message, Subscription};
 
 use crate::FairQueue;
-use crate::socket::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, PeerSet};
+use crate::peers::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, PeerSet};
 
 /// Topics and how many times each was subscribed, matched by prefix.
 #[derive(Debug, Clone, Default)]

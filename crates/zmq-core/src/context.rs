@@ -6,10 +6,10 @@ use std::io;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use std::sync::mpsc;
-use std::task::Poll;
+use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, Instant};
 
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
@@ -293,7 +293,7 @@ impl Inbound {
     /// The next message, or `None` once the session is gone and every
     /// message it delivered has been read.
     #[inline(always)]
-    pub fn poll_recv(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Message>> {
+    pub fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<Option<Message>> {
         match self.reader.poll_recv(cx) {
             Poll::Ready(Some(mut message)) => {
                 self.attach(&mut message);
@@ -315,7 +315,7 @@ impl Inbound {
     /// The next message, blocking the thread for at most `timeout`.
     pub fn recv_timeout(
         &mut self,
-        timeout: std::time::Duration,
+        timeout: Duration,
     ) -> Result<Message, zmq_pipe::RecvTimeoutError> {
         let mut message = self.reader.recv_timeout(timeout)?;
         self.attach(&mut message);
@@ -434,7 +434,7 @@ impl Listener {
     }
 
     /// The next connection, or `None` once the listener has closed.
-    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+    pub fn poll_accept(&mut self, cx: &mut TaskContext<'_>) -> Poll<Option<Connection>> {
         self.connections.poll_recv(cx)
     }
 
@@ -480,7 +480,7 @@ impl IpcListener {
     }
 
     /// The next connection, or `None` once the listener has closed.
-    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+    pub fn poll_accept(&mut self, cx: &mut TaskContext<'_>) -> Poll<Option<Connection>> {
         self.connections.poll_recv(cx)
     }
 
@@ -526,7 +526,7 @@ impl IpcAbstractListener {
     }
 
     /// The next connection, or `None` once the listener has closed.
-    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+    pub fn poll_accept(&mut self, cx: &mut TaskContext<'_>) -> Poll<Option<Connection>> {
         self.connections.poll_recv(cx)
     }
 
@@ -569,7 +569,7 @@ impl InprocListener {
     }
 
     /// The next connection, or `None` once the listener has closed.
-    pub fn poll_accept(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Option<Connection>> {
+    pub fn poll_accept(&mut self, cx: &mut TaskContext<'_>) -> Poll<Option<Connection>> {
         self.connections.poll_recv(cx)
     }
 
@@ -911,11 +911,15 @@ impl Context {
         client
     }
 
-    fn inproc(&self) -> std::sync::MutexGuard<'_, InprocRegistry> {
+    /// Unlike the crate's other locks, this one refuses a poisoned mutex: a
+    /// bind drains `pending` before it records the name, so a panic part
+    /// way through would lose connections or orphan them. Never called
+    /// from `Drop`.
+    fn inproc(&self) -> MutexGuard<'_, InprocRegistry> {
         self.inner
             .inproc
             .lock()
-            .unwrap_or_else(PoisonError::into_inner)
+            .expect("a panic during an inproc bind or connect left the registry inconsistent")
     }
 
     /// Connects to a TCP peer in the background and returns the pipes for
@@ -1040,6 +1044,20 @@ mod tests {
 
     fn config(socket_type: SocketType) -> ConnectionConfig {
         ConnectionConfig::new(socket_type)
+    }
+
+    #[test]
+    #[should_panic(expected = "left the registry inconsistent")]
+    fn a_panic_holding_the_inproc_registry_stops_later_use_of_it() {
+        let context = Context::new().unwrap();
+        let panicking = context.clone();
+        let panicked = std::thread::spawn(move || {
+            let _registry = panicking.inproc();
+            panic!("mid-update");
+        })
+        .join();
+        assert!(panicked.is_err(), "the thread panics to poison the lock");
+        context.connect_inproc("name", config(SocketType::Pair));
     }
 
     #[test]

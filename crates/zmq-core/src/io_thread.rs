@@ -120,6 +120,8 @@ impl IoThread {
     }
 
     /// Waits for the thread to exit, if it has not been joined already.
+    /// Ignores poisoning: `Drop` calls this, where a second panic would
+    /// abort, and taking the handle cannot leave it half updated.
     pub(crate) fn join(&self) {
         let thread = self
             .thread

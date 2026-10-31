@@ -214,7 +214,7 @@ impl Greeting {
             self.output.push(MINOR);
             self.output
                 .extend_from_slice(&self.mechanism.greeting_name());
-            self.output.push(u8::from(self.mechanism.as_server()));
+            self.output.push(u8::from(self.mechanism.is_server()));
             self.output.extend_from_slice(&[0; FILLER_LEN]);
             self.expected = GREETING_LEN;
         }

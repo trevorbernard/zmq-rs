@@ -14,7 +14,18 @@ use std::task::{Context as TaskContext, Poll};
 use zmq_pipe::TrySendError;
 use zmtp::{Frame, Message};
 
-use crate::socket::{FairQueue, LoadBalancer, PeerKey, PeerList, RouteOutcome, random_u32};
+use crate::peers::{PeerKey, PeerList, random_u32};
+use crate::{FairQueue, LoadBalancer};
+
+/// What happened to a reply REP was asked to send.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteOutcome {
+    Sent,
+    /// The requester is gone. The reply was dropped.
+    UnknownPeer,
+    /// The requester's queue is full. The reply was dropped.
+    PeerFull,
+}
 
 /// REQ's side: sends each request to the next peer with room and accepts a
 /// reply only from that peer.

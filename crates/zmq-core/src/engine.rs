@@ -898,7 +898,7 @@ impl Engine {
             if ping.ttl != Ttl::ZERO {
                 self.deadlines
                     .ttl
-                    .get_or_insert(Instant::now() + ping.ttl.as_duration());
+                    .get_or_insert(Instant::now() + ping.ttl.to_duration());
             }
             let mut pong = Vec::new();
             Command::Pong(ping.context).encode(&mut pong);
@@ -1053,8 +1053,8 @@ fn connection_metadata(stream: &Stream, established: &Established) -> MessageMet
 /// Attaches the connection's metadata to its first message only, for the
 /// socket's [`Inbound`](crate::Inbound) to give to the rest, or to every
 /// message when conflating, as a conflated pipe may replace the first.
-fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, every: bool) {
-    let attached = if every {
+fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, conflated: bool) {
+    let attached = if conflated {
         metadata.clone()
     } else {
         metadata.take()

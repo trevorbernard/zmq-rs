@@ -7,7 +7,7 @@
 use std::time::Duration;
 
 use zguide::body;
-use zmq::{Context, Linger, Req, RequestError, Socket, SocketOptions};
+use zmq::{Context, Linger, Req, Socket, SocketOptions};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_millis(2500);
 const REQUEST_RETRIES: usize = 3;
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     println!("E: malformed reply from server: {reply}");
                 }
-                Err(RequestError::TimedOut | RequestError::PeerGone) => {
+                Err(_) => {
                     retries_left -= 1;
                     if retries_left == 0 {
                         println!("E: server seems to be offline, abandoning");

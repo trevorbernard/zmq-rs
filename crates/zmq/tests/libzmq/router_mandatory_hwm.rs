@@ -22,7 +22,7 @@ fn send_until_full(router: &mut zmq::Socket<Router>, to: &RoutingId, mut sent: u
         match router.try_send(to, vec![0u8; 65536]) {
             Ok(()) => sent += 1,
             Err(SendError::Full(_)) => break,
-            Err(SendError::UnknownPeer(_)) => panic!("X is connected"),
+            Err(error) => panic!("X is connected: {error}"),
         }
     }
     sent

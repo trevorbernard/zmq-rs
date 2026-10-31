@@ -40,7 +40,7 @@ impl Mechanism {
     }
 
     /// The greeting `as-server` flag. Always false for NULL.
-    pub(crate) const fn as_server(self) -> bool {
+    pub(crate) const fn is_server(self) -> bool {
         matches!(self, Self::Plain(Role::Server) | Self::Curve(Role::Server))
     }
 

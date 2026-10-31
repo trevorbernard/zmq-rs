@@ -87,7 +87,7 @@ fn get_peer_state() {
         match router.try_send(&y, "Hello") {
             Ok(()) => dealer2_sent += 1,
             Err(SendError::Full(_)) => dealer2_blocked = true,
-            Err(SendError::UnknownPeer(_)) => panic!("Y is connected"),
+            Err(error) => panic!("Y is connected: {error}"),
         }
         // dealer2 is never read, so its queue fills.
         while let Some(message) = dealer1.try_recv() {

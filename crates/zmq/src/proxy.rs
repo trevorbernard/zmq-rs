@@ -3,9 +3,10 @@
 //! optionally copying them to a capture socket, and can be paused, resumed
 //! and stopped through a [`ProxyControl`].
 
+use std::fmt;
 use std::future::poll_fn;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use zmtp::{Frame, Message, Subscription};
@@ -144,6 +145,13 @@ enum Direction {
     ToFrontend,
 }
 
+/// Which step of a forward a counter update is for.
+#[derive(Debug, Clone, Copy)]
+enum Counted {
+    Received,
+    Sent,
+}
+
 /// How messages go one way: which counters they update, and whether a PUB
 /// or XPUB they go to may drop them.
 #[derive(Clone, Copy)]
@@ -259,17 +267,20 @@ fn pump(
 ) -> bool {
     let Route { direction, no_drop } = route;
     for _ in 0..BATCH {
-        if in_flight.is_none() {
-            let Poll::Ready(message) = from.poll_take(cx) else {
-                return false;
-            };
-            shared.count(direction, false, &message);
-            if let Some(capture) = capture {
-                capture.capture(&message);
+        let message = match in_flight {
+            Some(message) => message,
+            None => {
+                let Poll::Ready(message) = from.poll_take(cx) else {
+                    return false;
+                };
+                shared.count(direction, Counted::Received, &message);
+                if let Some(capture) = capture {
+                    capture.capture(&message);
+                }
+                in_flight.insert(message)
             }
-            *in_flight = Some(message);
-        }
-        let (parts, bytes) = size(in_flight.as_ref().expect("filled above"));
+        };
+        let (parts, bytes) = size(message);
         let given = if no_drop {
             to.poll_give_all(in_flight, cx)
         } else {
@@ -278,7 +289,7 @@ fn pump(
         if given.is_pending() {
             return false;
         }
-        shared.add(direction, true, parts, bytes);
+        shared.add(direction, Counted::Sent, parts, bytes);
     }
     true
 }
@@ -290,20 +301,20 @@ fn size(message: &Message) -> (u64, u64) {
 }
 
 impl Shared {
-    fn count(&self, direction: Direction, sent: bool, message: &Message) {
+    fn count(&self, direction: Direction, counted: Counted, message: &Message) {
         let (parts, bytes) = size(message);
-        self.add(direction, sent, parts, bytes);
+        self.add(direction, counted, parts, bytes);
     }
 
     /// Counters are in libzmq's STATISTICS order: frontend received and
     /// sent, then backend received and sent, each as messages then bytes.
-    fn add(&self, direction: Direction, sent: bool, parts: u64, bytes: u64) {
-        let side = match (direction, sent) {
+    fn add(&self, direction: Direction, counted: Counted, parts: u64, bytes: u64) {
+        let side = match (direction, counted) {
             // Received by the frontend, or sent by the backend, and back.
-            (Direction::ToBackend, false) => 0,
-            (Direction::ToFrontend, true) => 1,
-            (Direction::ToFrontend, false) => 2,
-            (Direction::ToBackend, true) => 3,
+            (Direction::ToBackend, Counted::Received) => 0,
+            (Direction::ToFrontend, Counted::Sent) => 1,
+            (Direction::ToFrontend, Counted::Received) => 2,
+            (Direction::ToBackend, Counted::Sent) => 3,
         };
         self.counters[2 * side].fetch_add(parts, Ordering::Relaxed);
         self.counters[2 * side + 1].fetch_add(bytes, Ordering::Relaxed);
@@ -366,7 +377,9 @@ impl ProxyControl {
         state.mode
     }
 
-    fn state(&self) -> std::sync::MutexGuard<'_, State> {
+    /// Ignores poisoning: `mode` and `waker` are each replaced whole, so a
+    /// panic while holding the lock cannot leave either half updated.
+    fn state(&self) -> MutexGuard<'_, State> {
         self.shared
             .state
             .lock()
@@ -539,8 +552,8 @@ impl Capture for Socket<Pair> {
     }
 }
 
-impl std::fmt::Debug for Proxy<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for Proxy<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Proxy")
             .field("capture", &self.capture.is_some())
             .field("statistics", &self.control.statistics())
@@ -548,8 +561,8 @@ impl std::fmt::Debug for Proxy<'_> {
     }
 }
 
-impl std::fmt::Debug for ProxyControl {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Debug for ProxyControl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ProxyControl")
             .field("mode", &self.state().mode)
             .finish_non_exhaustive()

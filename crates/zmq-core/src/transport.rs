@@ -7,8 +7,9 @@
 //! [`Stream::read_appending`]), and mio's do not offer that. Elsewhere
 //! mio's streams are used as they are.
 
+use std::fmt;
 use std::io::{self, Read, Write};
-use std::net::{SocketAddr, SocketAddrV6, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, SocketAddrV6, ToSocketAddrs};
 
 use mio::event::Source;
 use mio::net::TcpListener;
@@ -67,9 +68,9 @@ pub fn interface_addr(name: &str, port: u16) -> Option<SocketAddr> {
         .find(|interface| interface.ip().is_ipv4())
         .or_else(|| interfaces.first())?;
     Some(match interface.ip() {
-        std::net::IpAddr::V4(ip) => SocketAddr::from((ip, port)),
+        IpAddr::V4(ip) => SocketAddr::from((ip, port)),
         // A link-local address means nothing without its interface.
-        std::net::IpAddr::V6(ip) => {
+        IpAddr::V6(ip) => {
             SocketAddr::V6(SocketAddrV6::new(ip, port, 0, interface.index.unwrap_or(0)))
         }
     })
@@ -131,9 +132,9 @@ pub(crate) enum Address {
     IpcAbstract(String),
 }
 
-impl std::fmt::Display for Address {
+impl fmt::Display for Address {
     /// The endpoint string, as libzmq writes it.
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Tcp(addr) => write!(f, "tcp://{addr}"),
             Self::TcpHost { host, port, source } => {

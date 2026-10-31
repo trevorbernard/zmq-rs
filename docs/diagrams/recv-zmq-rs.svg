@@ -50,7 +50,7 @@ text { fill: #1b2230; }
 <text x="580" y="48" text-anchor="middle" font-size="10" class="muted">Writer → Reader</text>
 <rect x="697" y="16" width="87" height="40" rx="4" class="head-rs"/>
 <text x="740" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">FairQueue</text>
-<text x="740" y="48" text-anchor="middle" font-size="10" class="muted">socket.rs</text>
+<text x="740" y="48" text-anchor="middle" font-size="10" class="muted">fair_queue.rs</text>
 <rect x="865" y="16" width="70" height="40" rx="4" class="head-rs"/>
 <text x="900" y="33" text-anchor="middle" font-size="12" font-family="IBM Plex Mono, ui-monospace, monospace" font-weight="500">app</text>
 <text x="900" y="48" text-anchor="middle" font-size="10" class="muted">user code</text>
