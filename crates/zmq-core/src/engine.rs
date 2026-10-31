@@ -8,7 +8,7 @@
 
 use std::io::{self, Read};
 use std::mem;
-use std::sync::mpsc;
+use std::sync::{Arc, mpsc};
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -121,7 +121,10 @@ enum State {
 enum Mechanism {
     Null(NullHandshake),
     PlainClient(PlainClient),
-    PlainServer(PlainServer),
+    PlainServer {
+        server: PlainServer,
+        authenticator: Arc<dyn Authenticator>,
+    },
     CurveClient(Box<CurveClient>),
     CurveServer(Box<CurveServer>),
     /// A server waiting for its authenticator's answer.
@@ -134,7 +137,10 @@ enum Mechanism {
 /// A server handshake waiting for ZAP, by mechanism.
 enum Pending {
     Null(PendingNullAuthentication),
-    Plain(PendingPlainAuthentication),
+    Plain {
+        pending: PendingPlainAuthentication,
+        authenticator: Arc<dyn Authenticator>,
+    },
     Curve(Box<PendingCurveAuthentication>),
 }
 
@@ -517,14 +523,16 @@ impl Engine {
         Ok(true)
     }
 
-    /// What the configured security asks about peers, if anything: a CURVE
-    /// server may have no authenticator, and clients have none.
-    fn authenticator(&self) -> Option<&dyn Authenticator> {
+    /// What a CURVE server asks about clients, if anything. NULL and PLAIN
+    /// servers keep theirs in their [`Mechanism`], as they always have one.
+    fn curve_authenticator(&self) -> Option<&dyn Authenticator> {
         match &self.config.security {
-            Security::NullAuthenticated { authenticator, .. }
-            | Security::PlainServer { authenticator, .. } => Some(&**authenticator),
             Security::CurveServer { authenticator, .. } => authenticator.as_deref(),
-            Security::Null | Security::PlainClient(_) | Security::CurveClient { .. } => None,
+            Security::Null
+            | Security::NullAuthenticated { .. }
+            | Security::PlainClient(_)
+            | Security::PlainServer { .. }
+            | Security::CurveClient { .. } => None,
         }
     }
 
@@ -570,7 +578,10 @@ impl Engine {
                 &mut self.out.buf,
             )
             .map(Mechanism::PlainClient),
-            Security::PlainServer { domain, .. } => {
+            Security::PlainServer {
+                domain,
+                authenticator,
+            } => {
                 let peer_address = self.stream.zap_address();
                 PlainServer::start(
                     ServerConfig {
@@ -581,7 +592,10 @@ impl Engine {
                     },
                     peer,
                 )
-                .map(Mechanism::PlainServer)
+                .map(|server| Mechanism::PlainServer {
+                    server,
+                    authenticator: Arc::clone(authenticator),
+                })
             }
             Security::CurveClient {
                 keypair,
@@ -641,9 +655,15 @@ impl Engine {
                         let handshake = pending.reply(answer, &mut self.out.buf);
                         Step::Continue(Mechanism::Null(self.handshake_result(handshake)?))
                     }
-                    Pending::Plain(pending) => {
+                    Pending::Plain {
+                        pending,
+                        authenticator,
+                    } => {
                         let server = pending.reply(answer, &mut self.out.buf);
-                        Step::Continue(Mechanism::PlainServer(self.handshake_result(server)?))
+                        Step::Continue(Mechanism::PlainServer {
+                            server: self.handshake_result(server)?,
+                            authenticator,
+                        })
                     }
                     Pending::Curve(pending) => {
                         let result = pending.reply(answer, &mut self.out.buf);
@@ -737,14 +757,18 @@ impl Engine {
                     }
                 }
             }
-            Mechanism::PlainServer(server) => {
+            Mechanism::PlainServer {
+                server,
+                authenticator,
+            } => {
                 let result = server.receive(item, &mut self.out.buf);
                 match self.handshake_result(result)? {
                     PlainServerStep::Authenticate(pending, request) => {
-                        let authenticator = self
-                            .authenticator()
-                            .expect("a PLAIN server is configured with an authenticator");
-                        Step::Continue(ask(authenticator, request, Pending::Plain(pending), cx))
+                        let pending = Pending::Plain {
+                            pending,
+                            authenticator: Arc::clone(&authenticator),
+                        };
+                        Step::Continue(ask(&*authenticator, request, pending, cx))
                     }
                     PlainServerStep::Established(established) => {
                         Step::Established(established, None)
@@ -769,7 +793,7 @@ impl Engine {
                         Step::Continue(Mechanism::CurveServer(Box::new(server)))
                     }
                     CurveServerStep::Authenticate(pending, request) => {
-                        match self.authenticator() {
+                        match self.curve_authenticator() {
                             Some(authenticator) => Step::Continue(ask(
                                 authenticator,
                                 request,
