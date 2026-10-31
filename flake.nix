@@ -89,18 +89,20 @@
           # The shell has the legacy peers and a libzmq with drafts, so an
           # interop test that would skip for want of them fails instead.
           ZMQ_INTEROP_STRICT = "1";
-          nativeBuildInputs = [
-            rust
-            pkgs.cargo-audit
-            pkgs.cargo-mutants
-            pkgs.cargo-nextest
-            pkgs.just
-            pkgs.git
-            pkgs.pkg-config
-            pkgs.zeromq # reference libzmq for interop tests
-            pkgs.gdb
-            pkgs.python3
-          ];
+          nativeBuildInputs =
+            [
+              rust
+              pkgs.cargo-audit
+              pkgs.cargo-mutants
+              pkgs.cargo-nextest
+              pkgs.just
+              pkgs.git
+              pkgs.pkg-config
+              pkgs.zeromq # reference libzmq for interop tests
+              pkgs.gdb
+              pkgs.python3
+            ]
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [pkgs.perf];
           shellHook = ''
             echo "Rust $(rustc --version)"
             echo "Cargo $(cargo --version)"
