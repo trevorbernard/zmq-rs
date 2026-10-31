@@ -134,7 +134,9 @@ pub struct SideStatistics {
 /// Message parts and their octets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Count {
+    /// Message parts: a multipart message counts once for each part.
     pub messages: u64,
+    /// Octets in those parts.
     pub bytes: u64,
 }
 

@@ -21,6 +21,7 @@ pub enum Security {
     NullAuthenticated {
         /// The ZAP domain the authenticator sees.
         domain: Frame,
+        /// Decides whether each peer may complete its handshake.
         authenticator: Arc<dyn Authenticator>,
     },
     /// PLAIN client: sends a username and password in clear text, so use it
@@ -30,12 +31,16 @@ pub enum Security {
     PlainServer {
         /// The ZAP domain the authenticator sees; may be empty.
         domain: Frame,
+        /// Decides whether each client's credentials are accepted.
         authenticator: Arc<dyn Authenticator>,
     },
     /// CURVE client: encrypts and authenticates the connection with its
     /// long-term `keypair`, to the server whose public key is `server_key`.
     CurveClient {
+        /// Our long-term keys. The server's authenticator sees the public
+        /// key.
         keypair: Arc<Keypair>,
+        /// The server's long-term public key, known before connecting.
         server_key: PublicKey,
     },
     /// CURVE server with its long-term `keypair`. Clients must know its
@@ -43,9 +48,11 @@ pub enum Security {
     /// public key; without one, any client is accepted, as libzmq does with
     /// no ZAP handler.
     CurveServer {
+        /// Our long-term keys. Clients are configured with the public key.
         keypair: Arc<Keypair>,
         /// The ZAP domain the authenticator sees; may be empty.
         domain: Frame,
+        /// Decides whether each client's public key is accepted, if set.
         authenticator: Option<Arc<dyn Authenticator>>,
     },
 }
