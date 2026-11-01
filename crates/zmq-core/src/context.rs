@@ -1040,6 +1040,8 @@ impl std::error::Error for ShutdownTimedOut {}
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use super::*;
 
     fn config(socket_type: SocketType) -> ConnectionConfig {
@@ -1230,6 +1232,46 @@ mod tests {
     #[test]
     fn shutdown_delivers_a_large_message_whole_on_a_dropped_connection() {
         shutdown_delivers_a_large_message_whole(false);
+    }
+
+    #[test]
+    fn shutdown_delivers_what_was_queued_before_the_connection_was_up() {
+        let address = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let sending = Context::new().unwrap();
+        let mut connection = sending.connect(address, config(SocketType::Push));
+        connection.tx.try_send(Message::new("queued")).unwrap();
+        let shutting = sending.clone();
+        let shutdown = std::thread::spawn(move || shutting.shutdown(Duration::from_secs(5)));
+        std::thread::sleep(Duration::from_millis(100));
+        let receiving = Context::new().unwrap();
+        let mut listener = receiving.bind(address, config(SocketType::Pull)).unwrap();
+        assert_eq!(shutdown.join().unwrap(), Ok(()));
+        drop(connection);
+        let mut accepted = listener.accept_blocking().unwrap();
+        let message = accepted.rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(message.last().as_ref(), b"queued");
+    }
+
+    #[test]
+    fn a_connection_reset_during_the_greeting_reconnects_at_once() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let context = Context::new().unwrap();
+        let _connection = context.connect(listener.local_addr().unwrap(), config(SocketType::Push));
+        let (mut peer, _) = listener.accept().unwrap();
+        let mut signature = [0u8; 10];
+        peer.read_exact(&mut signature).unwrap();
+        // Lets the engine finish its first read, so the reset wakes it.
+        std::thread::sleep(Duration::from_millis(50));
+        socket2::SockRef::from(&peer)
+            .set_linger(Some(Duration::ZERO))
+            .unwrap();
+        drop(peer);
+        let started = Instant::now();
+        listener.accept().unwrap();
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]
