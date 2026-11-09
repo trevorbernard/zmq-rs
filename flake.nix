@@ -98,6 +98,8 @@
             pkgs.git
             pkgs.pkg-config
             pkgs.zeromq # reference libzmq for interop tests
+            pkgs.gdb
+            pkgs.python3
           ];
           shellHook = ''
             echo "Rust $(rustc --version)"
