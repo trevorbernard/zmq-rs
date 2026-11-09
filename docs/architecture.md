@@ -19,7 +19,7 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 
 | Crate | Role | I/O |
 |---|---|---|
-| `zmtp` | Greeting, handshakes (NULL, PLAIN), commands, frame codecs: state machines over bytes | none |
+| `zmtp` | Greeting, handshakes (NULL, PLAIN, CURVE), ZAP, Z85, commands, frame codecs: state machines over bytes | none |
 | `zmq-pipe` | SPSC `Writer`/`Reader` with high-water marks and wakers | none |
 | `zmq-core` | Context, I/O threads, sessions, engines, transports, routing | mio |
 | `zmq` | Typed sockets for applications | via `zmq-core` |
@@ -27,18 +27,39 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 
 ## Pieces in `zmq-core`
 
-| Piece | Role | libzmq |
+Files are under `crates/zmq-core/src/`.
+
+| Piece | File | Role | libzmq |
+|---|---|---|---|
+| `Context` | `context.rs` | Shared handle to N I/O threads; dropping the last clone stops and joins them | `ctx_t` |
+| `IoThread` | `io_thread.rs` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
+| `IoCommand` | `io_thread.rs` | The thread's command type (`Connect`, `Listen`, `Shutdown`, `Stop`) | `command_t` |
+| `Listener` | `context.rs` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
+| `IpcListener` | `context.rs` | A bound `ipc://` path (Unix domain socket), served like a TCP listener; removes its socket file when it closes | `ipc_listener_t` |
+| `Stream` | `transport.rs` | A connection's byte stream, TCP or Unix domain socket; engines and sessions are the same for both | `tcp_connecter_t`, `ipc_connecter_t` |
+| `InprocListener` | `context.rs` | A bound `inproc` name in the context's registry; paired connections arrive the same way | `ctx_t::endpoints`, `pend_connection` |
+| `Session` | `io_thread.rs` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
+| `Reconnect` | `reconnect.rs` | When to try connecting again after a connection fails or ends | `get_new_reconnect_ivl` |
+| `Engine` | `engine.rs` | One connection over a `Stream`: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
+| `Output` | `output.rs` | What an engine has yet to write; large payloads go from their own buffers | `encoder_base_t` |
+| `TokenWaker` | `io_thread.rs` | A pipe waker that queues its session or listener id once and wakes the event loop | `activate_read`, `activate_write` |
+| `Security`, `Authenticator` | `security.rs` | A connection's mechanism, and the server's check on each client | `mechanism_t`, ZAP |
+| `Monitor`, `Event` | `monitor.rs` | Typed events about a socket's listeners and connections | `zmq_socket_monitor` |
+
+Routing, one module per pattern, all built on `peers.rs` (the peers a socket talks to):
+
+| Module | Patterns | libzmq |
 |---|---|---|
-| `Context` | Shared handle to N I/O threads; dropping the last clone stops and joins them | `ctx_t` |
-| `IoThread` | A `std` thread running `mio::Poll`, reached through a command channel plus a `mio::Waker` | `io_thread_t`, `mailbox_t` |
-| `IoCommand` | The thread's command type (`Connect`, `Listen`, `Shutdown`, `Stop`) | `command_t` |
-| `Listener` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
-| `IpcListener` | A bound `ipc://` path (Unix domain socket), served like a TCP listener; removes its socket file when it closes | `ipc_listener_t` |
-| `Stream` | A connection's byte stream, TCP or Unix domain socket; engines and sessions are the same for both | `tcp_connecter_t`, `ipc_connecter_t` |
-| `InprocListener` | A bound `inproc` name in the context's registry; paired connections arrive the same way | `ctx_t::endpoints`, `pend_connection` |
-| `Session` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
-| `Engine` | One TCP connection: greeting, handshake, then codecs, with partial-write buffering | `zmtp_engine_t` |
-| `TokenWaker` | A pipe waker that queues its session or listener id once and wakes the event loop | `activate_read`, `activate_write` |
+| `load_balancer.rs`, `fair_queue.rs` | Sends to the next peer with room; receives round robin | `lb_t`, `fq_t` |
+| `reqrep.rs` | REQ, REP envelopes | `req_t`, `rep_t` |
+| `router_table.rs` | ROUTER, by routing id | `router_t` |
+| `pubsub.rs` | PUB, SUB, XPUB, XSUB | `xpub_t`, `xsub_t` |
+| `pair.rs` | PAIR | `pair_t` |
+| `server_table.rs` | SERVER, by numeric id | `server_t` |
+| `radiodish.rs` | RADIO, DISH | `radio_t`, `dish_t` |
+
+`test_support.rs` builds fake connections for unit-testing routing without
+threads. The typed sockets applications use are in `crates/zmq/src/socket.rs`.
 
 ## Event flow
 
