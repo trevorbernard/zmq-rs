@@ -95,7 +95,8 @@ signal again for data it has already reported.
   starts with no subscriptions, so this is how it learns them.
 - `Reconnect::Fixed` waits the interval plus random jitter below it, and
   `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
-  handshake succeeds; both follow libzmq's `get_new_reconnect_ivl`.
+  connection is made, before its handshake; both follow libzmq's
+  `get_new_reconnect_ivl`.
 - Dropping a connection's sender starts its linger: queued messages keep
   being delivered, across reconnects, until the queue is written or the
   `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at
@@ -432,7 +433,7 @@ a shared atomic and wakes the writer's waker.
 | Socket API | One `socket_base_t`; bad options are `EINVAL` | `Socket<T>`; bad operations and options do not compile |
 | Protocol | Engine owns mechanism, encoder, decoder | `zmtp`: sans-IO state machines |
 | Event loop | Own poller over epoll, kqueue, poll, select | `mio`, edge-triggered |
-| Teardown | `own_t` tree, `term`/`term_ack`, reaper thread; `zmq_ctx_term` blocks | `Arc`, `Drop`, closed flags; dropping `Context` never blocks |
+| Teardown | `own_t` tree, `term`/`term_ack`, reaper thread; `zmq_ctx_term` blocks | `Arc`, `Drop`, closed flags; dropping the last `Context` blocks likewise |
 | Reconnect | `tcp_connecter_t` child of the session | `Session` with `Origin::Connect` and `Reconnect` |
 | ROUTER, unknown id | Dropped unless `ZMQ_ROUTER_MANDATORY` | Always handed back |
 | PUB matching | `mtrie_t` plus `dist_t` array partitions | `PrefixMap` keyed rolling hash plus `PeerIndex` |
