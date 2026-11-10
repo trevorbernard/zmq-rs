@@ -15,6 +15,7 @@ test *args:
 
 # zmq-pipe's queue on loom: every interleaving of its models. Its own
 # target directory, as `--cfg loom` rebuilds everything.
+[doc("zmq-pipe's queue on loom: every interleaving of its models.")]
 loom *args:
     RUSTFLAGS="--cfg loom" CARGO_TARGET_DIR=target/loom cargo test -p zmq-pipe --lib --release {{args}}
 
@@ -24,6 +25,7 @@ miri *args:
 
 # zmq-pipe's tests and the shutdown stress tests under ThreadSanitizer.
 # Doctests are left out: rustdoc builds them without the sanitizer.
+[doc("zmq-pipe's tests and the shutdown stress tests under ThreadSanitizer.")]
 tsan:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -43,6 +45,7 @@ tsan:
 # --test-workspace=false, so the crate is picked by its files. Its baseline
 # still runs only the crate's own tests, so zmq-core's timeout, which would
 # follow from those, is set.
+[doc("Mutation testing of one crate, e.g. `just mutants zmtp`; results in target/mutants/<crate>/.")]
 mutants crate *args:
     mkdir -p target/mutants
     cargo mutants --file 'crates/{{crate}}/**' --test-workspace=false \
