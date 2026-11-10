@@ -224,6 +224,13 @@ impl<T> Drop for Producer<T> {
 }
 
 impl<T> Consumer<T> {
+    /// Whether the writer has added nothing past what was taken.
+    pub(crate) fn is_empty(&self) -> bool {
+        // SAFETY: `front` is live: only this end frees or recycles it.
+        let slot = unsafe { Chunk::slot(self.front, self.read) };
+        slot.state.load(Ordering::Acquire) != FULL
+    }
+
     /// Takes the next item if the writer has added it. With `sleep`, finding
     /// none marks the reader as waiting, so the writer's next push reports
     /// that it must be woken: register the waker first.

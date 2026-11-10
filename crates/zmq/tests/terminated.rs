@@ -272,3 +272,15 @@ fn a_bound_socket_is_dropped_without_waiting_after_a_shutdown() {
         .recv_timeout(FIVE)
         .expect("the sockets and the context drop after a shutdown");
 }
+
+#[test]
+fn a_connection_still_shaking_hands_does_not_hold_a_shutdown_up() {
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>();
+    let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
+    let mut push = context.socket::<Push>();
+    push.connect(&endpoint).unwrap();
+    let started = std::time::Instant::now();
+    assert_eq!(context.shutdown(FIVE), Ok(()));
+    assert!(started.elapsed() < Duration::from_secs(1));
+}

@@ -497,9 +497,16 @@ impl EventLoop {
         }
         // Nothing left to deliver and no connection to deliver on, as
         // libzmq ends a session whose pipe has terminated: lingering would
-        // reconnect forever for nothing.
+        // reconnect forever for nothing. A shutdown does not wait for the
+        // socket to go either: its listeners are closed, so a handshake
+        // with a peer in this context would never finish.
         let established = session.engine.as_ref().is_some_and(Engine::is_established);
-        if session.closing.is_some() && !established && session.outbound.is_drained() {
+        let nothing_queued = if self.shutdown.is_some() {
+            session.outbound.is_empty()
+        } else {
+            session.outbound.is_drained()
+        };
+        if session.closing.is_some() && !established && nothing_queued {
             self.close_session(id);
             return;
         }

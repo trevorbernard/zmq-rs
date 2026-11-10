@@ -446,6 +446,16 @@ impl<T> Reader<T> {
         self.shared.writer_closed.load(Ordering::Acquire)
     }
 
+    /// Whether nothing is queued now. The writer may add more at any time
+    /// unless it [is gone](Self::is_closed).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        match &self.receiver {
+            Receiver::Queue(consumer) => consumer.is_empty(),
+            Receiver::Latest(latest) => lock(latest).is_none(),
+        }
+    }
+
     /// Whether the writer is gone and every item it sent has been taken,
     /// found without taking one.
     #[must_use]
@@ -860,6 +870,17 @@ mod tests {
         assert_eq!(reader.try_recv(), Ok(1));
         assert_eq!(reader.try_recv(), Err(TryRecvError::Closed));
         assert_eq!(reader.recv_blocking(), None);
+    }
+
+    #[test]
+    fn empty_until_something_is_queued_and_again_once_it_is_taken() {
+        for (mut writer, mut reader) in [pipe(Hwm::Unlimited), pipe_conflated()] {
+            assert!(reader.is_empty());
+            writer.try_send(1).unwrap();
+            assert!(!reader.is_empty());
+            assert_eq!(reader.try_recv(), Ok(1));
+            assert!(reader.is_empty());
+        }
     }
 
     #[test]
