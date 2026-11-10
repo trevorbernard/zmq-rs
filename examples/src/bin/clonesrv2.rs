@@ -27,7 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     pipe.connect("inproc://state")?;
     let manager = context.clone();
     thread::spawn(move || state_manager(&manager, pipe));
-    updates.recv();
+    updates.recv()?;
 
     let mut sequence = 0;
     loop {
@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut kvmsg = KvMsg::new(sequence);
         kvmsg.set_key(randof(10_000).to_string());
         kvmsg.set_body(randof(1_000_000).to_string());
-        publisher.send(kvmsg.to_message());
-        updates.send(kvmsg.to_message());
+        publisher.send(kvmsg.to_message())?;
+        updates.send(kvmsg.to_message())?;
     }
 }
 
@@ -46,23 +46,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn state_manager(context: &Context, mut pipe: Socket<Pair>) -> TaskResult {
     let mut kvmap = HashMap::new();
 
-    pipe.send("READY");
+    pipe.send("READY")?;
     let mut snapshot = context.socket::<Router>();
     snapshot.bind("tcp://*:5556")?;
 
     // Current snapshot version number
     let mut sequence = 0;
     loop {
-        let [update, request] = zmq::poll([pipe.readable(), snapshot.readable()]);
+        let [update, request] = zmq::poll([pipe.readable(), snapshot.readable()])?;
 
         // Apply state update from main thread
-        if update && let Some(kvmsg) = KvMsg::from_message(&pipe.recv()) {
+        if update && let Some(kvmsg) = KvMsg::from_message(&pipe.recv()?) {
             sequence = kvmsg.sequence();
             kvmsg.store(&mut kvmap);
         }
         // Execute state snapshot request
         if request {
-            let (identity, request) = snapshot.recv();
+            let (identity, request) = snapshot.recv()?;
             if body(&request) != "ICANHAZ?" {
                 println!("E: bad request, aborting");
                 return Ok(());

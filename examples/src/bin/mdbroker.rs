@@ -300,7 +300,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Get and process messages forever
     loop {
-        if let Some((sender, msg)) = broker.socket.recv_timeout(HEARTBEAT_INTERVAL) {
+        if let Some((sender, msg)) = broker.socket.recv_timeout(HEARTBEAT_INTERVAL)? {
             if verbose {
                 log("I: received message:");
                 dump(&msg);

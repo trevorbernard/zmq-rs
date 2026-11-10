@@ -20,9 +20,21 @@ use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
 
 pub(crate) mod sealed {
     pub trait Sealed {}
+
+    /// A socket that learns when its context is shut down.
+    pub trait Terminates {
+        /// Whether the context is shut down; if not, a shutdown wakes `cx`.
+        fn poll_terminated(&self, cx: &mut std::task::Context<'_>) -> bool;
+    }
 }
 
 impl<T: SocketType> sealed::Sealed for Socket<T> {}
+
+impl<T: SocketType> sealed::Terminates for Socket<T> {
+    fn poll_terminated(&self, cx: &mut TaskContext<'_>) -> bool {
+        self.peers.poll_terminated(cx)
+    }
+}
 
 /// A ZeroMQ socket type. Implemented by [`Push`], [`Pull`] and the other
 /// markers; cannot be implemented outside this crate.
@@ -166,6 +178,32 @@ pub trait WaitsForRoom: SocketType + Sized {
 // `send_async`. Those are written out per type, so that each documents what
 // it takes and returns.
 
+impl<T: SocketType> Socket<T> {
+    /// Fails once the context is shut down.
+    pub(crate) fn alive(&self) -> Result<(), Terminated> {
+        if self.peers.is_terminated() {
+            Err(Terminated)
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Polls `poll` unless the context is shut down. While it is pending, a
+    /// shutdown wakes `cx`, and the next poll fails.
+    pub(crate) fn poll_alive<R>(
+        &mut self,
+        cx: &mut TaskContext<'_>,
+        poll: impl FnOnce(&mut Self, &mut TaskContext<'_>) -> Poll<R>,
+    ) -> Poll<Result<R, Terminated>> {
+        self.alive()?;
+        match poll(self, cx) {
+            Poll::Ready(output) => Poll::Ready(Ok(output)),
+            Poll::Pending if self.peers.poll_terminated(cx) => Poll::Ready(Err(Terminated)),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 impl<T: Receives> Socket<T> {
     /// What a poll for readability received, or else the next.
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<T::Received> {
@@ -175,20 +213,27 @@ impl<T: Receives> Socket<T> {
         T::poll_next(self, cx)
     }
 
-    pub(crate) fn try_recv_next(&mut self) -> Option<T::Received> {
-        ready(self.poll_recv(&mut noop()))
+    pub(crate) fn try_recv_next(&mut self) -> Result<Option<T::Received>, Terminated> {
+        self.alive()?;
+        Ok(ready(self.poll_recv(&mut noop())))
     }
 
-    pub(crate) fn recv_next(&mut self) -> T::Received {
-        wait::block_on(|cx| self.poll_recv(cx))
+    pub(crate) fn recv_next(&mut self) -> Result<T::Received, Terminated> {
+        wait::block_on(|cx| self.poll_alive(cx, |socket, cx| socket.poll_recv(cx)))
     }
 
-    pub(crate) fn recv_next_timeout(&mut self, timeout: Duration) -> Option<T::Received> {
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_recv(cx))
+    pub(crate) fn recv_next_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<T::Received>, Terminated> {
+        wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_recv(cx))
+        })
+        .transpose()
     }
 
-    pub(crate) async fn recv_next_async(&mut self) -> T::Received {
-        future::poll_fn(|cx| self.poll_recv(cx)).await
+    pub(crate) async fn recv_next_async(&mut self) -> Result<T::Received, Terminated> {
+        future::poll_fn(|cx| self.poll_alive(cx, |socket, cx| socket.poll_recv(cx))).await
     }
 }
 
@@ -201,30 +246,53 @@ impl<T: WaitsForRoom> Socket<T> {
         T::poll_send(self, slot, cx)
     }
 
-    pub(crate) fn try_send_message(&mut self, message: Message) -> Result<(), Message> {
+    pub(crate) fn try_send_message(
+        &mut self,
+        message: Message,
+    ) -> Result<(), TrySendError<Message>> {
+        if self.peers.is_terminated() {
+            return Err(TrySendError::Terminated(message));
+        }
         let mut slot = Some(message);
         let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), Err)
+        slot.map_or(Ok(()), |message| Err(TrySendError::Full(message)))
     }
 
-    pub(crate) fn send_message(&mut self, message: Message) {
+    pub(crate) fn send_message(&mut self, message: Message) -> Result<(), Terminated> {
         let mut slot = Some(message);
-        wait::block_on(|cx| self.poll_send(&mut slot, cx));
+        wait::block_on(|cx| self.poll_alive(cx, |socket, cx| socket.poll_send(&mut slot, cx)))
     }
 
     pub(crate) fn send_message_timeout(
         &mut self,
         message: Message,
         timeout: Duration,
-    ) -> Result<(), Message> {
+    ) -> Result<(), TrySendError<Message>> {
         let mut slot = Some(message);
-        wait::block_on_until(wait::deadline(timeout), |cx| self.poll_send(&mut slot, cx));
-        slot.map_or(Ok(()), Err)
+        let sent = wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_send(&mut slot, cx))
+        });
+        unsent(sent, &mut slot)
     }
 
-    pub(crate) async fn send_message_async(&mut self, message: Message) {
+    pub(crate) async fn send_message_async(&mut self, message: Message) -> Result<(), Terminated> {
         let mut slot = Some(message);
-        future::poll_fn(|cx| self.poll_send(&mut slot, cx)).await;
+        future::poll_fn(|cx| self.poll_alive(cx, |socket, cx| socket.poll_send(&mut slot, cx)))
+            .await
+    }
+}
+
+/// What a send that waited until a deadline came to: `None` if it was still
+/// waiting. A send that did not go through left its message in `slot`.
+pub(crate) fn unsent<R, M>(
+    sent: Option<Result<R, Terminated>>,
+    slot: &mut Option<M>,
+) -> Result<R, TrySendError<M>> {
+    let mut kept = || slot.take().expect("kept while pending");
+    match sent {
+        Some(Ok(sent)) => Ok(sent),
+        Some(Err(Terminated)) => Err(TrySendError::Terminated(kept())),
+        None => Err(TrySendError::Full(kept())),
     }
 }
 
@@ -402,8 +470,8 @@ impl<T: Receives + WaitsForRoom> Socket<T> {
     /// let mut b = context.socket::<Dealer>();
     /// b.connect("inproc://both")?;
     /// // Nothing to receive yet, but room to send.
-    /// assert_eq!(zmq::poll([b.readable_or_writable()]), [true]);
-    /// assert!(b.try_recv().is_none());
+    /// assert_eq!(zmq::poll([b.readable_or_writable()])?, [true]);
+    /// assert!(b.try_recv()?.is_none());
     /// assert!(b.try_send("hello").is_ok());
     /// # Ok(())
     /// # }
@@ -721,6 +789,7 @@ impl<T: SocketType> Socket<T> {
     /// the bind, as in libzmq, so a SUB that binds subscribes on them at
     /// once.
     pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
+        self.alive()?;
         let (id, bound) = match endpoint::bind_target(endpoint)? {
             Target::Tcp(addr) => self
                 .peers
@@ -806,6 +875,7 @@ impl<T: SocketType> Socket<T> {
         &mut self,
         endpoint: &str,
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
+        self.alive()?;
         let target = endpoint::connect_target(endpoint)?;
         let (id, key) = match &target {
             Target::Tcp(addr) => self.peers.connect(*addr),
@@ -871,13 +941,13 @@ impl<T: SocketType> Socket<T> {
 
 impl Socket<Push> {
     /// Sends `message` if a peer has room, otherwise hands it back.
-    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
+    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), TrySendError<Message>> {
         self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking while no peer has room.
-    pub fn send(&mut self, message: impl Into<Message>) {
-        self.send_message(message.into());
+    pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message(message.into())
     }
 
     /// Sends `message`, blocking for at most `timeout` while no peer has
@@ -886,26 +956,26 @@ impl Socket<Push> {
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
-    ) -> Result<(), Message> {
+    ) -> Result<(), TrySendError<Message>> {
         self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting while no peer has room.
-    pub async fn send_async(&mut self, message: impl Into<Message>) {
-        self.send_message_async(message.into()).await;
+    pub async fn send_async(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message_async(message.into()).await
     }
 }
 
 impl Socket<Pair> {
     /// Sends `message` if there is a peer with room, otherwise hands it
     /// back.
-    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
+    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), TrySendError<Message>> {
         self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking until there is a peer with room.
-    pub fn send(&mut self, message: impl Into<Message>) {
-        self.send_message(message.into());
+    pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message(message.into())
     }
 
     /// Sends `message`, blocking for at most `timeout` while there is no
@@ -914,33 +984,33 @@ impl Socket<Pair> {
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
-    ) -> Result<(), Message> {
+    ) -> Result<(), TrySendError<Message>> {
         self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting until there is a peer with room.
-    pub async fn send_async(&mut self, message: impl Into<Message>) {
-        self.send_message_async(message.into()).await;
+    pub async fn send_async(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message_async(message.into()).await
     }
 
     /// The next message, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Message> {
+    pub fn try_recv(&mut self) -> Result<Option<Message>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
-    pub fn recv(&mut self) -> Message {
+    pub fn recv(&mut self) -> Result<Message, Terminated> {
         self.recv_next()
     }
 
     /// The next message, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Message>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Message {
+    pub async fn recv_async(&mut self) -> Result<Message, Terminated> {
         self.recv_next_async().await
     }
 }
@@ -958,26 +1028,33 @@ impl<T: Publishes> Socket<T> {
     /// Never blocks. Returns how many subscribers it was queued for: none if
     /// nobody has subscribed to it yet, as subscriptions take a moment to
     /// arrive after connecting.
-    pub fn send(&mut self, message: impl Into<Message>) -> usize {
+    pub fn send(&mut self, message: impl Into<Message>) -> Result<usize, Terminated> {
+        self.alive()?;
         self.peers.accept(&mut noop());
-        self.routing.send(self.peers.list_mut(), message.into())
+        Ok(self.routing.send(self.peers.list_mut(), message.into()))
     }
 
     /// Sends `message` to every subscriber that wants it if all of them
     /// have room, otherwise hands it back, as libzmq's `ZMQ_XPUB_NODROP`.
     /// Returns how many subscribers it was queued for.
-    pub fn try_send_all(&mut self, message: impl Into<Message>) -> Result<usize, Message> {
+    pub fn try_send_all(
+        &mut self,
+        message: impl Into<Message>,
+    ) -> Result<usize, TrySendError<Message>> {
         let mut slot = Some(message.into());
-        let poll = self.poll_send_all(&mut slot, &mut noop());
-        ready(poll).ok_or_else(|| slot.take().expect("kept while pending"))
+        let sent = match self.alive() {
+            Ok(()) => ready(self.poll_send_all(&mut slot, &mut noop())).map(Ok),
+            Err(terminated) => Some(Err(terminated)),
+        };
+        unsent(sent, &mut slot)
     }
 
     /// Sends `message` to every subscriber that wants it, blocking until
     /// all of them have room, as libzmq's `ZMQ_XPUB_NODROP`. Returns how
     /// many subscribers it was queued for.
-    pub fn send_all(&mut self, message: impl Into<Message>) -> usize {
+    pub fn send_all(&mut self, message: impl Into<Message>) -> Result<usize, Terminated> {
         let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send_all(&mut slot, cx))
+        wait::block_on(|cx| self.poll_alive(cx, |socket, cx| socket.poll_send_all(&mut slot, cx)))
     }
 
     /// Sends `message` to every subscriber that wants it, blocking for at
@@ -988,20 +1065,24 @@ impl<T: Publishes> Socket<T> {
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
-    ) -> Result<usize, Message> {
+    ) -> Result<usize, TrySendError<Message>> {
         let mut slot = Some(message.into());
-        wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_send_all(&mut slot, cx)
-        })
-        .ok_or_else(|| slot.take().expect("kept while pending"))
+        let sent = wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_send_all(&mut slot, cx))
+        });
+        unsent(sent, &mut slot)
     }
 
     /// Sends `message` to every subscriber that wants it, waiting until all
     /// of them have room, as libzmq's `ZMQ_XPUB_NODROP`. Returns how many
     /// subscribers it was queued for.
-    pub async fn send_all_async(&mut self, message: impl Into<Message>) -> usize {
+    pub async fn send_all_async(
+        &mut self,
+        message: impl Into<Message>,
+    ) -> Result<usize, Terminated> {
         let mut slot = Some(message.into());
-        future::poll_fn(|cx| self.poll_send_all(&mut slot, cx)).await
+        future::poll_fn(|cx| self.poll_alive(cx, |socket, cx| socket.poll_send_all(&mut slot, cx)))
+            .await
     }
 
     pub(crate) fn poll_send_all(
@@ -1057,23 +1138,23 @@ impl Socket<Sub> {
     }
 
     /// The next message on a subscribed topic, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Message> {
+    pub fn try_recv(&mut self) -> Result<Option<Message>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message on a subscribed topic, blocking until one arrives.
-    pub fn recv(&mut self) -> Message {
+    pub fn recv(&mut self) -> Result<Message, Terminated> {
         self.recv_next()
     }
 
     /// The next message on a subscribed topic, blocking for at most
     /// `timeout`; `None` if none arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Message>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message on a subscribed topic, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Message {
+    pub async fn recv_async(&mut self) -> Result<Message, Terminated> {
         self.recv_next_async().await
     }
 }
@@ -1094,23 +1175,23 @@ impl Socket<XPub> {
     }
 
     /// The next event, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<XPubEvent> {
+    pub fn try_recv(&mut self) -> Result<Option<XPubEvent>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next event, blocking until one arrives.
-    pub fn recv(&mut self) -> XPubEvent {
+    pub fn recv(&mut self) -> Result<XPubEvent, Terminated> {
         self.recv_next()
     }
 
     /// The next event, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<XPubEvent> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<XPubEvent>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next event, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> XPubEvent {
+    pub async fn recv_async(&mut self) -> Result<XPubEvent, Terminated> {
         self.recv_next_async().await
     }
 }
@@ -1123,28 +1204,33 @@ impl Socket<ManualXPub> {
     }
 
     /// The next request, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<SubscriptionRequest<'_>> {
-        let (peer, event) = self.try_recv_next()?;
-        Some(self.lend(peer, event))
+    pub fn try_recv(&mut self) -> Result<Option<SubscriptionRequest<'_>>, Terminated> {
+        Ok(self
+            .try_recv_next()?
+            .map(|(peer, event)| self.lend(peer, event)))
     }
 
     /// The next request, blocking until one arrives.
-    pub fn recv(&mut self) -> SubscriptionRequest<'_> {
-        let (peer, event) = self.recv_next();
-        self.lend(peer, event)
+    pub fn recv(&mut self) -> Result<SubscriptionRequest<'_>, Terminated> {
+        let (peer, event) = self.recv_next()?;
+        Ok(self.lend(peer, event))
     }
 
     /// The next request, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<SubscriptionRequest<'_>> {
-        let (peer, event) = self.recv_next_timeout(timeout)?;
-        Some(self.lend(peer, event))
+    pub fn recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<SubscriptionRequest<'_>>, Terminated> {
+        Ok(self
+            .recv_next_timeout(timeout)?
+            .map(|(peer, event)| self.lend(peer, event)))
     }
 
     /// The next request, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> SubscriptionRequest<'_> {
-        let (peer, event) = self.recv_next_async().await;
-        self.lend(peer, event)
+    pub async fn recv_async(&mut self) -> Result<SubscriptionRequest<'_>, Terminated> {
+        let (peer, event) = self.recv_next_async().await?;
+        Ok(self.lend(peer, event))
     }
 
     /// Lends the socket to what a peer sent, to act on it.
@@ -1247,78 +1333,81 @@ impl Socket<XSub> {
     /// Sends `message` to every publisher. Never blocks. As in libzmq, a
     /// single frame starting with `0x01` or `0x00` is a subscription and
     /// subscribes or unsubscribes to the rest.
-    pub fn send(&mut self, message: impl Into<Message>) {
+    pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.alive()?;
         self.peers.accept(&mut noop());
         self.routing
             .send_upstream(self.peers.list_mut(), message.into());
+        Ok(())
     }
 
     /// Passes on what an [`XPub`] heard, as a proxy does: subscriptions
     /// become ours, and messages are sent upstream.
-    pub fn forward(&mut self, event: XPubEvent) {
+    pub fn forward(&mut self, event: XPubEvent) -> Result<(), Terminated> {
         match event {
             XPubEvent::Subscribe(topic) => self.subscribe(topic),
             XPubEvent::Cancel(topic) => {
                 self.unsubscribe(topic);
             }
-            XPubEvent::Message(message) => self.send(message),
+            XPubEvent::Message(message) => return self.send(message),
         }
+        Ok(())
     }
 
     /// The next message, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Message> {
+    pub fn try_recv(&mut self) -> Result<Option<Message>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
-    pub fn recv(&mut self) -> Message {
+    pub fn recv(&mut self) -> Result<Message, Terminated> {
         self.recv_next()
     }
 
     /// The next message, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Message>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Message {
+    pub async fn recv_async(&mut self) -> Result<Message, Terminated> {
         self.recv_next_async().await
     }
 }
 
 impl Socket<Pull> {
     /// The next message, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Message> {
+    pub fn try_recv(&mut self) -> Result<Option<Message>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
-    pub fn recv(&mut self) -> Message {
+    pub fn recv(&mut self) -> Result<Message, Terminated> {
         self.recv_next()
     }
 
     /// The next message, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Message>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Message {
+    pub async fn recv_async(&mut self) -> Result<Message, Terminated> {
         self.recv_next_async().await
     }
 }
 
 impl Socket<Dealer> {
     /// Sends `message` if a peer has room, otherwise hands it back.
-    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), Message> {
+    pub fn try_send(&mut self, message: impl Into<Message>) -> Result<(), TrySendError<Message>> {
         self.try_send_message(message.into())
     }
 
     /// Sends `message`, blocking while no peer has room.
-    pub fn send(&mut self, message: impl Into<Message>) {
-        self.send_message(message.into());
+    pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message(message.into())
     }
 
     /// Sends `message`, blocking for at most `timeout` while no peer has
@@ -1327,33 +1416,33 @@ impl Socket<Dealer> {
         &mut self,
         message: impl Into<Message>,
         timeout: Duration,
-    ) -> Result<(), Message> {
+    ) -> Result<(), TrySendError<Message>> {
         self.send_message_timeout(message.into(), timeout)
     }
 
     /// Sends `message`, waiting while no peer has room.
-    pub async fn send_async(&mut self, message: impl Into<Message>) {
-        self.send_message_async(message.into()).await;
+    pub async fn send_async(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
+        self.send_message_async(message.into()).await
     }
 
     /// The next message, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Message> {
+    pub fn try_recv(&mut self) -> Result<Option<Message>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message, blocking until one arrives.
-    pub fn recv(&mut self) -> Message {
+    pub fn recv(&mut self) -> Result<Message, Terminated> {
         self.recv_next()
     }
 
     /// The next message, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Message> {
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Message>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Message {
+    pub async fn recv_async(&mut self) -> Result<Message, Terminated> {
         self.recv_next_async().await
     }
     /// Whether each peer connected or accepted from now on is first sent an
@@ -1379,9 +1468,11 @@ impl Socket<Req> {
 
     /// Sends `message` to the next peer with room and waits for its reply,
     /// blocking the thread. Fails if that peer's connection closes first.
-    pub fn request(&mut self, message: impl Into<Message>) -> Result<Message, PeerGone> {
+    pub fn request(&mut self, message: impl Into<Message>) -> Result<Message, RequestError> {
         let mut state = RequestState::Sending(Some(message.into()));
-        wait::block_on(|cx| self.poll_request(&mut state, cx))
+        RequestError::from_poll(wait::block_on(|cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_request(&mut state, cx))
+        }))
     }
 
     /// Sends `message` to the next peer with room and waits for its reply,
@@ -1401,10 +1492,9 @@ impl Socket<Req> {
         self.set_correlation(true);
         let mut state = RequestState::Sending(Some(message.into()));
         match wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_request(&mut state, cx)
+            self.poll_alive(cx, |socket, cx| socket.poll_request(&mut state, cx))
         }) {
-            Some(Ok(reply)) => Ok(reply),
-            Some(Err(PeerGone)) => Err(RequestError::PeerGone),
+            Some(reply) => RequestError::from_poll(reply),
             None => Err(RequestError::TimedOut),
         }
     }
@@ -1415,9 +1505,14 @@ impl Socket<Req> {
     pub async fn request_async(
         &mut self,
         message: impl Into<Message>,
-    ) -> Result<Message, PeerGone> {
+    ) -> Result<Message, RequestError> {
         let mut state = RequestState::Sending(Some(message.into()));
-        future::poll_fn(|cx| self.poll_request(&mut state, cx)).await
+        RequestError::from_poll(
+            future::poll_fn(|cx| {
+                self.poll_alive(cx, |socket, cx| socket.poll_request(&mut state, cx))
+            })
+            .await,
+        )
     }
 
     fn poll_request(
@@ -1457,28 +1552,28 @@ enum RequestState {
 
 impl Socket<Rep> {
     /// The next request, if one is waiting.
-    pub fn try_recv(&mut self) -> Option<Request<'_>> {
-        let received = self.try_recv_next()?;
-        Some(self.lend(received))
+    pub fn try_recv(&mut self) -> Result<Option<Request<'_>>, Terminated> {
+        Ok(self.try_recv_next()?.map(|received| self.lend(received)))
     }
 
     /// The next request, blocking until one arrives.
-    pub fn recv(&mut self) -> Request<'_> {
-        let received = self.recv_next();
-        self.lend(received)
+    pub fn recv(&mut self) -> Result<Request<'_>, Terminated> {
+        let received = self.recv_next()?;
+        Ok(self.lend(received))
     }
 
     /// The next request, blocking for at most `timeout`; `None` if none
     /// arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<Request<'_>> {
-        let received = self.recv_next_timeout(timeout)?;
-        Some(self.lend(received))
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Request<'_>>, Terminated> {
+        Ok(self
+            .recv_next_timeout(timeout)?
+            .map(|received| self.lend(received)))
     }
 
     /// The next request, waiting until one arrives.
-    pub async fn recv_async(&mut self) -> Request<'_> {
-        let received = self.recv_next_async().await;
-        self.lend(received)
+    pub async fn recv_async(&mut self) -> Result<Request<'_>, Terminated> {
+        let received = self.recv_next_async().await?;
+        Ok(self.lend(received))
     }
 
     /// Lends the socket to a request, to answer it.
@@ -1522,21 +1617,77 @@ impl fmt::Debug for Request<'_> {
     }
 }
 
-/// A send to one peer failed: no peer has that routing id, client id or
-/// peer id, or it went away while the message waited (libzmq's
-/// `EHOSTUNREACH`). What was being sent is handed back.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnknownPeer<T>(pub T);
+/// The socket's context was shut down with
+/// [`Context::shutdown`](crate::Context::shutdown), as libzmq's `ETERM`:
+/// every send and receive on its sockets fails from then on, and those
+/// waiting are woken to fail. Drop the socket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Terminated;
 
-impl<T> fmt::Display for UnknownPeer<T> {
+impl fmt::Display for Terminated {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str("no peer has that id")
+        f.write_str("the context was shut down")
     }
 }
 
-impl<T: fmt::Debug> std::error::Error for UnknownPeer<T> {}
+impl std::error::Error for Terminated {}
 
-/// Why [`Socket::request_timeout`] got no reply.
+/// Why a send that does not wait, or waits only so long, did not go
+/// through. What was being sent is handed back.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TrySendError<T> {
+    /// No peer has room (libzmq's `EAGAIN`).
+    Full(T),
+    /// The context was shut down (libzmq's `ETERM`).
+    Terminated(T),
+}
+
+impl<T> TrySendError<T> {
+    /// What was being sent.
+    pub fn into_inner(self) -> T {
+        match self {
+            Self::Full(unsent) | Self::Terminated(unsent) => unsent,
+        }
+    }
+
+    #[cfg(feature = "draft")]
+    pub(crate) fn map<U>(self, f: impl FnOnce(T) -> U) -> TrySendError<U> {
+        match self {
+            Self::Full(unsent) => TrySendError::Full(f(unsent)),
+            Self::Terminated(unsent) => TrySendError::Terminated(f(unsent)),
+        }
+    }
+}
+
+impl<T> fmt::Display for TrySendError<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Full(_) => f.write_str("no peer has room"),
+            Self::Terminated(_) => Terminated.fmt(f),
+        }
+    }
+}
+
+impl<T: fmt::Debug> std::error::Error for TrySendError<T> {}
+
+/// What a send to one peer came to: `None` if it was still waiting at its
+/// deadline. A send that did not go through left what it was sending in
+/// `slot`, unless there is no such peer, which hands it back.
+pub(crate) fn routed<M>(
+    sent: Option<Result<Result<(), M>, Terminated>>,
+    slot: &mut Option<M>,
+) -> Result<(), SendError<M>> {
+    let mut kept = || slot.take().expect("kept while pending");
+    match sent {
+        Some(Ok(Ok(()))) => Ok(()),
+        Some(Ok(Err(unsent))) => Err(SendError::UnknownPeer(unsent)),
+        Some(Err(Terminated)) => Err(SendError::Terminated(kept())),
+        None => Err(SendError::Full(kept())),
+    }
+}
+
+/// Why a request got no reply.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum RequestError {
@@ -1544,6 +1695,18 @@ pub enum RequestError {
     PeerGone,
     /// No reply arrived in time. The request is abandoned.
     TimedOut,
+    /// The context was shut down (libzmq's `ETERM`).
+    Terminated,
+}
+
+impl RequestError {
+    fn from_poll(reply: Result<Result<Message, PeerGone>, Terminated>) -> Result<Message, Self> {
+        match reply {
+            Ok(Ok(reply)) => Ok(reply),
+            Ok(Err(PeerGone)) => Err(Self::PeerGone),
+            Err(Terminated) => Err(Self::Terminated),
+        }
+    }
 }
 
 impl fmt::Display for RequestError {
@@ -1551,6 +1714,7 @@ impl fmt::Display for RequestError {
         match self {
             Self::PeerGone => PeerGone.fmt(f),
             Self::TimedOut => f.write_str("no reply in time"),
+            Self::Terminated => Terminated.fmt(f),
         }
     }
 }
@@ -1565,6 +1729,9 @@ impl Socket<Router> {
         to: &RoutingId,
         message: impl Into<Message>,
     ) -> Result<(), SendError<Message>> {
+        if self.peers.is_terminated() {
+            return Err(SendError::Terminated(message.into()));
+        }
         self.peers.accept(&mut noop());
         let RouterRouting { table, .. } = &mut self.routing;
         let peers = self.peers.list_mut();
@@ -1579,9 +1746,12 @@ impl Socket<Router> {
         &mut self,
         to: &RoutingId,
         message: impl Into<Message>,
-    ) -> Result<(), UnknownPeer<Message>> {
+    ) -> Result<(), SendError<Message>> {
         let mut slot = Some(message.into());
-        wait::block_on(|cx| self.poll_send(to, &mut slot, cx)).map_err(UnknownPeer)
+        let sent = wait::block_on(|cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_send(to, &mut slot, cx))
+        });
+        routed(Some(sent), &mut slot)
     }
 
     /// Sends `message` to the peer with routing id `to`, blocking for at
@@ -1594,13 +1764,10 @@ impl Socket<Router> {
         timeout: Duration,
     ) -> Result<(), SendError<Message>> {
         let mut slot = Some(message.into());
-        match wait::block_on_until(wait::deadline(timeout), |cx| {
-            self.poll_send(to, &mut slot, cx)
-        }) {
-            Some(Ok(())) => Ok(()),
-            Some(Err(message)) => Err(SendError::UnknownPeer(message)),
-            None => Err(SendError::Full(slot.take().expect("kept while pending"))),
-        }
+        let sent = wait::block_on_until(wait::deadline(timeout), |cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_send(to, &mut slot, cx))
+        });
+        routed(sent, &mut slot)
     }
 
     /// Sends `message` to the peer with routing id `to`, waiting while its
@@ -1610,11 +1777,13 @@ impl Socket<Router> {
         &mut self,
         to: &RoutingId,
         message: impl Into<Message>,
-    ) -> Result<(), UnknownPeer<Message>> {
+    ) -> Result<(), SendError<Message>> {
         let mut slot = Some(message.into());
-        future::poll_fn(|cx| self.poll_send(to, &mut slot, cx))
-            .await
-            .map_err(UnknownPeer)
+        let sent = future::poll_fn(|cx| {
+            self.poll_alive(cx, |socket, cx| socket.poll_send(to, &mut slot, cx))
+        })
+        .await;
+        routed(Some(sent), &mut slot)
     }
 
     fn poll_send(
@@ -1647,25 +1816,28 @@ impl Socket<Router> {
 
     /// The next message and the routing id of the peer that sent it, if
     /// one is waiting.
-    pub fn try_recv(&mut self) -> Option<(RoutingId, Message)> {
+    pub fn try_recv(&mut self) -> Result<Option<(RoutingId, Message)>, Terminated> {
         self.try_recv_next()
     }
 
     /// The next message and its sender's routing id, blocking until one
     /// arrives.
-    pub fn recv(&mut self) -> (RoutingId, Message) {
+    pub fn recv(&mut self) -> Result<(RoutingId, Message), Terminated> {
         self.recv_next()
     }
 
     /// The next message and its sender's routing id, blocking for at most
     /// `timeout`; `None` if none arrives in time.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Option<(RoutingId, Message)> {
+    pub fn recv_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<(RoutingId, Message)>, Terminated> {
         self.recv_next_timeout(timeout)
     }
 
     /// The next message and its sender's routing id, waiting until one
     /// arrives.
-    pub async fn recv_async(&mut self) -> (RoutingId, Message) {
+    pub async fn recv_async(&mut self) -> Result<(RoutingId, Message), Terminated> {
         self.recv_next_async().await
     }
 }

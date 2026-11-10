@@ -153,19 +153,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let time_left = send_state_at.saturating_duration_since(Instant::now());
         let [request, peer_state] =
-            zmq::poll_timeout([frontend.readable(), statesub.readable()], time_left)
+            zmq::poll_timeout([frontend.readable(), statesub.readable()], time_left)?
                 .unwrap_or_default();
 
         if request {
             // Have a client request; answer it by echoing it back
-            let (client, message) = frontend.recv();
+            let (client, message) = frontend.recv()?;
             if fsm.apply(Event::ClientRequest) {
                 let _ = frontend.try_send(&client, message);
             }
         }
         if peer_state {
             // Have state from our peer, execute as event
-            if let Some(event) = Event::from_peer(&body(&statesub.recv())) {
+            if let Some(event) = Event::from_peer(&body(&statesub.recv()?)) {
                 if !fsm.apply(event) {
                     break; // Error, so exit
                 }
@@ -174,7 +174,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         // If we timed out, send state to peer
         if Instant::now() >= send_state_at {
-            statepub.send((fsm.state as u8).to_string());
+            statepub.send((fsm.state as u8).to_string())?;
             send_state_at = Instant::now() + HEARTBEAT;
         }
     }

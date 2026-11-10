@@ -9,7 +9,10 @@ const PREFIX1: &str = "prefix1";
 const PREFIX2: &str = "p2";
 
 fn expect(subscriber: &mut zmq::Socket<Sub>, topic: &str) {
-    assert_eq!(subscriber.try_recv(), Some(Message::from(topic.to_owned())));
+    assert_eq!(
+        subscriber.try_recv().unwrap(),
+        Some(Message::from(topic.to_owned()))
+    );
 }
 
 #[test]
@@ -30,18 +33,18 @@ fn test() {
     sub2.subscribe(PREFIX2);
 
     // Send a message with the first prefix
-    publisher.send(PREFIX1);
+    publisher.send(PREFIX1).unwrap();
     settle();
     // sub1 should receive it, but not sub2
     expect(&mut sub1, PREFIX1);
-    assert_eq!(sub2.try_recv(), None);
+    assert_eq!(sub2.try_recv().unwrap(), None);
 
     // Send a message with the second prefix
-    publisher.send(PREFIX2);
+    publisher.send(PREFIX2).unwrap();
     settle();
     // sub2 should receive it, but not sub1
     expect(&mut sub2, PREFIX2);
-    assert_eq!(sub1.try_recv(), None);
+    assert_eq!(sub1.try_recv().unwrap(), None);
 
     // Now invert the matching, on both sides, otherwise the SUB socket
     // will filter the messages out
@@ -50,16 +53,16 @@ fn test() {
     sub2.set_invert_matching(true);
 
     // Send a message with the first prefix
-    publisher.send(PREFIX1);
+    publisher.send(PREFIX1).unwrap();
     settle();
     // sub2 should receive it, but not sub1
     expect(&mut sub2, PREFIX1);
-    assert_eq!(sub1.try_recv(), None);
+    assert_eq!(sub1.try_recv().unwrap(), None);
 
     // Send a message with the second prefix
-    publisher.send(PREFIX2);
+    publisher.send(PREFIX2).unwrap();
     settle();
     // sub1 should receive it, but not sub2
     expect(&mut sub1, PREFIX2);
-    assert_eq!(sub2.try_recv(), None);
+    assert_eq!(sub2.try_recv().unwrap(), None);
 }

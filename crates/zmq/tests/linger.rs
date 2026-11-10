@@ -29,7 +29,7 @@ fn dropping_the_context_delivers_what_was_queued() {
 
     let receiver = thread::spawn(move || {
         let mut count = 0;
-        while pull.recv() != "END".into() {
+        while pull.recv().unwrap() != "END".into() {
             count += 1;
         }
         count
@@ -44,9 +44,9 @@ fn dropping_the_context_delivers_what_was_queued() {
         push.connect(&endpoint).unwrap();
         // Too much for the kernel's socket buffers to take at once.
         for _ in 0..COUNT {
-            push.send(vec![0; 1000]);
+            push.send(vec![0; 1000]).unwrap();
         }
-        push.send("END");
+        push.send("END").unwrap();
     });
     let received = within(FIVE * 6, move || receiver.join().unwrap());
     assert_eq!(received, COUNT);
@@ -62,7 +62,7 @@ fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
         let context = Context::new().unwrap();
         let mut rep = context.socket::<Rep>();
         let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
-        let replier = thread::spawn(move || rep.recv().reply("answer"));
+        let replier = thread::spawn(move || rep.recv().unwrap().reply("answer"));
         let mut req = context.socket::<Req>();
         req.connect(&endpoint).unwrap();
         let answer = within(FIVE, move || req.request("question"));
@@ -91,6 +91,6 @@ fn a_bounded_linger_gives_up_on_an_unreachable_peer() {
             ..SocketOptions::default()
         });
         push.connect(&free_endpoint()).unwrap();
-        push.send("never delivered");
+        push.send("never delivered").unwrap();
     });
 }

@@ -93,10 +93,10 @@ fn mock_sub(sub_command: bool) {
     } else {
         stream.write_all(b"\x00\x02\x01A").unwrap();
     }
-    let (event, mut server) = within(FIVE, move || (server.recv(), server));
+    let (event, mut server) = within(FIVE, move || (server.recv().unwrap(), server));
     assert_eq!(event, XPubEvent::Subscribe("A".into()));
 
-    assert_eq!(server.send("ALOL"), 1);
+    assert_eq!(server.send("ALOL").unwrap(), 1);
     assert_eq!(read_frame(&mut stream), (0, b"ALOL".to_vec()));
 }
 
@@ -116,7 +116,7 @@ fn mock_pub(sub_command: bool) {
     // the mock may not be its peer yet. A receive takes it in and sends it
     // the subscription, as libzmq's test does with a non-blocking
     // `zmq_recv`.
-    let _ = server.recv_timeout(Duration::from_millis(100));
+    let _ = server.recv_timeout(Duration::from_millis(100)).unwrap();
     let (flags, body) = read_frame(&mut stream);
     if sub_command {
         assert_eq!((flags, body), (COMMAND, b"\x09SUBSCRIBEA".to_vec()));
@@ -125,7 +125,10 @@ fn mock_pub(sub_command: bool) {
     }
 
     stream.write_all(b"\x00\x04ALOL").unwrap();
-    assert_eq!(within(FIVE, move || server.recv()), Message::from("ALOL"));
+    assert_eq!(
+        within(FIVE, move || server.recv().unwrap()),
+        Message::from("ALOL")
+    );
 }
 
 #[test]

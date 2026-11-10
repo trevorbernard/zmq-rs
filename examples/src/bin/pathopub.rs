@@ -25,11 +25,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Send out all 1,000 topic messages
     for topic_nbr in 0..1000 {
-        publisher.send(update(topic_nbr, "Save Roger"));
+        publisher.send(update(topic_nbr, "Save Roger"))?;
     }
     // Send one random update per second
     loop {
         sleep_ms(1000);
-        publisher.send(update(randof(1000), "Off with his head!"));
+        publisher.send(update(randof(1000), "Off with his head!"))?;
     }
 }

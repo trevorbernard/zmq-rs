@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("I: service is ready at {bind_endpoint}");
 
     loop {
-        let (identity, request) = server.recv();
+        let (identity, request) = server.recv()?;
         if verbose {
             dump(&request);
         }

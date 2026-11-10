@@ -19,7 +19,7 @@ fn our_xpub_welcomes_a_libzmq_sub() {
     sub.subscribe(b"WELCOME");
     sub.connect(bound);
     // Our XPUB greets the peer when it next takes peers in.
-    assert_eq!(xpub.recv(), XPubEvent::Subscribe("WELCOME".into()));
+    assert_eq!(xpub.recv().unwrap(), XPubEvent::Subscribe("WELCOME".into()));
     assert_eq!(sub.recv().unwrap(), [b"WELCOME".to_vec()]);
 }
 
@@ -37,7 +37,7 @@ fn a_libzmq_xpub_welcomes_our_sub() {
     let started = Instant::now();
     let welcome = loop {
         assert!(started.elapsed() < FIVE, "never welcomed");
-        if let Some(message) = sub.try_recv() {
+        if let Some(message) = sub.try_recv().unwrap() {
             break message;
         }
         thread::sleep(Duration::from_millis(5));
@@ -53,11 +53,11 @@ fn our_manual_xpub_decides_a_libzmq_subs_topics() {
     let sub = Socket::new(Kind::Sub);
     sub.subscribe(b"");
     sub.connect(bound);
-    let mut request = xpub.recv();
+    let mut request = xpub.recv().unwrap();
     assert_eq!(request.event(), &XPubEvent::Subscribe("".into()));
     assert!(request.subscribe("allowed"));
     drop(request);
-    assert_eq!(xpub.send("secret"), 0);
-    assert_eq!(xpub.send("allowed"), 1);
+    assert_eq!(xpub.send("secret").unwrap(), 0);
+    assert_eq!(xpub.send("allowed").unwrap(), 1);
     assert_eq!(sub.recv().unwrap(), [b"allowed".to_vec()]);
 }

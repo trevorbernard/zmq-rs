@@ -326,7 +326,7 @@ Rules shared by every pattern:
 - Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. This is documented on `Request`.
 - Two deliberate differences from libzmq's REQ:
   - A reply without a delimiter is dropped and the wait continues; libzmq drops the connection.
-  - If the asked peer's connection closes before replying, `request` returns `PeerGone`; libzmq waits forever.
+  - If the asked peer's connection closes before replying, `request` fails with `RequestError::PeerGone`; libzmq waits forever.
   - After `request_timeout` gives up (`RequestError::TimedOut`), the socket takes a new request at once. libzmq's REQ is stuck after `ZMQ_RCVTIMEO` (EFSM) unless `ZMQ_REQ_RELAXED` is set.
 
 ### PUBSUB (RFC 29)

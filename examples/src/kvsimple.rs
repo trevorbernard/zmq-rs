@@ -113,10 +113,10 @@ mod tests {
         let mut kvmsg = KvMsg::new(1);
         kvmsg.set_key("key");
         kvmsg.set_body("body");
-        output.send(kvmsg.to_message());
+        output.send(kvmsg.to_message()).unwrap();
         kvmsg.clone().store(&mut kvmap);
 
-        let received = KvMsg::from_message(&input.recv()).unwrap();
+        let received = KvMsg::from_message(&input.recv().unwrap()).unwrap();
         assert_eq!(received, kvmsg);
         assert_eq!(received.key(), Some("key"));
         received.store(&mut kvmap);

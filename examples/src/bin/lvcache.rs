@@ -26,19 +26,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // We route topic updates from frontend to backend, and we handle
     // subscriptions by sending whatever we cached, if anything
     loop {
-        let [update, subscription] = zmq::poll([frontend.readable(), backend.readable()]);
+        let [update, subscription] = zmq::poll([frontend.readable(), backend.readable()])?;
 
         // Any new topic data we cache and then forward
         if update {
-            let message = frontend.recv();
+            let message = frontend.recv()?;
             cache.insert(message.split_first().0.clone(), message.clone());
-            backend.send(message);
+            backend.send(message)?;
         }
         // When we get a new subscription, we pull data from the cache
-        if subscription && let XPubEvent::Subscribe(topic) = backend.recv() {
+        if subscription && let XPubEvent::Subscribe(topic) = backend.recv()? {
             println!("Sending cached topic {}", text(&topic));
             if let Some(previous) = cache.get(&topic) {
-                backend.send(previous.clone());
+                backend.send(previous.clone())?;
             }
         }
     }

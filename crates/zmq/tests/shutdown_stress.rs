@@ -60,7 +60,7 @@ fn lingering_messages_survive_concurrent_drops(address: fn() -> String) {
                         let mut push = context.socket::<Push>();
                         push.connect(&endpoint).unwrap();
                         for index in 0..MESSAGES {
-                            push.send(format!("{sender} {index}"));
+                            push.send(format!("{sender} {index}")).unwrap();
                         }
                     })
                 })
@@ -68,7 +68,10 @@ fn lingering_messages_survive_concurrent_drops(address: fn() -> String) {
             drop(context);
             let mut next = [0; SENDERS];
             for _ in 0..SENDERS * MESSAGES {
-                let message = pull.recv_timeout(FIVE).expect("every message, in time");
+                let message = pull
+                    .recv_timeout(FIVE)
+                    .unwrap()
+                    .expect("every message, in time");
                 let (sender, index) = origin(&message);
                 assert_eq!(index, next[sender], "sender {sender}'s messages in order");
                 next[sender] += 1;
@@ -134,7 +137,7 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
                 let stop = stop.clone();
                 thread::spawn(move || {
                     while !stop.load(Ordering::Relaxed) {
-                        publisher.send("news");
+                        publisher.send("news").unwrap();
                         thread::yield_now();
                     }
                 })
@@ -148,7 +151,7 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
                             let mut subscriber = context.socket::<Sub>();
                             subscriber.connect(&endpoint).unwrap();
                             subscriber.subscribe("");
-                            assert_eq!(subscriber.recv_timeout(FIVE), Some("news".into()));
+                            assert_eq!(subscriber.recv_timeout(FIVE).unwrap(), Some("news".into()));
                         }
                     })
                 })

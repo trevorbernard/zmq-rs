@@ -41,7 +41,7 @@ fn a_libzmq_client_talks_to_our_server() {
     client.connect(bound);
     client.send(&[b"ping"]).unwrap();
     let (id, request, mut server) = within(FIVE, move || {
-        let (id, request) = server.recv();
+        let (id, request) = server.recv().unwrap();
         (id, request, server)
     });
     assert_eq!(request, Frame::from("ping"));
@@ -60,7 +60,7 @@ fn our_client_reaches_a_libzmq_server() {
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
     client.connect(&format!("tcp://{addr}")).unwrap();
-    client.send("hello libzmq");
+    client.send("hello libzmq").unwrap();
     assert_eq!(server.recv().unwrap(), [b"hello libzmq"]);
 }
 
@@ -82,7 +82,10 @@ fn our_client_drops_multipart_messages() {
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();
     peer.send(&Message::from("single")).unwrap();
-    assert_eq!(within(FIVE, move || client.recv()), Frame::from("single"));
+    assert_eq!(
+        within(FIVE, move || client.recv().unwrap()),
+        Frame::from("single")
+    );
 }
 
 #[test]
@@ -94,7 +97,7 @@ fn our_server_drops_multipart_messages() {
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();
     peer.send(&Message::from("single")).unwrap();
-    let (_, frame) = within(FIVE, move || server.recv());
+    let (_, frame) = within(FIVE, move || server.recv().unwrap());
     assert_eq!(frame, Frame::from("single"));
 }
 
@@ -109,9 +112,12 @@ fn a_libzmq_server_replies_to_our_client() {
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
     client.connect(&format!("tcp://{addr}")).unwrap();
-    client.send("question");
+    client.send("question").unwrap();
     let (id, body) = server.recv_routed().unwrap();
     assert_eq!(body, b"question");
     server.send_routed(id, b"answer").unwrap();
-    assert_eq!(within(FIVE, move || client.recv()), Frame::from("answer"));
+    assert_eq!(
+        within(FIVE, move || client.recv().unwrap()),
+        Frame::from("answer")
+    );
 }

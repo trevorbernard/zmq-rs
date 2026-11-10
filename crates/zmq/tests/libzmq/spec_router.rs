@@ -37,20 +37,23 @@ fn fair_queue_in(bind_address: &str) {
 
     let a = RoutingId::new("A").unwrap();
     for _ in 0..2 {
-        senders[0].send("M");
-        assert_eq!(receiver.recv_timeout(FIVE), Some((a.clone(), msg(&["M"]))));
+        senders[0].send("M").unwrap();
+        assert_eq!(
+            receiver.recv_timeout(FIVE).unwrap(),
+            Some((a.clone(), msg(&["M"])))
+        );
     }
 
     // send N requests, and expect one from each sender
     for sender in &mut senders {
-        sender.send("M");
+        sender.send("M").unwrap();
     }
     let mut pending: HashMap<RoutingId, usize> = names
         .iter()
         .map(|name| (RoutingId::new(*name).unwrap(), 1))
         .collect();
     for _ in names {
-        let (from, message) = receiver.recv_timeout(FIVE).expect("every request");
+        let (from, message) = receiver.recv_timeout(FIVE).unwrap().expect("every request");
         assert_eq!(message, msg(&["M"]));
         let left = pending.get_mut(&from).expect("a known sender");
         assert_eq!(*left, 1, "{from:?} sent twice");
@@ -89,7 +92,7 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // Send a message in both directions
     let to_b = RoutingId::new("B").unwrap();
     a.send(&to_b, "ABC").unwrap();
-    b.send("DEF");
+    b.send("DEF").unwrap();
     b.disconnect(&connect_address).unwrap();
     // Disconnect may take time
     settle();
@@ -101,16 +104,16 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
         Err(SendError::UnknownPeer(_))
     ));
     assert_eq!(
-        a.try_recv(),
+        a.try_recv().unwrap(),
         Some((RoutingId::new("B").unwrap(), Message::from("DEF")))
     );
-    assert_eq!(a.try_recv(), None);
+    assert_eq!(a.try_recv().unwrap(), None);
 
     // After a reconnect of B, the messages should still be gone
     b.connect(&connect_address).unwrap();
     settle();
-    assert_eq!(a.try_recv(), None);
-    assert_eq!(b.try_recv(), None);
+    assert_eq!(a.try_recv().unwrap(), None);
+    assert_eq!(b.try_recv().unwrap(), None);
 }
 
 #[test]

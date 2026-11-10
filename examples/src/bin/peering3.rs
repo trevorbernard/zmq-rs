@@ -45,10 +45,10 @@ fn client_task(context: Context, me: String) -> TaskResult {
                     // Worker is supposed to answer us with our task id
                     let reply = body(&reply);
                     assert_eq!(reply, task_id);
-                    monitor.send(reply);
+                    monitor.send(reply)?;
                 }
                 Err(_) => {
-                    monitor.send(format!("E: CLIENT EXIT - lost task {task_id}"));
+                    monitor.send(format!("E: CLIENT EXIT - lost task {task_id}"))?;
                     return Ok(());
                 }
             }
@@ -155,9 +155,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ];
         // If we have no workers ready, wait indefinitely
         let ready = if workers.is_empty() {
-            zmq::poll(primary)
+            zmq::poll(primary)?
         } else {
-            zmq::poll_timeout(primary, Duration::from_secs(1)).unwrap_or_default()
+            zmq::poll_timeout(primary, Duration::from_secs(1))?.unwrap_or_default()
         };
         let [from_worker, from_peer, state, status] = ready;
 
@@ -166,7 +166,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut reply = None;
 
         if from_worker {
-            let (worker, message) = localbe.recv();
+            let (worker, message) = localbe.recv()?;
             workers.push_back(worker);
             // Its envelope delimiter is of no further use. If it's READY,
             // don't route the message any further
@@ -178,7 +178,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Or handle reply from peer broker; we don't use the peer broker
         // identity for anything
         else if from_peer {
-            reply = Some(cloudbe.recv().1);
+            reply = Some(cloudbe.recv()?.1);
         }
         // Route reply to cloud if it's addressed to a broker, and to the
         // client otherwise
@@ -194,11 +194,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // If we have input messages on our statefe or monitor sockets, we
         // can process these immediately
         if state {
-            let capacity = statefe.recv();
+            let capacity = statefe.recv()?;
             cloud_capacity = text(capacity.last()).parse().unwrap_or(0);
         }
         if status {
-            println!("{}", body(&monitor.recv()));
+            println!("{}", body(&monitor.recv()?));
         }
 
         // Now route as many clients requests as we can handle. If we have
@@ -210,9 +210,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 localfe.readable(),
                 cloudfe.readable().when(!workers.is_empty()),
             ];
-            let request = match zmq::poll_timeout(frontends, Duration::ZERO) {
-                Some([true, _]) => with_sender(localfe.recv()),
-                Some([_, true]) => with_sender(cloudfe.recv()),
+            let request = match zmq::poll_timeout(frontends, Duration::ZERO)? {
+                Some([true, _]) => with_sender(localfe.recv()?),
+                Some([_, true]) => with_sender(cloudfe.recv()?),
                 // No work, go back to primary
                 _ => break,
             };
@@ -235,7 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // new capacity
             let mut capacity = Message::new(me.clone());
             capacity.push(workers.len().to_string());
-            statebe.send(capacity);
+            statebe.send(capacity)?;
         }
     }
 }

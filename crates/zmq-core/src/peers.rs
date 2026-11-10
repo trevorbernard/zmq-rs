@@ -9,9 +9,11 @@ use std::io;
 use std::net::SocketAddr;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::sync::mpsc;
 use std::task::{Context as TaskContext, Poll, Waker};
 
+use atomic_waker::AtomicWaker;
 use zmq_pipe::{ReaderGone, TryRecvError, TrySendError};
 use zmtp::Message;
 
@@ -309,12 +311,15 @@ pub struct Peers {
     next_endpoint: u64,
     /// What each new peer is sent first, if anything.
     greeting: Option<Message>,
+    /// Woken when the context is shut down.
+    termination: Arc<AtomicWaker>,
 }
 
 impl Peers {
     /// No peers yet; new connections use `config`.
     pub fn new(context: Context, config: ConnectionConfig) -> Self {
         Self {
+            termination: context.watch_termination(),
             context,
             config,
             list: PeerList::default(),
@@ -517,6 +522,20 @@ impl Peers {
                 }
             }
         });
+    }
+
+    /// Whether the context was shut down (libzmq's `ETERM`).
+    pub fn is_terminated(&self) -> bool {
+        self.context.is_terminated()
+    }
+
+    /// Whether the context was shut down; if not, a shutdown wakes `cx`,
+    /// unless it is [`noop_context`]'s. For a task about to wait.
+    pub fn poll_terminated(&self, cx: &mut TaskContext<'_>) -> bool {
+        if registers(cx) {
+            self.termination.register(cx.waker());
+        }
+        self.is_terminated()
     }
 
     /// The peers, for a routing strategy.

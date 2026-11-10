@@ -15,13 +15,13 @@ fn timeo() {
     frontend.bind("inproc://timeout_test").unwrap();
 
     // A receive on a socket with no peers returns at once.
-    assert_eq!(frontend.try_recv(), None);
+    assert_eq!(frontend.try_recv().unwrap(), None);
 
     // The receive timeout is honored.
     let timeout = Duration::from_millis(250);
     let jitter = Duration::from_millis(50);
     let started = Instant::now();
-    assert_eq!(frontend.recv_timeout(timeout), None);
+    assert_eq!(frontend.recv_timeout(timeout).unwrap(), None);
     let elapsed = started.elapsed();
     assert!(elapsed > timeout - jitter, "returned after {elapsed:?}");
 
@@ -29,6 +29,6 @@ fn timeo() {
     let mut backend = context.socket::<Dealer>();
     backend.connect("inproc://timeout_test").unwrap();
     assert!(backend.send_timeout("Hello", timeout).is_ok());
-    let received = within(FIVE, move || frontend.recv());
+    let received = within(FIVE, move || frontend.recv().unwrap());
     assert_eq!(received, Message::from("Hello"));
 }

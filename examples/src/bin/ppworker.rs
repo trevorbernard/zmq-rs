@@ -28,7 +28,7 @@ fn worker_socket(context: &Context) -> Result<Socket<Dealer>, zmq::Error> {
 
     // Tell queue we're ready for work
     println!("I: worker ready");
-    worker.send(PPP_READY);
+    worker.send(PPP_READY)?;
     Ok(worker)
 }
 
@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut cycles = 0;
     loop {
-        if let Some(message) = worker.recv_timeout(HEARTBEAT_INTERVAL) {
+        if let Some(message) = worker.recv_timeout(HEARTBEAT_INTERVAL)? {
             // Get message
             // - envelope + content -> request
             // - 1-part HEARTBEAT -> heartbeat
@@ -64,7 +64,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     sleep_ms(3000);
                 }
                 println!("I: normal reply");
-                worker.send(message);
+                worker.send(message)?;
                 liveness = HEARTBEAT_LIVENESS;
                 sleep_ms(1000); // Do some heavy work
             } else if **message.last() == *PPP_HEARTBEAT {
@@ -99,7 +99,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if Instant::now() > heartbeat_at {
             heartbeat_at = Instant::now() + HEARTBEAT_INTERVAL;
             println!("I: worker heartbeat");
-            worker.send(PPP_HEARTBEAT);
+            worker.send(PPP_HEARTBEAT)?;
         }
     }
 }

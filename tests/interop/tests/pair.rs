@@ -30,10 +30,10 @@ fn our_pair_talks_to_a_libzmq_pair() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
     ours.connect(&format!("tcp://{addr}")).unwrap();
-    ours.send("ping");
+    ours.send("ping").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"ping"]);
     theirs.send(&[b"pong", b"two frames"]).unwrap();
-    let received = within(FIVE, move || ours.recv());
+    let received = within(FIVE, move || ours.recv().unwrap());
     assert_eq!(received.iter().count(), 2);
     assert_eq!(received.get(0).unwrap().as_slice(), b"pong");
 }
@@ -47,9 +47,9 @@ fn a_libzmq_pair_talks_to_ours() {
     theirs.set_receive_timeout(FIVE);
     theirs.connect(bound);
     theirs.send(&[b"hello"]).unwrap();
-    let (received, mut ours) = within(FIVE, move || (ours.recv(), ours));
+    let (received, mut ours) = within(FIVE, move || (ours.recv().unwrap(), ours));
     assert_eq!(received, Message::from("hello"));
-    ours.send("hi");
+    ours.send("hi").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"hi"]);
 }
 
@@ -61,7 +61,7 @@ fn a_second_libzmq_pair_waits_its_turn() {
     let first = Socket::new(Kind::Pair);
     first.connect(bound.clone());
     first.send(&[b"first"]).unwrap();
-    let (received, ours) = within(FIVE, move || (ours.recv(), ours));
+    let (received, ours) = within(FIVE, move || (ours.recv().unwrap(), ours));
     assert_eq!(received, Message::from("first"));
 
     // Turned away for now. What it sends meanwhile is lost with the
@@ -74,7 +74,7 @@ fn a_second_libzmq_pair_waits_its_turn() {
     thread::sleep(Duration::from_millis(200));
     let mut ours = ours;
     assert_eq!(
-        ours.try_recv(),
+        ours.try_recv().unwrap(),
         None,
         "the second is not heard while the first is here"
     );
@@ -82,13 +82,13 @@ fn a_second_libzmq_pair_waits_its_turn() {
     let started = std::time::Instant::now();
     let heard = loop {
         second.send(&[b"knock"]).unwrap();
-        if let Some(message) = ours.try_recv() {
+        if let Some(message) = ours.try_recv().unwrap() {
             break message;
         }
         assert!(started.elapsed() < FIVE, "the second never got in");
         thread::sleep(Duration::from_millis(20));
     };
     assert!(heard == Message::from("knock") || heard == Message::from("lost"));
-    ours.send("welcome");
+    ours.send("welcome").unwrap();
     assert_eq!(second.recv().unwrap(), [b"welcome"]);
 }

@@ -40,7 +40,13 @@ fn a_libzmq_scatter_feeds_our_gather() {
     for i in 0..3 {
         scatter.send(&[format!("{i}").as_bytes()]).unwrap();
     }
-    let received = within(FIVE, move || [gather.recv(), gather.recv(), gather.recv()]);
+    let received = within(FIVE, move || {
+        [
+            gather.recv().unwrap(),
+            gather.recv().unwrap(),
+            gather.recv().unwrap(),
+        ]
+    });
     assert_eq!(received, ["0", "1", "2"].map(Frame::from));
 }
 
@@ -55,7 +61,7 @@ fn our_scatter_feeds_a_libzmq_gather() {
     let context = Context::new().unwrap();
     let mut scatter = context.socket::<Scatter>();
     scatter.connect(&format!("tcp://{addr}")).unwrap();
-    scatter.send("to libzmq");
+    scatter.send("to libzmq").unwrap();
     assert_eq!(gather.recv().unwrap(), [b"to libzmq"]);
 }
 
@@ -77,5 +83,8 @@ fn our_gather_drops_multipart_messages() {
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();
     peer.send(&Message::from("single")).unwrap();
-    assert_eq!(within(FIVE, move || gather.recv()), Frame::from("single"));
+    assert_eq!(
+        within(FIVE, move || gather.recv().unwrap()),
+        Frame::from("single")
+    );
 }

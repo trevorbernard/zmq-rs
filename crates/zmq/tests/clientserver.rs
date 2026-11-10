@@ -8,9 +8,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{
-    Client, ClientId, Context, Dealer, Frame, Hwm, SendError, Server, SocketOptions, UnknownPeer,
-};
+use zmq::{Client, ClientId, Context, Dealer, Frame, Hwm, SendError, Server, SocketOptions};
 use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -36,13 +34,13 @@ fn a_server_answers_each_client_by_its_id() {
         .map(|n| {
             let mut client = context.socket::<Client>();
             client.connect(&bound.to_string()).unwrap();
-            client.send(format!("hello from {n}"));
+            client.send(format!("hello from {n}")).unwrap();
             client
         })
         .collect();
 
     let (requests, mut server) = within(FIVE, move || {
-        let requests: Vec<(ClientId, Frame)> = (0..3).map(|_| server.recv()).collect();
+        let requests: Vec<(ClientId, Frame)> = (0..3).map(|_| server.recv().unwrap()).collect();
         (requests, server)
     });
     let ids: HashSet<ClientId> = requests.iter().map(|(id, _)| *id).collect();
@@ -53,7 +51,7 @@ fn a_server_answers_each_client_by_its_id() {
     }
     for (n, client) in clients.iter_mut().enumerate() {
         let mut client = std::mem::replace(client, context.socket::<Client>());
-        let reply = within(FIVE, move || client.recv());
+        let reply = within(FIVE, move || client.recv().unwrap());
         assert_eq!(reply, Frame::from(format!("re: hello from {n}")));
     }
 }
@@ -65,8 +63,8 @@ fn client_ids_are_never_zero() {
     server.bind("inproc://ids").unwrap();
     let mut client = context.socket::<Client>();
     client.connect("inproc://ids").unwrap();
-    client.send("hi");
-    let (id, _) = server.try_recv().unwrap();
+    client.send("hi").unwrap();
+    let (id, _) = server.try_recv().unwrap().unwrap();
     assert_ne!(id.get(), 0);
 }
 
@@ -77,17 +75,17 @@ fn sending_to_an_unknown_or_departed_client_fails() {
     server.bind("inproc://departed").unwrap();
     let mut client = context.socket::<Client>();
     client.connect("inproc://departed").unwrap();
-    client.send("hi");
-    let (id, _) = server.try_recv().unwrap();
+    client.send("hi").unwrap();
+    let (id, _) = server.try_recv().unwrap().unwrap();
     let stranger = ClientId::new(id.get().wrapping_add(1000).max(1)).unwrap();
     assert_eq!(
         server.send(stranger, "who?"),
-        Err(UnknownPeer(Frame::from("who?")))
+        Err(SendError::UnknownPeer(Frame::from("who?")))
     );
     drop(client);
     assert_eq!(
         server.send(id, "gone"),
-        Err(UnknownPeer(Frame::from("gone")))
+        Err(SendError::UnknownPeer(Frame::from("gone")))
     );
 }
 
@@ -105,8 +103,8 @@ fn a_full_client_makes_try_send_hand_the_frame_back() {
         ..SocketOptions::default()
     });
     client.connect("inproc://full").unwrap();
-    client.send("hi");
-    let (id, _) = server.try_recv().unwrap();
+    client.send("hi").unwrap();
+    let (id, _) = server.try_recv().unwrap().unwrap();
     server.try_send(id, "1").unwrap();
     server.try_send(id, "2").unwrap();
     assert_eq!(
@@ -118,7 +116,13 @@ fn a_full_client_makes_try_send_hand_the_frame_back() {
         server.send(id, "3").unwrap();
         server
     });
-    let received = within(FIVE, move || [client.recv(), client.recv(), client.recv()]);
+    let received = within(FIVE, move || {
+        [
+            client.recv().unwrap(),
+            client.recv().unwrap(),
+            client.recv().unwrap(),
+        ]
+    });
     assert_eq!(
         received,
         [Frame::from("1"), Frame::from("2"), Frame::from("3")]
@@ -133,8 +137,8 @@ fn a_disconnected_client_is_forgotten() {
     server.bind("inproc://disconnect").unwrap();
     let mut client = context.socket::<Client>();
     client.connect("inproc://disconnect").unwrap();
-    client.send("hi");
-    let (id, _) = server.try_recv().unwrap();
+    client.send("hi").unwrap();
+    let (id, _) = server.try_recv().unwrap().unwrap();
     assert!(server.disconnect_client(id));
     assert!(!server.disconnect_client(id), "already gone");
     assert_eq!(
@@ -162,12 +166,12 @@ fn a_client_load_balances_across_servers() {
         client.connect(&format!("inproc://balanced-{n}")).unwrap();
     }
     for i in 0..4 {
-        client.send(format!("{i}"));
+        client.send(format!("{i}")).unwrap();
     }
     for server in &mut servers {
-        assert!(server.try_recv().is_some());
-        assert!(server.try_recv().is_some());
-        assert!(server.try_recv().is_none());
+        assert!(server.try_recv().unwrap().is_some());
+        assert!(server.try_recv().unwrap().is_some());
+        assert!(server.try_recv().unwrap().is_none());
     }
 }
 
@@ -179,5 +183,5 @@ fn only_clients_and_servers_pair() {
     let mut dealer = context.socket::<Dealer>();
     dealer.connect("inproc://strangers").unwrap();
     assert!(dealer.try_send("not a client").is_err());
-    assert!(server.try_recv().is_none());
+    assert!(server.try_recv().unwrap().is_none());
 }

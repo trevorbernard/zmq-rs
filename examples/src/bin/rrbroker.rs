@@ -13,16 +13,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Switch messages between sockets
     loop {
-        let [from_client, from_service] = zmq::poll([frontend.readable(), backend.readable()]);
+        let [from_client, from_service] = zmq::poll([frontend.readable(), backend.readable()])?;
         if from_client {
             // The client's routing id goes first, so the reply finds it
-            let (client, request) = frontend.recv();
+            let (client, request) = frontend.recv()?;
             let mut message = Message::new(client.as_bytes().to_vec());
             message.extend(request);
-            backend.send(message);
+            backend.send(message)?;
         }
         if from_service {
-            let (client, reply) = backend.recv().into_parts();
+            let (client, reply) = backend.recv()?.into_parts();
             frontend.send(&RoutingId::new(client)?, Message::try_from(reply)?)?;
         }
     }

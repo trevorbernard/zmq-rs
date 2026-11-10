@@ -37,10 +37,10 @@ impl Authenticator for NoHandler {
 fn no_zap_handler() {
     let context = Context::new().unwrap();
     let (mut server, mut client) = pair(&context, Security::Null);
-    client.send(bounce_content());
-    assert_eq!(server.recv_timeout(FIVE), Some(bounce_content()));
-    server.send(bounce_content());
-    assert_eq!(client.recv_timeout(FIVE), Some(bounce_content()));
+    client.send(bounce_content()).unwrap();
+    assert_eq!(server.recv_timeout(FIVE).unwrap(), Some(bounce_content()));
+    server.send(bounce_content()).unwrap();
+    assert_eq!(client.recv_timeout(FIVE).unwrap(), Some(bounce_content()));
 }
 
 #[test]
@@ -48,7 +48,7 @@ fn no_zap_handler_enforce_domain() {
     let context = Context::new().unwrap();
     let (mut server, mut client) = pair(&context, Security::null_authenticated("TEST", NoHandler));
     let _ = client.try_send(bounce_content());
-    assert_eq!(server.recv_timeout(SETTLE), None);
+    assert_eq!(server.recv_timeout(SETTLE).unwrap(), None);
     let _ = server.try_send(bounce_content());
-    assert_eq!(client.recv_timeout(SETTLE), None);
+    assert_eq!(client.recv_timeout(SETTLE).unwrap(), None);
 }

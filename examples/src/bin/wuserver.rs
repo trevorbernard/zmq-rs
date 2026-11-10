@@ -12,6 +12,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let zipcode = randof(100_000);
         let temperature = randof(215) as i64 - 80;
         let relhumidity = randof(50) + 10;
-        publisher.send(format!("{zipcode:05} {temperature} {relhumidity}"));
+        publisher.send(format!("{zipcode:05} {temperature} {relhumidity}"))?;
     }
 }

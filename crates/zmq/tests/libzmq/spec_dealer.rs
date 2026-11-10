@@ -29,12 +29,12 @@ fn round_robin_out(bind_address: &str) {
 
     // Send all requests
     for _ in &reps {
-        dealer.send(msg(&["", "ABC"]));
+        dealer.send(msg(&["", "ABC"])).unwrap();
     }
 
     // Expect every REP got one message
     for rep in &mut reps {
-        let request = rep.recv_timeout(FIVE).expect("one request each");
+        let request = rep.recv_timeout(FIVE).unwrap().expect("one request each");
         assert_eq!(request.body(), &msg(&["ABC"]));
     }
 }
@@ -64,20 +64,20 @@ fn fair_queue_in(bind_address: &str) {
         .collect();
 
     for _ in 0..2 {
-        senders[0].send("A");
-        assert_eq!(receiver.recv_timeout(FIVE), Some(msg(&["A"])));
+        senders[0].send("A").unwrap();
+        assert_eq!(receiver.recv_timeout(FIVE).unwrap(), Some(msg(&["A"])));
     }
 
     // send our requests
     for sender in &mut senders {
-        sender.send("B");
+        sender.send("B").unwrap();
     }
     // Wait for data.
     settle();
 
     // handle the requests
     for _ in &senders {
-        assert_eq!(receiver.recv_timeout(FIVE), Some(msg(&["B"])));
+        assert_eq!(receiver.recv_timeout(FIVE).unwrap(), Some(msg(&["B"])));
     }
 }
 
@@ -107,8 +107,8 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     b.connect(&connect_address).unwrap();
 
     // Send a message in both directions
-    a.send("ABC");
-    b.send("DEF");
+    a.send("ABC").unwrap();
+    b.send("DEF").unwrap();
     b.disconnect(&connect_address).unwrap();
     // Disconnect may take time
     settle();
@@ -116,14 +116,14 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     // Sending to B fails. What B sent before leaving is still delivered,
     // as libzmq delivers it (docs/rfc-compliance.md, "Socket patterns").
     assert!(a.try_send(Message::new("")).is_err());
-    assert_eq!(a.try_recv(), Some(Message::from("DEF")));
-    assert_eq!(a.try_recv(), None);
+    assert_eq!(a.try_recv().unwrap(), Some(Message::from("DEF")));
+    assert_eq!(a.try_recv().unwrap(), None);
 
     // After a reconnect of B, the messages should still be gone
     b.connect(&connect_address).unwrap();
     settle();
-    assert_eq!(a.try_recv(), None);
-    assert_eq!(b.try_recv(), None);
+    assert_eq!(a.try_recv().unwrap(), None);
+    assert_eq!(b.try_recv().unwrap(), None);
 }
 
 #[test]

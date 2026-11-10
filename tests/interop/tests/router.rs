@@ -4,9 +4,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{
-    Context, Dealer, Frame, Identity, Message, Router, RoutingId, SocketOptions, UnknownPeer,
-};
+use zmq::{Context, Dealer, Frame, Identity, Message, Router, RoutingId, SendError, SocketOptions};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_test_ports::free_endpoint;
 
@@ -49,10 +47,10 @@ fn our_dealer_talks_to_a_libzmq_router() {
     let mut dealer = context.socket_with::<Dealer>(identity("d1"));
     dealer.connect(&format!("tcp://{addr}")).unwrap();
 
-    dealer.send("hello");
+    dealer.send("hello").unwrap();
     assert_eq!(router.recv().unwrap(), [&b"d1"[..], b"hello"]);
     router.send(&[b"d1", b"reply"]).unwrap();
-    let reply = within(Duration::from_secs(5), move || dealer.recv());
+    let reply = within(Duration::from_secs(5), move || dealer.recv().unwrap());
     assert_eq!(reply, Message::from("reply"));
 }
 
@@ -67,7 +65,7 @@ fn our_router_talks_to_a_libzmq_dealer() {
     dealer.send(&[b"hi"]).unwrap();
 
     let (from, received, router) = within(Duration::from_secs(5), move || {
-        let (from, received) = router.recv();
+        let (from, received) = router.recv().unwrap();
         (from, received, router)
     });
     assert_eq!(from, id("lib"));
@@ -89,7 +87,7 @@ fn router_keeps_the_envelope_for_the_application() {
     req.send(&[b"question"]).unwrap();
 
     let (from, request, mut router) = within(Duration::from_secs(5), move || {
-        let (from, request) = router.recv();
+        let (from, request) = router.recv().unwrap();
         (from, request, router)
     });
     assert_eq!(request, message(&[b"", b"question"]));
@@ -111,7 +109,7 @@ fn router_generates_routing_ids_for_anonymous_peers() {
         })
         .collect();
     let (received, mut router) = within(Duration::from_secs(5), move || {
-        let received: Vec<(RoutingId, Message)> = (0..2).map(|_| router.recv()).collect();
+        let received: Vec<(RoutingId, Message)> = (0..2).map(|_| router.recv().unwrap()).collect();
         (received, router)
     });
     for (from, _) in &received {
@@ -138,7 +136,7 @@ fn router_drops_what_it_cannot_route_without_blocking() {
     router.bind(&free_endpoint()).unwrap();
     assert_eq!(
         router.send(&id("nobody"), "lost"),
-        Err(UnknownPeer(Message::from("lost")))
+        Err(SendError::UnknownPeer(Message::from("lost")))
     );
 }
 
@@ -152,7 +150,7 @@ fn router_ignores_a_peer_reusing_an_identity() {
     first.connect(addr.clone());
     first.send(&[b"first"]).unwrap();
     let (from, received, router) = within(Duration::from_secs(5), move || {
-        let (from, received) = router.recv();
+        let (from, received) = router.recv().unwrap();
         (from, received, router)
     });
     assert_eq!((from, received), (id("same"), Message::from("first")));
@@ -164,7 +162,7 @@ fn router_ignores_a_peer_reusing_an_identity() {
     thread::sleep(Duration::from_millis(300));
     let mut router = router;
     assert_eq!(
-        router.try_recv(),
+        router.try_recv().unwrap(),
         None,
         "the duplicate's messages are dropped"
     );
@@ -183,7 +181,7 @@ fn dealer_load_balances_and_fair_queues() {
             .unwrap();
     }
     for i in 0..4 {
-        dealer.send(format!("{i}"));
+        dealer.send(format!("{i}")).unwrap();
     }
     for (r, router) in routers.iter().enumerate() {
         for k in 0..2 {
@@ -197,7 +195,7 @@ fn dealer_load_balances_and_fair_queues() {
             .unwrap();
     }
     let mut replies = within(Duration::from_secs(5), move || {
-        vec![dealer.recv(), dealer.recv()]
+        vec![dealer.recv().unwrap(), dealer.recv().unwrap()]
     });
     replies.sort_by_key(|m| m.get(0).unwrap().to_vec());
     assert_eq!(
@@ -213,15 +211,15 @@ fn our_router_and_dealer_talk_to_each_other() {
     let addr = router.bind(&free_endpoint()).unwrap();
     let mut dealer = context.socket_with::<Dealer>(identity("ours"));
     dealer.connect(&addr.to_string()).unwrap();
-    dealer.send("ping");
+    dealer.send("ping").unwrap();
     let (from, ping, mut router) = within(Duration::from_secs(5), move || {
-        let (from, ping) = router.recv();
+        let (from, ping) = router.recv().unwrap();
         (from, ping, router)
     });
     assert_eq!((&from, ping), (&id("ours"), Message::from("ping")));
     router.send(&from, "pong").unwrap();
     assert_eq!(
-        within(Duration::from_secs(5), move || dealer.recv()),
+        within(Duration::from_secs(5), move || dealer.recv().unwrap()),
         Message::from("pong")
     );
 }
@@ -236,7 +234,7 @@ fn a_connecting_router_routes_once_the_peer_is_known() {
     router.connect(&format!("tcp://{addr}")).unwrap();
     dealer.send(&[b"hello router"]).unwrap();
     let (from, hello, mut router) = within(Duration::from_secs(5), move || {
-        let (from, hello) = router.recv();
+        let (from, hello) = router.recv().unwrap();
         (from, hello, router)
     });
     assert_eq!((&from, hello), (&id("srv"), Message::from("hello router")));
@@ -274,8 +272,8 @@ fn plain_secured_dealer_and_router() {
         ..identity("secure")
     });
     dealer.connect(&addr.to_string()).unwrap();
-    dealer.send("over plain");
-    let (from, received) = within(Duration::from_secs(5), move || router.recv());
+    dealer.send("over plain").unwrap();
+    let (from, received) = within(Duration::from_secs(5), move || router.recv().unwrap());
     assert_eq!(
         (from, received),
         (id("secure"), Message::from("over plain"))
@@ -293,7 +291,7 @@ fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
     first.connect(addr.clone());
     first.send(&[b"first"]).unwrap();
     let router = within(Duration::from_secs(5), move || {
-        assert_eq!(router.recv(), (id("same"), Message::from("first")));
+        assert_eq!(router.recv().unwrap(), (id("same"), Message::from("first")));
         router
     });
 
@@ -303,7 +301,10 @@ fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
     second.send(&[b"second"]).unwrap();
     let mut router = within(Duration::from_secs(5), move || {
         let mut router = router;
-        assert_eq!(router.recv(), (id("same"), Message::from("second")));
+        assert_eq!(
+            router.recv().unwrap(),
+            (id("same"), Message::from("second"))
+        );
         router
     });
     router.send(&id("same"), "to the second").unwrap();
@@ -319,7 +320,7 @@ fn a_probing_libzmq_dealer_is_known_to_our_router_at_once() {
     dealer.set_routing_id(b"prober");
     dealer.set_probe_router();
     dealer.connect(addr);
-    let received = within(Duration::from_secs(5), move || router.recv());
+    let received = within(Duration::from_secs(5), move || router.recv().unwrap());
     assert_eq!(received, (id("prober"), Message::new(Frame::new())));
 }
 
@@ -354,7 +355,7 @@ fn a_probing_libzmq_router_greets_our_dealer() {
     let mut dealer = context.socket::<Dealer>();
     dealer.connect(&format!("tcp://{addr}")).unwrap();
     let (done, received) = mpsc::channel();
-    thread::spawn(move || done.send(dealer.recv()));
+    thread::spawn(move || done.send(dealer.recv().unwrap()));
     // libzmq writes the probe once its socket attaches the new pipe, which
     // it does only while the application calls into it.
     router.set_receive_timeout(Duration::from_millis(50));

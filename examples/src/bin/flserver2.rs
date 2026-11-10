@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("I: service is ready at {endpoint}");
     loop {
-        let request = server.recv();
+        let request = server.recv()?;
         // Fail nastily if run against wrong client
         assert_eq!(request.body().len().get(), 2);
 

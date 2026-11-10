@@ -18,8 +18,8 @@ fn dealer_called_x(context: &Context, endpoint: &str) -> Socket<Dealer> {
 /// Sends from `dealer` and checks that `router` receives it from X, which
 /// also shows the connection is up.
 fn hello_from_x(dealer: &mut Socket<Dealer>, router: &mut Socket<Router>) {
-    dealer.send("Hello");
-    let (from, message) = router.recv_timeout(FIVE).expect("Hello from X");
+    dealer.send("Hello").unwrap();
+    let (from, message) = router.recv_timeout(FIVE).unwrap().expect("Hello from X");
     assert_eq!(from.as_bytes(), b"X");
     assert_eq!(message, Message::from("Hello"));
 }
@@ -40,8 +40,11 @@ fn with_handover() {
 
     let x = RoutingId::new("X").unwrap();
     router.send(&x, "Hello").unwrap();
-    assert_eq!(dealer_one.recv_timeout(SETTLE), None);
-    assert_eq!(dealer_two.recv_timeout(FIVE), Some(Message::from("Hello")));
+    assert_eq!(dealer_one.recv_timeout(SETTLE).unwrap(), None);
+    assert_eq!(
+        dealer_two.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("Hello"))
+    );
 }
 
 #[test]
@@ -55,11 +58,14 @@ fn without_handover() {
 
     // A second dealer with the same routing id is ignored.
     let mut dealer_two = dealer_called_x(&context, &endpoint);
-    dealer_two.send("Hello");
-    assert_eq!(router.recv_timeout(SETTLE), None);
+    dealer_two.send("Hello").unwrap();
+    assert_eq!(router.recv_timeout(SETTLE).unwrap(), None);
 
     let x = RoutingId::new("X").unwrap();
     router.send(&x, "Hello").unwrap();
-    assert_eq!(dealer_two.recv_timeout(SETTLE), None);
-    assert_eq!(dealer_one.recv_timeout(FIVE), Some(Message::from("Hello")));
+    assert_eq!(dealer_two.recv_timeout(SETTLE).unwrap(), None);
+    assert_eq!(
+        dealer_one.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("Hello"))
+    );
 }

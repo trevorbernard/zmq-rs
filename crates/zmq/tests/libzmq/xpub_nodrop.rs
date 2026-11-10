@@ -32,19 +32,20 @@ fn test() {
     // We must wait for the subscription to be processed here, otherwise
     // some or all published messages might be lost
     assert_eq!(
-        publisher.recv_timeout(FIVE),
+        publisher.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Subscribe("".into()))
     );
 
     let send_count = HWM - 1;
     for _ in 0..send_count {
-        assert_eq!(publisher.send_all(Message::from("")), 1);
+        assert_eq!(publisher.send_all(Message::from("")).unwrap(), 1);
     }
     let mut recv_count = 0;
-    if subscriber.recv_timeout(FIVE).is_some() {
+    if subscriber.recv_timeout(FIVE).unwrap().is_some() {
         recv_count += 1;
         while subscriber
             .recv_timeout(Duration::from_millis(250))
+            .unwrap()
             .is_some()
         {
             recv_count += 1;
@@ -60,9 +61,12 @@ fn test() {
     }
     let mut recv_count = 0;
     if send_count > 0 {
-        subscriber.recv_timeout(FIVE).expect("a first message");
+        subscriber
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("a first message");
         recv_count += 1;
-        while subscriber.try_recv().is_some() {
+        while subscriber.try_recv().unwrap().is_some() {
             recv_count += 1;
         }
     }

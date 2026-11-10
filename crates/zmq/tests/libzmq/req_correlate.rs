@@ -33,7 +33,7 @@ fn req_correlate() {
 
     // The router sees the peer's routing id, the 4-octet request id, the
     // delimiter and the request.
-    let (peer, request) = router.recv_timeout(FIVE).expect("the request");
+    let (peer, request) = router.recv_timeout(FIVE).unwrap().expect("the request");
     assert!(!peer.as_bytes().is_empty());
     let frames: Vec<Frame> = request.into_iter().collect();
     assert_eq!(frames.len(), 4);

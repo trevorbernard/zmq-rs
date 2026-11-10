@@ -32,8 +32,11 @@ fn exchange(context: &Context, options: &SocketOptions) {
     let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(options.clone());
     push.connect(&bound.to_string()).unwrap();
-    push.send("through");
-    assert_eq!(pull.recv_timeout(FIVE), Some(Message::from("through")));
+    push.send("through").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("through"))
+    );
 }
 
 #[test]

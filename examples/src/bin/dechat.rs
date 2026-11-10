@@ -18,7 +18,7 @@ fn listener_task(context: Context, network: String) -> Result<(), zmq::Error> {
     }
     listener.subscribe("");
     loop {
-        print!("{}", body(&listener.recv()));
+        print!("{}", body(&listener.recv()?));
     }
 }
 
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     broadcaster.bind(&format!("tcp://{interface}:9000"))?;
     let mut message = String::new();
     while io::stdin().read_line(&mut message)? > 0 {
-        broadcaster.send(format!("{username}: {message}"));
+        broadcaster.send(format!("{username}: {message}"))?;
         message.clear();
     }
     Ok(())

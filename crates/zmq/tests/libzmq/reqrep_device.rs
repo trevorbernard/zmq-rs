@@ -29,21 +29,21 @@ fn roundtrip() {
     // Pass the request through the device: libzmq copies its four frames
     // one by one; a zmq-rs ROUTER hands over the sender's id apart, so it
     // goes back in front.
-    let (client, request) = router.recv_timeout(FIVE).expect("the request");
+    let (client, request) = router.recv_timeout(FIVE).unwrap().expect("the request");
     let mut forwarded = Message::new(Frame::from(client));
     forwarded.extend(request);
     assert_eq!(forwarded.len().get(), 4);
-    dealer.send(forwarded);
+    dealer.send(forwarded).unwrap();
 
     // Receive the request.
-    let request = rep.recv_timeout(FIVE).expect("the request");
+    let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &msg(&["ABC", "DEF"]));
 
     // Send the reply.
     request.reply(msg(&["GHI", "JKL"]));
 
     // Pass the reply through the device.
-    let reply = dealer.recv_timeout(FIVE).expect("the reply");
+    let reply = dealer.recv_timeout(FIVE).unwrap().expect("the reply");
     assert_eq!(reply.len().get(), 4);
     let (client, rest) = reply.into_parts();
     router

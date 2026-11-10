@@ -20,10 +20,13 @@ fn roundtrip() {
     let context = Context::new().unwrap();
     let (mut sb, mut sc) = bound_and_connected(&context, "channel-roundtrip");
 
-    sb.send("HELLO");
-    let (received, mut sc) = within(FIVE, move || (sc.recv(), sc));
+    sb.send("HELLO").unwrap();
+    let (received, mut sc) = within(FIVE, move || (sc.recv().unwrap(), sc));
     assert_eq!(received, Frame::from("HELLO"));
 
-    sc.send("WORLD");
-    assert_eq!(within(FIVE, move || sb.recv()), Frame::from("WORLD"));
+    sc.send("WORLD").unwrap();
+    assert_eq!(
+        within(FIVE, move || sb.recv().unwrap()),
+        Frame::from("WORLD")
+    );
 }

@@ -18,13 +18,13 @@ fn peer() {
     peer2.send(peer1_id, vec![1]).unwrap();
 
     let (peer2_id, frame, mut peer1) = within(FIVE, move || {
-        let (id, frame) = peer1.recv();
+        let (id, frame) = peer1.recv().unwrap();
         (id, frame, peer1)
     });
     assert_eq!(frame, Frame::from(vec![1]));
 
     peer1.send(peer2_id, vec![2]).unwrap();
-    let (from, frame) = within(FIVE, move || peer2.recv());
+    let (from, frame) = within(FIVE, move || peer2.recv().unwrap());
     assert_eq!(from, peer1_id);
     assert_eq!(frame, Frame::from(vec![2]));
 }

@@ -40,7 +40,7 @@ fn a_libzmq_peer_and_ours_address_each_other() {
     let to_ours = theirs.connect_peer(bound);
     theirs.send_routed(to_ours, b"hello from libzmq").unwrap();
     let (to_theirs, greeting, mut ours) = within(FIVE, move || {
-        let (from, greeting) = ours.recv();
+        let (from, greeting) = ours.recv().unwrap();
         (from, greeting, ours)
     });
     assert_eq!(greeting, Frame::from("hello from libzmq"));
@@ -68,7 +68,7 @@ fn our_peer_connects_to_a_libzmq_peer() {
     assert_eq!(body, b"queued before the connection is up");
     theirs.send_routed(to_ours, b"reply").unwrap();
     assert_eq!(
-        within(FIVE, move || ours.recv()),
+        within(FIVE, move || ours.recv().unwrap()),
         (to_theirs, Frame::from("reply"))
     );
 }
@@ -85,9 +85,9 @@ fn a_libzmq_channel_talks_to_ours() {
     theirs.set_receive_timeout(FIVE);
     theirs.connect(bound);
     theirs.send(&[b"ping"]).unwrap();
-    let (heard, mut ours) = within(FIVE, move || (ours.recv(), ours));
+    let (heard, mut ours) = within(FIVE, move || (ours.recv().unwrap(), ours));
     assert_eq!(heard, Frame::from("ping"));
-    ours.send("pong");
+    ours.send("pong").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"pong"]);
 }
 
@@ -109,5 +109,8 @@ fn our_channel_drops_multipart_messages() {
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();
     peer.send(&Message::from("single")).unwrap();
-    assert_eq!(within(FIVE, move || channel.recv()), Frame::from("single"));
+    assert_eq!(
+        within(FIVE, move || channel.recv().unwrap()),
+        Frame::from("single")
+    );
 }

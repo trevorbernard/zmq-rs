@@ -24,10 +24,11 @@ fn disconnect_inproc() {
             let ready = zmq::poll_timeout(
                 [subscriber.readable(), publisher.readable()],
                 Duration::from_millis(100),
-            );
+            )
+            .unwrap();
             let [publication, subscription] = ready.unwrap_or_default();
             if subscription {
-                match publisher.recv() {
+                match publisher.recv().unwrap() {
                     XPubEvent::Subscribe(_) => {
                         assert!(!is_subscribed);
                         is_subscribed = true;
@@ -40,7 +41,7 @@ fn disconnect_inproc() {
                 }
             }
             if publication {
-                subscriber.recv();
+                subscriber.recv().unwrap();
                 publications_received += 1;
             }
             if iteration == 1 {
@@ -57,7 +58,7 @@ fn disconnect_inproc() {
             }
             let mut message = Message::new("foo");
             message.push("this is foo!");
-            publisher.send(message);
+            publisher.send(message).unwrap();
         }
         assert_eq!(publications_received, 3);
         assert!(!is_subscribed);

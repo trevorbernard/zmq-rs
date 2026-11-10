@@ -29,10 +29,13 @@ fn connections_spread_over_several_io_threads() {
         push.connect(&bound.to_string()).unwrap();
     }
     for i in 0..3 {
-        push.send(format!("m{i}"));
+        push.send(format!("m{i}")).unwrap();
     }
     for pull in &mut pulls {
-        assert!(pull.recv_timeout(FIVE).is_some(), "every peer gets one");
+        assert!(
+            pull.recv_timeout(FIVE).unwrap().is_some(),
+            "every peer gets one"
+        );
     }
 }
 
@@ -60,8 +63,11 @@ fn unbinding_closes_accepted_connections() {
     let mut push = context.socket_with::<Push>(fast_reconnect());
     let mut monitor = push.monitor();
     push.connect(&bound).unwrap();
-    push.send("before");
-    assert_eq!(first.recv_timeout(FIVE), Some(Message::from("before")));
+    push.send("before").unwrap();
+    assert_eq!(
+        first.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("before"))
+    );
     first.unbind(&bound).unwrap();
     // Sent before the push sees its connection end, a message would go
     // down that connection and be lost, as in libzmq.
@@ -69,9 +75,12 @@ fn unbinding_closes_accepted_connections() {
     // The push reconnects to whoever binds the port next.
     let mut second = context.socket::<Pull>();
     second.bind(&bound).unwrap();
-    push.send("after");
-    assert_eq!(second.recv_timeout(FIVE), Some(Message::from("after")));
-    assert_eq!(first.recv_timeout(BRIEFLY), None);
+    push.send("after").unwrap();
+    assert_eq!(
+        second.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("after"))
+    );
+    assert_eq!(first.recv_timeout(BRIEFLY).unwrap(), None);
 }
 
 #[test]
@@ -141,15 +150,15 @@ fn a_disconnected_peer_gets_no_more() {
     push.connect(&dropped_at).unwrap();
     push.disconnect(&dropped_at).unwrap();
     for i in 0..4 {
-        push.send(format!("m{i}"));
+        push.send(format!("m{i}")).unwrap();
     }
     for i in 0..4 {
         assert_eq!(
-            kept.recv_timeout(FIVE),
+            kept.recv_timeout(FIVE).unwrap(),
             Some(Message::from(format!("m{i}")))
         );
     }
-    assert_eq!(dropped.recv_timeout(BRIEFLY), None);
+    assert_eq!(dropped.recv_timeout(BRIEFLY).unwrap(), None);
 }
 
 #[test]
@@ -162,7 +171,7 @@ fn a_disconnected_endpoint_is_not_retried() {
     let mut pull = context.socket::<Pull>();
     pull.bind(&endpoint).unwrap();
     assert!(push.send_timeout("lost", BRIEFLY).is_err(), "no peer left");
-    assert_eq!(pull.recv_timeout(BRIEFLY), None);
+    assert_eq!(pull.recv_timeout(BRIEFLY).unwrap(), None);
 }
 
 #[test]
@@ -192,8 +201,11 @@ fn an_immediate_connection_can_be_disconnected() {
         ..fast_reconnect()
     });
     push.connect(&bound).unwrap();
-    push.send("connected");
-    assert_eq!(pull.recv_timeout(FIVE), Some(Message::from("connected")));
+    push.send("connected").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("connected"))
+    );
     push.disconnect(&bound).unwrap();
     assert!(push.send_timeout("lost", BRIEFLY).is_err(), "no peer left");
 }
@@ -235,8 +247,11 @@ fn a_socket_binds_an_interface_by_name() {
     assert!(bound.tcp_addr().unwrap().ip().is_loopback(), "{bound}");
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
-    push.send("over lo");
-    assert_eq!(pull.recv_timeout(FIVE), Some(Message::from("over lo")));
+    push.send("over lo").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("over lo"))
+    );
 }
 
 #[test]

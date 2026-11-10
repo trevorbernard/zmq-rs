@@ -56,7 +56,7 @@ impl Flcliapi {
     pub fn connect(&mut self, endpoint: &str) {
         let mut message = Message::new("CONNECT");
         message.push(endpoint.to_owned());
-        self.pipe.send(message);
+        self.pipe.send(message).unwrap();
         thread::sleep(Duration::from_millis(100)); // Allow connection to come up
     }
 
@@ -65,8 +65,8 @@ impl Flcliapi {
     pub fn request(&mut self, request: Message) -> Option<Message> {
         let mut message = Message::new("REQUEST");
         message.extend(request);
-        self.pipe.send(message);
-        let (status, reply) = self.pipe.recv().into_parts();
+        self.pipe.send(message).unwrap();
+        let (status, reply) = self.pipe.recv().unwrap().into_parts();
         if *status == *b"FAILED" {
             return None;
         }
@@ -135,7 +135,7 @@ impl Agent {
             }
             let timeout = tickless.saturating_duration_since(Instant::now());
             let [control, reply] =
-                zmq::poll_timeout([self.pipe.readable(), self.router.readable()], timeout)
+                zmq::poll_timeout([self.pipe.readable(), self.router.readable()], timeout)?
                     .unwrap_or_default();
 
             if control {
@@ -150,7 +150,7 @@ impl Agent {
                 && Instant::now() >= expires
             {
                 // Request expired, kill it
-                self.pipe.send("FAILED");
+                self.pipe.send("FAILED")?;
                 self.request = None;
             } else if let Some((request, _)) = &self.request {
                 // Find server to talk to, remove any expired ones
@@ -179,7 +179,7 @@ impl Agent {
 
     /// Processes one message from the frontend: CONNECT or REQUEST.
     fn control_message(&mut self) -> Result<(), zmq::Error> {
-        let (command, rest) = self.pipe.recv().into_parts();
+        let (command, rest) = self.pipe.recv()?.into_parts();
         match command.as_slice() {
             b"CONNECT" => {
                 let Some(endpoint) = rest.first().map(|frame| text(frame)) else {
@@ -207,7 +207,7 @@ impl Agent {
 
     /// Processes one message from a connected server.
     fn router_message(&mut self) {
-        let (identity, reply) = self.router.recv();
+        let (identity, reply) = self.router.recv().unwrap();
 
         // Frame 0 is server that replied
         let endpoint = text(identity.as_bytes());
@@ -225,7 +225,7 @@ impl Agent {
         if self.request.is_some() && *sequence == *self.sequence.to_string().as_bytes() {
             let mut reply = Message::new("OK");
             reply.extend(rest);
-            self.pipe.send(reply);
+            self.pipe.send(reply).unwrap();
             self.request = None;
         }
     }

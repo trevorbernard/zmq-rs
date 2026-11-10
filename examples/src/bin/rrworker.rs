@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     responder.connect("tcp://localhost:5560")?;
 
     loop {
-        let request = responder.recv();
+        let request = responder.recv()?;
         println!("Received request: [{}]", body(request.body()));
         sleep_ms(1000);
         request.reply("World");

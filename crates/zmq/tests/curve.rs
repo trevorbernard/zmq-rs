@@ -45,9 +45,9 @@ fn push_and_pull_over_curve() {
     push.connect(&bound.to_string()).unwrap();
     let big =
         Message::try_from(vec![Frame::from("header"), Frame::from(vec![9; 200_000])]).unwrap();
-    push.send(big.clone());
-    push.send("small");
-    let received = within(FIVE, move || [pull.recv(), pull.recv()]);
+    push.send(big.clone()).unwrap();
+    push.send("small").unwrap();
+    let received = within(FIVE, move || [pull.recv().unwrap(), pull.recv().unwrap()]);
     assert_eq!(received, [big, Message::from("small")]);
 }
 
@@ -70,11 +70,14 @@ fn max_message_size_counts_every_frame_of_a_curve_message() {
         Message::try_from(vec![Frame::from(vec![1; 400]), Frame::from(vec![2; 400])]).unwrap();
     let over_limit =
         Message::try_from(vec![Frame::from(vec![3; 600]), Frame::from(vec![4; 600])]).unwrap();
-    push.send(within_limit.clone());
-    push.send(over_limit);
+    push.send(within_limit.clone()).unwrap();
+    push.send(over_limit).unwrap();
     let received = within(FIVE, move || {
-        let first = pull.recv();
-        (first, pull.recv_timeout(Duration::from_millis(500)))
+        let first = pull.recv().unwrap();
+        (
+            first,
+            pull.recv_timeout(Duration::from_millis(500)).unwrap(),
+        )
     });
     assert_eq!(received, (within_limit, None));
 }
@@ -107,7 +110,7 @@ fn the_authenticator_sees_the_clients_public_key() {
     let mut trusted =
         context.socket_with::<Dealer>(secured(Security::curve_client(client, server_key)));
     trusted.connect(&bound.to_string()).unwrap();
-    trusted.send("let me in");
+    trusted.send("let me in").unwrap();
     let mut stranger = context.socket_with::<Dealer>(secured(Security::curve_client(
         Keypair::generate(),
         server_key,
@@ -117,15 +120,19 @@ fn the_authenticator_sees_the_clients_public_key() {
     let _ = stranger.try_send("me too");
 
     let (from, message, mut router) = within(FIVE, move || {
-        let (from, message) = router.recv();
+        let (from, message) = router.recv().unwrap();
         (from, message, router)
     });
     assert_eq!(message, Message::from("let me in"));
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(router.try_recv(), None, "the stranger never gets through");
+    assert_eq!(
+        router.try_recv().unwrap(),
+        None,
+        "the stranger never gets through"
+    );
     router.send(&from, "welcome").unwrap();
     assert_eq!(
-        within(FIVE, move || trusted.recv()),
+        within(FIVE, move || trusted.recv().unwrap()),
         Message::from("welcome")
     );
 }
@@ -144,9 +151,9 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
         ))
     });
     push.connect(&bound.to_string()).unwrap();
-    push.send("lost");
+    push.send("lost").unwrap();
     thread::sleep(Duration::from_millis(300));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -163,7 +170,7 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
     // A refused client has no pipe left, so `send` could block for good.
     let _ = push.try_send("in the clear");
     thread::sleep(Duration::from_millis(300));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -185,15 +192,17 @@ fn heartbeats_and_subscriptions_travel_boxed() {
     subscriber.subscribe("news");
     subscriber.connect(&bound.to_string()).unwrap();
     let started = std::time::Instant::now();
-    while publisher.send("news: boxed") == 0 {
+    while publisher.send("news: boxed").unwrap() == 0 {
         assert!(started.elapsed() < FIVE, "the subscription never arrived");
         thread::sleep(Duration::from_millis(5));
     }
     // Several heartbeat intervals pass; the connection stays up.
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(publisher.send("sports"), 0);
-    assert_eq!(publisher.send("news: still here"), 1);
-    let received = within(FIVE, move || [subscriber.recv(), subscriber.recv()]);
+    assert_eq!(publisher.send("sports").unwrap(), 0);
+    assert_eq!(publisher.send("news: still here").unwrap(), 1);
+    let received = within(FIVE, move || {
+        [subscriber.recv().unwrap(), subscriber.recv().unwrap()]
+    });
     assert_eq!(
         received,
         [
@@ -216,9 +225,9 @@ fn curve_over_ipc() {
         server_key,
     )));
     push.connect(&bound.to_string()).unwrap();
-    push.send("over a unix socket, encrypted");
+    push.send("over a unix socket, encrypted").unwrap();
     assert_eq!(
-        within(FIVE, move || pull.recv()),
+        within(FIVE, move || pull.recv().unwrap()),
         Message::from("over a unix socket, encrypted")
     );
 }

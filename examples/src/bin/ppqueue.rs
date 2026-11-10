@@ -76,13 +76,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 frontend.readable().when(!workers.0.is_empty()),
             ],
             HEARTBEAT_INTERVAL,
-        )
+        )?
         .unwrap_or_default();
 
         // Handle worker activity on backend
         if from_worker {
             // Any sign of life from worker means it's ready
-            let (identity, message) = backend.recv();
+            let (identity, message) = backend.recv()?;
             workers.ready(Worker::new(identity));
 
             // Validate control message, or return reply to client: a
@@ -100,7 +100,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if from_client {
             // Now get next client request, route to next worker
-            let (client, request) = frontend.recv();
+            let (client, request) = frontend.recv()?;
             let worker = workers.next().ok_or("no worker is free")?;
             let mut message = Message::new(client.as_bytes().to_vec());
             message.extend(request);

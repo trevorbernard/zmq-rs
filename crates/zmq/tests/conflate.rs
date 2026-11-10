@@ -28,10 +28,10 @@ fn a_conflating_pull_keeps_only_the_latest_message() {
     let mut push = context.socket::<Push>();
     push.connect("inproc://latest").unwrap();
     for i in 1..=10 {
-        push.send(i.to_string());
+        push.send(i.to_string()).unwrap();
     }
-    assert_eq!(pull.recv(), Message::from("10"));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.recv().unwrap(), Message::from("10"));
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -45,9 +45,9 @@ fn a_conflating_push_queues_only_the_latest_message() {
     }
     let mut pull = context.socket::<Pull>();
     pull.bind("inproc://later").unwrap();
-    assert_eq!(pull.recv(), Message::from("10"));
+    assert_eq!(pull.recv().unwrap(), Message::from("10"));
     thread::sleep(Duration::from_millis(50));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -59,12 +59,12 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
     for i in 1..=100 {
-        push.send(i.to_string());
+        push.send(i.to_string()).unwrap();
     }
     // Time for all of them to arrive, each replacing the one before.
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(pull.try_recv(), Some(Message::from("100")));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), Some(Message::from("100")));
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -76,11 +76,11 @@ fn a_conflating_pull_that_connects_keeps_only_the_latest_message() {
     pull.set_conflate(true);
     pull.connect(&bound.to_string()).unwrap();
     for i in 1..=100 {
-        push.send(i.to_string());
+        push.send(i.to_string()).unwrap();
     }
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(pull.try_recv(), Some(Message::from("100")));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), Some(Message::from("100")));
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -92,10 +92,10 @@ fn conflating_can_be_turned_off_again() {
     pull.bind("inproc://every").unwrap();
     let mut push = context.socket::<Push>();
     push.connect("inproc://every").unwrap();
-    push.send("1");
-    push.send("2");
-    assert_eq!(pull.recv(), Message::from("1"));
-    assert_eq!(pull.recv(), Message::from("2"));
+    push.send("1").unwrap();
+    push.send("2").unwrap();
+    assert_eq!(pull.recv().unwrap(), Message::from("1"));
+    assert_eq!(pull.recv().unwrap(), Message::from("2"));
 }
 
 #[test]
@@ -109,12 +109,16 @@ fn conflating_never_loses_a_subscription() {
     subscriber.subscribe("b");
     subscriber.connect("inproc://topics").unwrap();
     let publisher = within(FIVE, move || {
-        while publisher.send("b") == 0 {
+        while publisher.send("b").unwrap() == 0 {
             thread::yield_now();
         }
         publisher
     });
     let mut publisher = publisher;
-    assert_eq!(publisher.send("a"), 1, "both subscriptions arrived");
-    assert_eq!(subscriber.recv(), Message::from("a"));
+    assert_eq!(
+        publisher.send("a").unwrap(),
+        1,
+        "both subscriptions arrived"
+    );
+    assert_eq!(subscriber.recv().unwrap(), Message::from("a"));
 }

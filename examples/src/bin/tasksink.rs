@@ -11,11 +11,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     receiver.bind("tcp://*:5558")?;
 
     // Wait for start of batch
-    receiver.recv();
+    receiver.recv()?;
     let start = Instant::now();
 
     for task_nbr in 0..100 {
-        receiver.recv();
+        receiver.recv()?;
         print!("{}", if task_nbr % 10 == 0 { ":" } else { "." });
         io::stdout().flush()?;
     }

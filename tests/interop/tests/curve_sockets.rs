@@ -46,11 +46,11 @@ fn our_curve_dealer_talks_to_a_libzmq_curve_router() {
         ..SocketOptions::default()
     });
     dealer.connect(&format!("tcp://{addr}")).unwrap();
-    dealer.send("hello libzmq");
+    dealer.send("hello libzmq").unwrap();
     assert_eq!(router.recv().unwrap(), [&b"ours"[..], b"hello libzmq"]);
     router.send(&[b"ours", b"hello rust"]).unwrap();
     assert_eq!(
-        within(FIVE, move || dealer.recv()),
+        within(FIVE, move || dealer.recv().unwrap()),
         Message::from("hello rust")
     );
 }
@@ -85,7 +85,7 @@ fn a_libzmq_curve_dealer_is_authenticated_by_our_router() {
     dealer.connect(bound);
     dealer.send(&[b"knock knock"]).unwrap();
     let (from, message, mut router) = within(FIVE, move || {
-        let (from, message) = router.recv();
+        let (from, message) = router.recv().unwrap();
         (from, message, router)
     });
     assert_eq!(message, Message::from("knock knock"));
@@ -112,14 +112,14 @@ fn a_libzmq_curve_sub_subscribes_through_the_box() {
     subscriber.subscribe(b"news");
     subscriber.connect(bound);
     let started = Instant::now();
-    while publisher.send("news: encrypted") == 0 {
+    while publisher.send("news: encrypted").unwrap() == 0 {
         assert!(
             started.elapsed() < FIVE,
             "the boxed SUBSCRIBE never arrived"
         );
         thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(publisher.send("sports"), 0);
+    assert_eq!(publisher.send("sports").unwrap(), 0);
     assert_eq!(subscriber.recv().unwrap(), [b"news: encrypted"]);
 }
 
@@ -139,7 +139,7 @@ fn libzmq_answers_our_boxed_pings() {
         ..SocketOptions::default()
     });
     push.connect(&format!("tcp://{addr}")).unwrap();
-    push.send("first");
+    push.send("first").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"first"]);
     // Well past the heartbeat timeout: only boxed PONGs keep us connected.
     thread::sleep(Duration::from_millis(300));
@@ -163,7 +163,7 @@ fn libzmq_refuses_our_client_with_the_wrong_server_key() {
         ))
     });
     push.connect(&format!("tcp://{addr}")).unwrap();
-    push.send("never");
+    push.send("never").unwrap();
     assert!(pull.recv().is_err());
 }
 

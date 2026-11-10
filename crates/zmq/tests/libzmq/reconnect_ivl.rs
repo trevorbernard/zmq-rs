@@ -18,9 +18,9 @@ const BRIEFLY: Duration = Duration::from_millis(250);
 /// neither side receives anything.
 fn expect_bounce_fail(server: &mut Socket<Pair>, client: &mut Socket<Pair>) {
     let _ = client.send_timeout(bounce_content(), BRIEFLY);
-    assert_eq!(server.recv_timeout(BRIEFLY), None);
+    assert_eq!(server.recv_timeout(BRIEFLY).unwrap(), None);
     let _ = server.send_timeout(bounce_content(), BRIEFLY);
-    assert_eq!(client.recv_timeout(BRIEFLY), None);
+    assert_eq!(client.recv_timeout(BRIEFLY).unwrap(), None);
 }
 
 fn reconnect_ivl_against_pair_socket(context: &Context, server: &mut Socket<Pair>, endpoint: &str) {

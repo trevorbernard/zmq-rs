@@ -103,10 +103,15 @@ signal again for data it has already reported.
   once. A lingering session with nothing left queued and no established
   connection ends at once, as libzmq's does. Dropping only the receiver
   discards incoming messages but keeps the connection sending.
-- `Context::shutdown(timeout)` closes listeners and every session, lets each
-  deliver its queue within its linger and the timeout, then joins the I/O
-  threads. Connections still delivering or still disconnected at the
-  deadline are reported as abandoned.
+- `Context::shutdown(timeout)` first marks the context terminated and wakes
+  every socket waiting on it, as libzmq's `zmq_ctx_shutdown`: each socket
+  holds a waker slot in the context, and every send, receive and poll
+  checks the flag first and fails with `Terminated` (`ETERM`). It then
+  closes listeners and every session, lets each deliver its queue within
+  its linger and the timeout, then joins the I/O threads. Connections still
+  delivering or still disconnected at the deadline are reported as
+  abandoned. Unlike `zmq_ctx_term`, it does not wait for the sockets to be
+  dropped.
 - Dropping the last `Context` clone, which every socket holds, shuts down
   with no deadline: as libzmq's `zmq_ctx_term`, it blocks until each
   connection has delivered its queue or its linger has run out, so with the

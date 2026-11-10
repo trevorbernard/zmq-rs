@@ -57,14 +57,14 @@ impl MdClient {
             log(&format!("I: send request to '{service}' service:"));
             dump(&request);
         }
-        self.client.send(request);
+        self.client.send(request).unwrap();
     }
 
     /// The next reply, or `None` if none came in time. Does not attempt to
     /// recover from a broker failure, which is not possible without storing
     /// all unanswered requests and resending them all.
     pub fn recv(&mut self) -> Option<Message> {
-        let Some(reply) = self.client.recv_timeout(self.timeout) else {
+        let Some(reply) = self.client.recv_timeout(self.timeout).unwrap() else {
             if self.verbose {
                 log("W: permanent error, abandoning request");
             }

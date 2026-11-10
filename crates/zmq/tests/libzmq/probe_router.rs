@@ -26,7 +26,7 @@ fn probe_router_router() {
 
     // The probe: routing id X and an empty message.
     let (from, probe, mut server) = within(FIVE, move || {
-        let (from, probe) = server.recv();
+        let (from, probe) = server.recv().unwrap();
         (from, probe, server)
     });
     assert_eq!(from.as_bytes(), b"X");
@@ -36,7 +36,7 @@ fn probe_router_router() {
 
     // The server's routing id is generated, as it set none: five octets,
     // as libzmq generates them.
-    let (server_id, message) = within(FIVE, move || client.recv());
+    let (server_id, message) = within(FIVE, move || client.recv().unwrap());
     assert_eq!(server_id.as_bytes().len(), 5);
     assert_eq!(message, Message::from("Hello"));
 }
@@ -52,12 +52,15 @@ fn probe_router_dealer() {
     client.connect(&endpoint).unwrap();
 
     let (from, probe, mut server) = within(FIVE, move || {
-        let (from, probe) = server.recv();
+        let (from, probe) = server.recv().unwrap();
         (from, probe, server)
     });
     assert_eq!(from, RoutingId::new("X").unwrap());
     assert_eq!(probe, Message::from(""));
 
     server.send(&from, "Hello").unwrap();
-    assert_eq!(within(FIVE, move || client.recv()), Message::from("Hello"));
+    assert_eq!(
+        within(FIVE, move || client.recv().unwrap()),
+        Message::from("Hello")
+    );
 }

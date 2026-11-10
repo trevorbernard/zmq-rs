@@ -75,7 +75,7 @@ impl MdWorker {
         self.expect_reply = true;
 
         loop {
-            if let Some(msg) = self.worker.recv_timeout(self.heartbeat) {
+            if let Some(msg) = self.worker.recv_timeout(self.heartbeat).unwrap() {
                 if self.verbose {
                     log("I: received message from broker:");
                     dump(&msg);
@@ -133,7 +133,7 @@ impl MdWorker {
             log(&format!("I: sending {} to broker", command.name()));
             dump(&msg);
         }
-        self.worker.send(msg);
+        self.worker.send(msg).unwrap();
     }
 
     fn reconnect_to_broker(&mut self) {

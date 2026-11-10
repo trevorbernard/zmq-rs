@@ -47,26 +47,29 @@ impl CloneClient {
     /// before connecting to a server, as the subtree is the first thing
     /// sent to it.
     pub fn subtree(&mut self, subtree: &str) {
-        self.pipe.send(command(&["SUBTREE", subtree]));
+        self.pipe.send(command(&["SUBTREE", subtree])).unwrap();
     }
 
     /// Connects to a new server endpoint, `address` being
     /// `tcp://host` and `service` its port. We can connect to at most two
     /// servers.
     pub fn connect(&mut self, address: &str, service: &str) {
-        self.pipe.send(command(&["CONNECT", address, service]));
+        self.pipe
+            .send(command(&["CONNECT", address, service]))
+            .unwrap();
     }
 
     /// Sets a new value in the shared map, for `ttl` seconds if not zero.
     pub fn set(&mut self, key: &str, value: &str, ttl: u32) {
         self.pipe
-            .send(command(&["SET", key, value, &ttl.to_string()]));
+            .send(command(&["SET", key, value, &ttl.to_string()]))
+            .unwrap();
     }
 
     /// Looks up `key` in the distributed map; `""` if it has no value.
     pub fn get(&mut self, key: &str) -> String {
-        self.pipe.send(command(&["GET", key]));
-        text(self.pipe.recv().split_first().0)
+        self.pipe.send(command(&["GET", key])).unwrap();
+        text(self.pipe.recv().unwrap().split_first().0)
     }
 }
 
@@ -176,7 +179,7 @@ impl Agent {
                 if server.requests < 2 {
                     let mut request = Message::new("ICANHAZ?");
                     request.push(self.subtree.clone());
-                    server.snapshot.send(request);
+                    server.snapshot.send(request).unwrap();
                     server.requests += 1;
                 }
                 server.expiry = Instant::now() + SERVER_TTL;
@@ -189,7 +192,7 @@ impl Agent {
             // while active from subscriber, where the server gives HUGZ
             let event = match self.servers.get_mut(self.cur_server) {
                 None => {
-                    zmq::poll([self.pipe.readable()]);
+                    zmq::poll([self.pipe.readable()]).unwrap();
                     Event::Control
                 }
                 Some(server) => {
@@ -201,11 +204,13 @@ impl Agent {
                             server.subscriber.readable().when(!syncing),
                         ],
                         server.expiry.saturating_duration_since(Instant::now()),
-                    ) {
+                    )
+                    .unwrap()
+                    {
                         None => Event::Silence,
                         Some([true, _, _]) => Event::Control,
-                        Some([_, true, _]) => Event::Server(server.snapshot.recv()),
-                        Some(_) => Event::Server(server.subscriber.recv()),
+                        Some([_, true, _]) => Event::Server(server.snapshot.recv().unwrap()),
+                        Some(_) => Event::Server(server.subscriber.recv().unwrap()),
                     }
                 }
             };
@@ -230,7 +235,7 @@ impl Agent {
     // Here we handle the different control messages from the frontend;
     // SUBTREE, CONNECT, SET, and GET
     fn control_message(&mut self) {
-        let message = self.pipe.recv();
+        let message = self.pipe.recv().unwrap();
         let frames: Vec<String> = message.iter().map(|frame| text(frame)).collect();
         match frames.iter().map(String::as_str).collect::<Vec<_>>()[..] {
             ["SUBTREE", subtree] => self.subtree = subtree.to_owned(),
@@ -260,7 +265,7 @@ impl Agent {
                 kvmsg.set_uuid();
                 kvmsg.set_body(value.to_owned());
                 kvmsg.set_prop("ttl", ttl);
-                self.publisher.send(kvmsg.to_message());
+                self.publisher.send(kvmsg.to_message()).unwrap();
                 kvmsg.store(&mut self.kvmap);
             }
             ["GET", key] => {
@@ -269,7 +274,7 @@ impl Agent {
                     .get(key)
                     .and_then(KvMsg::body)
                     .unwrap_or_default();
-                self.pipe.send(value.to_vec());
+                self.pipe.send(value.to_vec()).unwrap();
             }
             _ => log("E: bad control message"),
         }

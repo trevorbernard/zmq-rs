@@ -45,7 +45,7 @@ fn send_until_blocked(socket: &mut Socket<Push>) -> usize {
 
 fn receive_all(socket: &mut Socket<Pull>) -> usize {
     let mut recv_count = 0;
-    while socket.try_recv().is_some() {
+    while socket.try_recv().unwrap().is_some() {
         recv_count += 1;
     }
     recv_count
@@ -93,8 +93,8 @@ fn count_msg(send_hwm: usize, recv_hwm: usize, test_type: TestType) -> usize {
     assert_eq!(receive_all(&mut bind_socket), send_count);
 
     // Now it should be possible to send one more
-    connect_socket.send("");
-    assert!(bind_socket.recv_timeout(FIVE).is_some());
+    connect_socket.send("").unwrap();
+    assert!(bind_socket.recv_timeout(FIVE).unwrap().is_some());
     send_count
 }
 

@@ -14,9 +14,9 @@ fn bind_before_connect() {
     bound.bind("inproc://bbc").unwrap();
     let mut connected = context.socket::<Pair>();
     connected.connect("inproc://bbc").unwrap();
-    connected.send("foobar");
+    connected.send("foobar").unwrap();
     within(FIVE, move || {
-        assert_eq!(bound.recv(), Message::from("foobar"))
+        assert_eq!(bound.recv().unwrap(), Message::from("foobar"))
     });
 }
 
@@ -25,11 +25,11 @@ fn connect_before_bind() {
     let context = Context::new().unwrap();
     let mut connected = context.socket::<Pair>();
     connected.connect("inproc://cbb").unwrap();
-    connected.send("foobar");
+    connected.send("foobar").unwrap();
     let mut bound = context.socket::<Pair>();
     bound.bind("inproc://cbb").unwrap();
     within(FIVE, move || {
-        assert_eq!(bound.recv(), Message::from("foobar"))
+        assert_eq!(bound.recv().unwrap(), Message::from("foobar"))
     });
 }
 
@@ -39,14 +39,14 @@ fn connect_before_bind_pub_sub() {
     let mut publisher = context.socket::<Pub>();
     publisher.connect("inproc://cbbps").unwrap();
     // Dropped: nobody has subscribed yet.
-    publisher.send("before");
+    publisher.send("before").unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("");
     subscriber.bind("inproc://cbbps").unwrap();
     settle();
-    publisher.send("after");
+    publisher.send("after").unwrap();
     within(FIVE, move || {
-        assert_eq!(subscriber.recv(), Message::from("after"));
+        assert_eq!(subscriber.recv().unwrap(), Message::from("after"));
     });
 }
 
@@ -68,7 +68,7 @@ fn multiple_connects() {
         .map(|_| {
             let mut push = context.socket::<Push>();
             push.connect("inproc://multiple").unwrap();
-            push.send("foobar");
+            push.send("foobar").unwrap();
             push
         })
         .collect();
@@ -76,7 +76,7 @@ fn multiple_connects() {
     pull.bind("inproc://multiple").unwrap();
     within(FIVE, move || {
         for _ in &pushes {
-            assert_eq!(pull.recv(), Message::from("foobar"));
+            assert_eq!(pull.recv().unwrap(), Message::from("foobar"));
         }
     });
 }
@@ -94,7 +94,7 @@ fn multiple_threads() {
             thread::spawn(move || {
                 let mut push = context.socket::<Push>();
                 push.connect("inproc://sink").unwrap();
-                push.send("foobar");
+                push.send("foobar").unwrap();
             })
         })
         .collect();
@@ -102,7 +102,7 @@ fn multiple_threads() {
     pull.bind("inproc://sink").unwrap();
     within(FIVE, move || {
         for _ in 0..30 {
-            assert_eq!(pull.recv(), Message::from("foobar"));
+            assert_eq!(pull.recv().unwrap(), Message::from("foobar"));
         }
     });
     for pusher in pushers {
@@ -121,7 +121,7 @@ fn simultaneous_connect_bind_threads() {
                 thread::spawn(move || {
                     let mut connected = context.socket::<Pair>();
                     connected.connect(&endpoint).unwrap();
-                    assert_eq!(connected.recv(), Message::from("foobar"));
+                    assert_eq!(connected.recv().unwrap(), Message::from("foobar"));
                 })
             };
             let binding = {
@@ -129,7 +129,7 @@ fn simultaneous_connect_bind_threads() {
                 thread::spawn(move || {
                     let mut bound = context.socket::<Pair>();
                     bound.bind(&endpoint).unwrap();
-                    bound.send("foobar");
+                    bound.send("foobar").unwrap();
                 })
             };
             [connecting, binding]
@@ -151,9 +151,9 @@ fn routing_id() {
     router.bind("inproc://routing_id").unwrap();
     let mut message = Message::new("A");
     message.push("B");
-    dealer.send(message.clone());
+    dealer.send(message.clone()).unwrap();
     // The routing id comes first, then both parts of the body.
-    let (_, body) = within(FIVE, move || router.recv());
+    let (_, body) = within(FIVE, move || router.recv().unwrap());
     assert_eq!(body, message);
 }
 
@@ -174,9 +174,9 @@ fn unbind() {
     second.bind("inproc://unbind").unwrap();
     let mut connected = context.socket::<Pair>();
     connected.connect("inproc://unbind").unwrap();
-    connected.send("foobar");
+    connected.send("foobar").unwrap();
     within(FIVE, move || {
-        assert_eq!(second.recv(), Message::from("foobar"))
+        assert_eq!(second.recv().unwrap(), Message::from("foobar"))
     });
 }
 

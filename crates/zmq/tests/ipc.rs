@@ -53,9 +53,9 @@ fn push_and_pull_over_ipc() {
     assert_eq!(bound.to_string(), format!("ipc://{}", path.display()));
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
-    push.send("over a unix socket");
+    push.send("over a unix socket").unwrap();
     assert_eq!(
-        within(FIVE, move || pull.recv()),
+        within(FIVE, move || pull.recv().unwrap()),
         Message::from("over a unix socket")
     );
 }
@@ -86,9 +86,9 @@ fn a_wildcard_binds_a_fresh_path() {
     assert!(path.exists(), "{path:?}");
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
-    push.send("found it");
+    push.send("found it").unwrap();
     let pull = within(FIVE, move || {
-        assert_eq!(pull.recv(), Message::from("found it"));
+        assert_eq!(pull.recv().unwrap(), Message::from("found it"));
         pull
     });
     drop(pull);
@@ -127,8 +127,11 @@ fn a_stale_socket_file_is_replaced() {
     pull.bind(&format!("ipc://{}", path.display())).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&format!("ipc://{}", path.display())).unwrap();
-    push.send("fresh");
-    assert_eq!(within(FIVE, move || pull.recv()), Message::from("fresh"));
+    push.send("fresh").unwrap();
+    assert_eq!(
+        within(FIVE, move || pull.recv().unwrap()),
+        Message::from("fresh")
+    );
 }
 
 #[test]
@@ -150,11 +153,14 @@ fn connecting_before_binding_retries_until_it_works() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&format!("ipc://{}", path.display())).unwrap();
-    push.send("queued");
+    push.send("queued").unwrap();
     thread::sleep(Duration::from_millis(50));
     let mut pull = context.socket::<Pull>();
     pull.bind(&format!("ipc://{}", path.display())).unwrap();
-    assert_eq!(within(FIVE, move || pull.recv()), Message::from("queued"));
+    assert_eq!(
+        within(FIVE, move || pull.recv().unwrap()),
+        Message::from("queued")
+    );
 }
 
 #[test]
@@ -177,9 +183,9 @@ fn a_connection_comes_back_when_the_binder_does() {
     let mut push = context.socket::<Push>();
     let mut events = push.monitor();
     push.connect(&endpoint).unwrap();
-    push.send("before");
+    push.send("before").unwrap();
     let pull = within(FIVE, move || {
-        assert_eq!(pull.recv(), Message::from("before"));
+        assert_eq!(pull.recv().unwrap(), Message::from("before"));
         pull
     });
     drop(pull);
@@ -188,8 +194,11 @@ fn a_connection_comes_back_when_the_binder_does() {
     // What is sent before the push reconnects goes to the closing
     // connection and is lost, as in libzmq.
     await_handshakes(&mut events, 2);
-    push.send("after");
-    assert_eq!(within(FIVE, move || pull.recv()), Message::from("after"));
+    push.send("after").unwrap();
+    assert_eq!(
+        within(FIVE, move || pull.recv().unwrap()),
+        Message::from("after")
+    );
 }
 
 #[test]
@@ -226,9 +235,9 @@ mod abstract_names {
         assert_eq!(bound.to_string(), format!("ipc://@{name}"));
         let mut push = context.socket::<Push>();
         push.connect(&bound.to_string()).unwrap();
-        push.send("no file at all");
+        push.send("no file at all").unwrap();
         assert_eq!(
-            within(FIVE, move || pull.recv()),
+            within(FIVE, move || pull.recv().unwrap()),
             Message::from("no file at all")
         );
         assert!(!std::path::Path::new(&format!("@{name}")).exists());
@@ -283,11 +292,14 @@ mod abstract_names {
         let context = Context::new().unwrap();
         let mut push = context.socket::<Push>();
         push.connect(&endpoint).unwrap();
-        push.send("queued");
+        push.send("queued").unwrap();
         thread::sleep(Duration::from_millis(50));
         let mut pull = context.socket::<Pull>();
         pull.bind(&endpoint).unwrap();
-        assert_eq!(within(FIVE, move || pull.recv()), Message::from("queued"));
+        assert_eq!(
+            within(FIVE, move || pull.recv().unwrap()),
+            Message::from("queued")
+        );
     }
 
     #[test]
@@ -299,9 +311,9 @@ mod abstract_names {
         let mut push = context.socket::<Push>();
         let mut events = push.monitor();
         push.connect(&endpoint).unwrap();
-        push.send("before");
+        push.send("before").unwrap();
         let pull = within(FIVE, move || {
-            assert_eq!(pull.recv(), Message::from("before"));
+            assert_eq!(pull.recv().unwrap(), Message::from("before"));
             pull
         });
         drop(pull);
@@ -311,7 +323,10 @@ mod abstract_names {
         // What is sent before the push reconnects goes to the closing
         // connection and is lost, as in libzmq.
         super::await_handshakes(&mut events, 2);
-        push.send("after");
-        assert_eq!(within(FIVE, move || pull.recv()), Message::from("after"));
+        push.send("after").unwrap();
+        assert_eq!(
+            within(FIVE, move || pull.recv().unwrap()),
+            Message::from("after")
+        );
     }
 }

@@ -12,8 +12,8 @@ fn pass_one(
 ) -> (zmq::Socket<Push>, zmq::Socket<Pull>) {
     within(FIVE, move || {
         let (mut push, mut pull) = (push, pull);
-        push.send("ABC");
-        assert_eq!(pull.recv(), Message::from("ABC"));
+        push.send("ABC").unwrap();
+        assert_eq!(pull.recv().unwrap(), Message::from("ABC"));
         (push, pull)
     })
 }

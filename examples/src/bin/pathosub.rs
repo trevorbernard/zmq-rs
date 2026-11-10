@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     subscriber.subscribe(&subscription);
 
     loop {
-        let message = subscriber.recv();
+        let message = subscriber.recv()?;
         let (topic, data) = message.split_first();
         assert_eq!(text(topic), subscription);
         println!(

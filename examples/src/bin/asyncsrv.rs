@@ -30,12 +30,12 @@ fn client_task(context: Context) -> TaskResult {
     loop {
         // Tick once per second, pulling in arriving messages
         for _centitick in 0..100 {
-            if let Some(reply) = client.recv_timeout(Duration::from_millis(10)) {
+            if let Some(reply) = client.recv_timeout(Duration::from_millis(10))? {
                 println!("{name} {}", body(&reply));
             }
         }
         request_nbr += 1;
-        client.send(format!("request #{request_nbr}"));
+        client.send(format!("request #{request_nbr}"))?;
     }
 }
 
@@ -67,13 +67,13 @@ fn server_worker(context: Context) -> TaskResult {
 
     loop {
         // The DEALER socket gives us the reply envelope and message
-        let request = worker.recv();
+        let request = worker.recv()?;
 
         // Send 0..4 replies back
         for _ in 0..randof(5) {
             // Sleep for some fraction of a second
             sleep_ms(randof(1000) + 1);
-            worker.send(request.clone());
+            worker.send(request.clone())?;
         }
     }
 }

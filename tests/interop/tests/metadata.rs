@@ -20,7 +20,7 @@ fn we_read_what_a_libzmq_peer_announces() {
     theirs.connect(endpoint);
     theirs.send(&[b"hi"]).unwrap();
 
-    let message = ours.recv_timeout(FIVE).expect("their message");
+    let message = ours.recv_timeout(FIVE).unwrap().expect("their message");
     assert_eq!(message.property("Socket-Type"), Some(b"DEALER".as_slice()));
     assert_eq!(message.property("Identity"), Some(b"theirs".as_slice()));
     assert_eq!(message.property("X-Hello"), Some(b"World".as_slice()));
@@ -70,7 +70,10 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     });
     ours.connect(&format!("tcp://{addr}")).unwrap();
     first.send(&[b"one"]).unwrap();
-    let message = ours.recv_timeout(FIVE).expect("from the first run");
+    let message = ours
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("from the first run");
     assert_eq!(message.property("X-Run"), Some(b"1".as_slice()));
     drop(first);
 
@@ -78,7 +81,10 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     second.set_metadata("X-Run", "2");
     second.bind(&format!("tcp://{addr}"));
     second.send(&[b"two"]).unwrap();
-    let message = ours.recv_timeout(FIVE).expect("from the second run");
+    let message = ours
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("from the second run");
     assert_eq!(message, zmq::Message::from("two"));
     assert_eq!(message.property("X-Run"), Some(b"2".as_slice()));
 }

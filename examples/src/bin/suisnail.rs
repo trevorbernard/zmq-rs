@@ -24,7 +24,7 @@ fn subscriber(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error
     subscriber.connect("tcp://localhost:5556")?;
 
     loop {
-        let string = body(&subscriber.recv());
+        let string = body(&subscriber.recv()?);
         println!("{string}");
         let clock: u128 = string.parse().expect("a timestamp");
 
@@ -36,7 +36,7 @@ fn subscriber(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error
         // Work for 1 msec plus some random additional time
         sleep_ms(1 + randof(2));
     }
-    pipe.send("gone and died");
+    pipe.send("gone and died")?;
     Ok(())
 }
 
@@ -46,8 +46,8 @@ fn publisher(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error>
     publisher.bind("tcp://*:5556")?;
 
     loop {
-        publisher.send(now_ms().to_string());
-        if pipe.try_recv().is_some() {
+        publisher.send(now_ms().to_string())?;
+        if pipe.try_recv()?.is_some() {
             break;
         }
         sleep_ms(1);
@@ -78,8 +78,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || subscriber(context, child)
     });
 
-    subpipe.recv();
-    pubpipe.send("break");
+    subpipe.recv()?;
+    pubpipe.send("break")?;
     publisher.join().expect("publisher panicked")?;
     Ok(())
 }

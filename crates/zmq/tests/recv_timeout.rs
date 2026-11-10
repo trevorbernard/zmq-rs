@@ -77,8 +77,8 @@ fn pair() {
     right.connect("inproc://pair").unwrap();
     check(
         left,
-        move || right.send("x"),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || right.send("x").unwrap(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -91,8 +91,8 @@ fn pull() {
     push.connect("inproc://pull").unwrap();
     check(
         pull,
-        move || push.send("x"),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || push.send("x").unwrap(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -106,8 +106,8 @@ fn sub() {
     sub.connect("inproc://sub").unwrap();
     check(
         sub,
-        move || assert_eq!(publisher.send("x"), 1),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || assert_eq!(publisher.send("x").unwrap(), 1),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -121,8 +121,8 @@ fn xsub() {
     xsub.connect("inproc://xsub").unwrap();
     check(
         xsub,
-        move || assert_eq!(publisher.send("x"), 1),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || assert_eq!(publisher.send("x").unwrap(), 1),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -140,7 +140,7 @@ fn xpub() {
             topics += 1;
             sub.subscribe(format!("topic {topics}"));
         },
-        |s, t| s.recv_timeout(t).is_some(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -158,7 +158,7 @@ fn manual_xpub() {
             topics += 1;
             sub.subscribe(format!("topic {topics}"));
         },
-        |s, t| s.recv_timeout(t).is_some(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -171,8 +171,8 @@ fn dealer() {
     other.connect("inproc://dealer").unwrap();
     check(
         dealer,
-        move || other.send("x"),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || other.send("x").unwrap(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -185,8 +185,8 @@ fn router() {
     dealer.connect("inproc://router").unwrap();
     check(
         router,
-        move || dealer.send("x"),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || dealer.send("x").unwrap(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -200,8 +200,8 @@ fn rep() {
     let request = || Message::try_from(vec![Frame::new(), Frame::from("x")]).unwrap();
     check(
         rep,
-        move || dealer.send(request()),
-        |s, t| s.recv_timeout(t).is_some(),
+        move || dealer.send(request()).unwrap(),
+        |s, t| s.recv_timeout(t).unwrap().is_some(),
     );
 }
 
@@ -223,10 +223,10 @@ fn a_timed_out_request_leaves_the_socket_usable_and_its_reply_unseen() {
     let mut rep = context.socket::<Rep>();
     rep.bind("inproc://slow").unwrap();
     let server = thread::spawn(move || {
-        let first = rep.recv();
+        let first = rep.recv().unwrap();
         thread::sleep(SHORT * 3);
         first.reply("late");
-        let second = rep.recv();
+        let second = rep.recv().unwrap();
         let body = String::from_utf8_lossy(second.body().get(0).unwrap()).into_owned();
         second.reply(format!("for {body}"));
     });
@@ -249,7 +249,7 @@ fn a_peer_closing_before_replying_still_fails_the_request() {
     let mut rep = context.socket::<Rep>();
     rep.bind("inproc://closing").unwrap();
     let server = thread::spawn(move || {
-        let request = rep.recv();
+        let request = rep.recv().unwrap();
         drop(request);
         drop(rep);
     });
@@ -302,8 +302,8 @@ mod draft {
         client.connect("inproc://server").unwrap();
         check(
             server,
-            move || client.send("x"),
-            |s, t| s.recv_timeout(t).is_some(),
+            move || client.send("x").unwrap(),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 
@@ -314,12 +314,15 @@ mod draft {
         server.bind("inproc://client").unwrap();
         let mut client = context.socket::<Client>();
         client.connect("inproc://client").unwrap();
-        client.send("hello");
-        let (id, _) = server.recv_timeout(FIVE).expect("the client said hello");
+        client.send("hello").unwrap();
+        let (id, _) = server
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("the client said hello");
         check(
             client,
             move || server.send(id, "x").unwrap(),
-            |s, t| s.recv_timeout(t).is_some(),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 
@@ -332,8 +335,8 @@ mod draft {
         scatter.connect("inproc://gather").unwrap();
         check(
             gather,
-            move || scatter.send("x"),
-            |s, t| s.recv_timeout(t).is_some(),
+            move || scatter.send("x").unwrap(),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 
@@ -346,8 +349,8 @@ mod draft {
         right.connect("inproc://channel").unwrap();
         check(
             left,
-            move || right.send("x"),
-            |s, t| s.recv_timeout(t).is_some(),
+            move || right.send("x").unwrap(),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 
@@ -361,7 +364,7 @@ mod draft {
         check(
             peer,
             move || other.send(id, "x").unwrap(),
-            |s, t| s.recv_timeout(t).is_some(),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 
@@ -376,8 +379,8 @@ mod draft {
         assert!(dish.join(&news));
         check(
             dish,
-            move || assert_eq!(radio.send(&news, "x"), 1),
-            |s, t| s.recv_timeout(t).is_some(),
+            move || assert_eq!(radio.send(&news, "x").unwrap(), 1),
+            |s, t| s.recv_timeout(t).unwrap().is_some(),
         );
     }
 }

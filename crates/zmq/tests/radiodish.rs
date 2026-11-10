@@ -36,11 +36,19 @@ fn a_dish_receives_only_the_groups_it_joined() {
     let mut dish = context.socket::<Dish>();
     dish.connect("inproc://radio").unwrap();
     assert!(dish.join(&group("news")));
-    assert_eq!(radio.send(&group("newsflash"), "groups match exactly"), 0);
-    assert_eq!(radio.send(&group("sports"), "not joined"), 0);
-    assert_eq!(radio.send(&group("news"), "rain"), 1);
-    assert_eq!(dish.try_recv(), Some((group("news"), Frame::from("rain"))));
-    assert_eq!(dish.try_recv(), None);
+    assert_eq!(
+        radio
+            .send(&group("newsflash"), "groups match exactly")
+            .unwrap(),
+        0
+    );
+    assert_eq!(radio.send(&group("sports"), "not joined").unwrap(), 0);
+    assert_eq!(radio.send(&group("news"), "rain").unwrap(), 1);
+    assert_eq!(
+        dish.try_recv().unwrap(),
+        Some((group("news"), Frame::from("rain")))
+    );
+    assert_eq!(dish.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -61,10 +69,10 @@ fn leaving_stops_delivery_even_of_queued_messages() {
     let mut dish = context.socket::<Dish>();
     dish.connect("inproc://leaving").unwrap();
     dish.join(&group("a"));
-    assert_eq!(radio.send(&group("a"), "queued"), 1);
+    assert_eq!(radio.send(&group("a"), "queued").unwrap(), 1);
     dish.leave(&group("a"));
-    assert_eq!(dish.try_recv(), None, "filtered on arrival");
-    assert_eq!(radio.send(&group("a"), "after"), 0);
+    assert_eq!(dish.try_recv().unwrap(), None, "filtered on arrival");
+    assert_eq!(radio.send(&group("a"), "after").unwrap(), 0);
 }
 
 #[test]
@@ -81,15 +89,15 @@ fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
         })
         .collect();
     let started = Instant::now();
-    while radio.send(&group("all"), "warm up") < 3 {
+    while radio.send(&group("all"), "warm up").unwrap() < 3 {
         assert!(started.elapsed() < FIVE, "the joins never arrived");
         thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(radio.send(&group("all"), "to everyone"), 3);
+    assert_eq!(radio.send(&group("all"), "to everyone").unwrap(), 3);
     for mut dish in dishes {
         let received = within(FIVE, move || {
             loop {
-                let (group, body) = dish.recv();
+                let (group, body) = dish.recv().unwrap();
                 if body == Frame::from("to everyone") {
                     return group;
                 }
@@ -115,7 +123,7 @@ fn a_radio_drops_for_a_slow_dish_instead_of_blocking() {
     dish.join(&group("g"));
     dish.connect("inproc://slow-dish").unwrap();
     let sent: Vec<usize> = (0..4)
-        .map(|i| radio.send(&group("g"), format!("{i}")))
+        .map(|i| radio.send(&group("g"), format!("{i}")).unwrap())
         .collect();
     assert_eq!(sent, [1, 1, 0, 0]);
 }
@@ -132,8 +140,8 @@ fn joins_are_never_dropped_however_many() {
     dish.connect("inproc://many-groups").unwrap();
     for i in 0..3000 {
         let name = Group::new(format!("group {i}")).unwrap();
-        assert_eq!(radio.send(&name, "x"), 1, "group {i}");
-        assert!(dish.try_recv().is_some());
+        assert_eq!(radio.send(&name, "x").unwrap(), 1, "group {i}");
+        assert!(dish.try_recv().unwrap().is_some());
     }
 }
 
@@ -145,8 +153,11 @@ fn leaving_drops_a_message_a_poll_already_took() {
     let mut dish = context.socket::<Dish>();
     dish.connect("inproc://radio-held").unwrap();
     assert!(dish.join(&group("news")));
-    assert_eq!(radio.send(&group("news"), "rain"), 1);
-    assert_eq!(zmq::poll_timeout([dish.readable()], FIVE), Some([true]));
+    assert_eq!(radio.send(&group("news"), "rain").unwrap(), 1);
+    assert_eq!(
+        zmq::poll_timeout([dish.readable()], FIVE).unwrap(),
+        Some([true])
+    );
     assert!(dish.leave(&group("news")));
-    assert_eq!(dish.try_recv(), None);
+    assert_eq!(dish.try_recv().unwrap(), None);
 }

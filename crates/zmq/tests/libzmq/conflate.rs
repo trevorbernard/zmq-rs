@@ -17,11 +17,14 @@ fn conflate() {
 
     let message_count = 20;
     for j in 0..message_count {
-        s_out.send(i32::to_le_bytes(j).to_vec());
+        s_out.send(i32::to_le_bytes(j).to_vec()).unwrap();
     }
     settle();
 
-    let received = s_in.recv_timeout(FIVE).expect("the latest message");
+    let received = s_in
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("the latest message");
     let payload = i32::from_le_bytes(received.last()[..].try_into().unwrap());
     assert_eq!(payload, message_count - 1);
 }

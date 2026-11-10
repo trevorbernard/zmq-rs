@@ -21,10 +21,10 @@ fn worker_task(context: Context) -> Result<(), zmq::Error> {
         // Tell the broker we're ready for work
         let mut ready = Message::new("");
         ready.push("Hi Boss");
-        worker.send(ready);
+        worker.send(ready)?;
 
         // Get workload from broker, after the envelope delimiter
-        if body(&worker.recv()) == "Fired!" {
+        if body(&worker.recv()?) == "Fired!" {
             println!("Completed: {total} tasks");
             return Ok(());
         }
@@ -52,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut workers_fired = 0;
     while workers_fired < NBR_WORKERS {
         // Next message gives us least recently used worker
-        let (identity, _) = broker.recv();
+        let (identity, _) = broker.recv()?;
         let mut reply = Message::new("");
         if Instant::now() < end_time {
             reply.push("Work harder");

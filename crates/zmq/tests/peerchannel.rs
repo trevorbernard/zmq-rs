@@ -5,7 +5,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Channel, Context, Frame, Peer, PeerId, SendError, UnknownPeer};
+use zmq::{Channel, Context, Frame, Peer, PeerId, SendError};
 use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -32,13 +32,13 @@ fn peers_address_each_other_by_id() {
     bob.send(to_alice, "hello alice").unwrap();
 
     let (to_bob, greeting, mut alice) = within(FIVE, move || {
-        let (from, greeting) = alice.recv();
+        let (from, greeting) = alice.recv().unwrap();
         (from, greeting, alice)
     });
     assert_eq!(greeting, Frame::from("hello alice"));
     alice.send(to_bob, "hello bob").unwrap();
     assert_eq!(
-        within(FIVE, move || bob.recv()),
+        within(FIVE, move || bob.recv().unwrap()),
         (to_alice, Frame::from("hello bob"))
     );
 }
@@ -58,10 +58,10 @@ fn every_connection_gets_its_own_nonzero_id() {
     assert_ne!(b.get(), 0);
     caller.send(b, "to b").unwrap();
     assert_eq!(
-        other.try_recv().map(|(_, frame)| frame),
+        other.try_recv().unwrap().map(|(_, frame)| frame),
         Some(Frame::from("to b"))
     );
-    assert_eq!(hub.try_recv(), None);
+    assert_eq!(hub.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -69,7 +69,10 @@ fn sending_to_an_unknown_peer_fails() {
     let context = Context::new().unwrap();
     let mut peer = context.socket::<Peer>();
     let nobody = PeerId::new(7).unwrap();
-    assert_eq!(peer.send(nobody, "hi"), Err(UnknownPeer(Frame::from("hi"))));
+    assert_eq!(
+        peer.send(nobody, "hi"),
+        Err(SendError::UnknownPeer(Frame::from("hi")))
+    );
     assert_eq!(
         peer.try_send(nobody, "hi"),
         Err(SendError::UnknownPeer(Frame::from("hi")))
@@ -85,7 +88,10 @@ fn a_disconnected_peer_is_forgotten() {
     let id = near.connect_peer("inproc://far").unwrap();
     assert!(near.disconnect_peer(id));
     assert!(!near.disconnect_peer(id));
-    assert_eq!(near.send(id, "gone"), Err(UnknownPeer(Frame::from("gone"))));
+    assert_eq!(
+        near.send(id, "gone"),
+        Err(SendError::UnknownPeer(Frame::from("gone")))
+    );
 }
 
 #[test]
@@ -105,11 +111,14 @@ fn a_channel_talks_both_ways() {
     let bound = left.bind(&free_endpoint()).unwrap();
     let mut right = context.socket::<Channel>();
     right.connect(&bound.to_string()).unwrap();
-    right.send("ping");
-    let (heard, mut left) = within(FIVE, move || (left.recv(), left));
+    right.send("ping").unwrap();
+    let (heard, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
     assert_eq!(heard, Frame::from("ping"));
-    left.send("pong");
-    assert_eq!(within(FIVE, move || right.recv()), Frame::from("pong"));
+    left.send("pong").unwrap();
+    assert_eq!(
+        within(FIVE, move || right.recv().unwrap()),
+        Frame::from("pong")
+    );
 }
 
 #[test]
@@ -121,9 +130,12 @@ fn a_channel_has_one_peer() {
     first.connect("inproc://one-peer").unwrap();
     let mut second = context.socket::<Channel>();
     second.connect("inproc://one-peer").unwrap();
-    hub.send("for the first");
-    assert_eq!(first.try_recv(), Some(Frame::from("for the first")));
-    assert_eq!(second.try_recv(), None);
+    hub.send("for the first").unwrap();
+    assert_eq!(
+        first.try_recv().unwrap(),
+        Some(Frame::from("for the first"))
+    );
+    assert_eq!(second.try_recv().unwrap(), None);
     assert!(second.try_send("anyone?").is_err(), "turned away");
 }
 
@@ -131,5 +143,8 @@ fn a_channel_has_one_peer() {
 fn a_channel_without_a_peer_hands_the_frame_back() {
     let context = Context::new().unwrap();
     let mut channel = context.socket::<Channel>();
-    assert_eq!(channel.try_send("alone"), Err(Frame::from("alone")));
+    assert_eq!(
+        channel.try_send("alone"),
+        Err(zmq::TrySendError::Full(Frame::from("alone")))
+    );
 }

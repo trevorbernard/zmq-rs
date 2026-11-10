@@ -48,7 +48,7 @@ fn we_authenticate_a_libzmq_null_peer() {
     push.send(&[b"from libzmq"]).unwrap();
     let started = Instant::now();
     loop {
-        if let Some(message) = pull.try_recv() {
+        if let Some(message) = pull.try_recv().unwrap() {
             assert_eq!(message, Message::from("from libzmq"));
             break;
         }
@@ -74,7 +74,7 @@ fn we_refuse_a_libzmq_null_peer() {
     expect(&mut monitor, |kind| {
         *kind == EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 })
     });
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn libzmq_authenticates_our_null_peer_through_its_zap_handler() {
         let mut push = context.socket::<Push>();
         let mut monitor = push.monitor();
         push.connect(&format!("tcp://{addr}")).unwrap();
-        push.send("hello");
+        push.send("hello").unwrap();
         let request = handler.join().unwrap();
         assert_eq!(
             request[5], b"NULL",

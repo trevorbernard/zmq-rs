@@ -23,7 +23,11 @@ fn options(immediate: bool) -> SocketOptions {
 /// loop does.
 fn count_received(socket: &mut Socket<Pull>) -> usize {
     let mut seen = 0;
-    while socket.recv_timeout(Duration::from_millis(250)).is_some() {
+    while socket
+        .recv_timeout(Duration::from_millis(250))
+        .unwrap()
+        .is_some()
+    {
         seen += 1;
     }
     seen
@@ -44,7 +48,7 @@ fn immediate_1() {
     settle();
 
     for _ in 0..10 {
-        from.send("Hello");
+        from.send("Hello").unwrap();
     }
     assert_eq!(count_received(&mut to), 5);
 }
@@ -78,7 +82,10 @@ fn immediate_3() {
 
     // Ping backend to frontend so we know when the connection is up
     assert!(backend.send_timeout("Hello", FIVE).is_ok());
-    assert_eq!(frontend.recv_timeout(FIVE), Some(Message::from("Hello")));
+    assert_eq!(
+        frontend.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("Hello"))
+    );
 
     assert!(frontend.try_send("Hello").is_ok());
 
@@ -91,7 +98,10 @@ fn immediate_3() {
     let mut backend = context.socket_with::<Dealer>(options(false));
     backend.bind(&endpoint).unwrap();
     assert!(backend.send_timeout("Hello", FIVE).is_ok());
-    assert_eq!(frontend.recv_timeout(FIVE), Some(Message::from("Hello")));
+    assert_eq!(
+        frontend.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("Hello"))
+    );
 
     // After the reconnect, it should succeed
     assert!(frontend.try_send("Hello").is_ok());

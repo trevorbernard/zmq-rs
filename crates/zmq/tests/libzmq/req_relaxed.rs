@@ -64,14 +64,14 @@ fn case_1(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
 
     // Send a request, ensure it arrives, don't send a reply.
     let asking = in_background(req, |req| req.request_timeout(message(&["A", "B"]), SETTLE));
-    let unanswered = rep0.recv_timeout(FIVE).expect("A B");
+    let unanswered = rep0.recv_timeout(FIVE).unwrap().expect("A B");
     assert_eq!(unanswered.body(), &message(&["A", "B"]));
     let (req, abandoned) = finish(asking);
     assert!(matches!(abandoned, Err(RequestError::TimedOut)));
 
     // Send another request.
     let asking = in_background(req, |req| req.request(message(&["C", "D"])));
-    let expected = rep1.recv_timeout(FIVE).expect("C D");
+    let expected = rep1.recv_timeout(FIVE).unwrap().expect("C D");
     assert_eq!(expected.body(), &message(&["C", "D"]));
 
     // The reply to the first request is discarded; the expected one comes.
@@ -82,7 +82,7 @@ fn case_1(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
 
     // Another standard request-reply cycle, just to check.
     let asking = in_background(req, |req| req.request("E"));
-    let request = rep2.recv_timeout(FIVE).expect("E");
+    let request = rep2.recv_timeout(FIVE).unwrap().expect("E");
     assert_eq!(request.body(), &Message::from("E"));
     request.reply(message(&["F", "G"]));
     let (req, reply) = finish(asking);
@@ -98,7 +98,7 @@ fn case_2(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
     // Send a request, ensure it arrives, and reply once the REQ has
     // stopped waiting, so the reply sits in its pipe.
     let asking = in_background(req, |req| req.request_timeout("H", SETTLE));
-    let late = rep3.recv_timeout(FIVE).expect("H");
+    let late = rep3.recv_timeout(FIVE).unwrap().expect("H");
     assert_eq!(late.body(), &Message::from("H"));
     let (req, abandoned) = finish(asking);
     assert!(matches!(abandoned, Err(RequestError::TimedOut)));
@@ -107,7 +107,7 @@ fn case_2(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
 
     // Without receiving that reply, send another request.
     let asking = in_background(req, |req| req.request("I"));
-    let request = rep4.recv_timeout(FIVE).expect("I");
+    let request = rep4.recv_timeout(FIVE).unwrap().expect("I");
     assert_eq!(request.body(), &Message::from("I"));
     request.reply("GOOD");
     let (req, reply) = finish(asking);
@@ -137,7 +137,7 @@ fn case_3_abandoned_peers_stay_in_turn() {
     let (req, mut rep) = set_up(&context);
     let req = case_2(req, &mut rep);
     let asking = in_background(req, |req| req.request("J"));
-    let request = rep[0].recv_timeout(FIVE).expect("J at rep0");
+    let request = rep[0].recv_timeout(FIVE).unwrap().expect("J at rep0");
     assert_eq!(request.body(), &Message::from("J"));
     request.reply("K");
     finish(asking).1.unwrap();
@@ -166,7 +166,7 @@ fn case_4_replies_to_earlier_requests_are_discarded() {
     thread::sleep(2 * SETTLE);
     router.bind(&endpoint).unwrap();
     for _ in 0..2 {
-        let (from, request) = router.recv_timeout(FIVE).expect("a request");
+        let (from, request) = router.recv_timeout(FIVE).unwrap().expect("a request");
         router.send(&from, request).unwrap();
     }
 

@@ -11,7 +11,7 @@ fn worker_routine(context: Context) -> Result<(), zmq::Error> {
     receiver.connect("inproc://workers")?;
 
     loop {
-        let request = receiver.recv();
+        let request = receiver.recv()?;
         println!("Received request: [{}]", body(request.body()));
         sleep_ms(1000);
         request.reply("World");

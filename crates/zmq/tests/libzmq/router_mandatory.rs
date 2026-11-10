@@ -43,13 +43,16 @@ fn basic() {
 
     let mut dealer = dealer_called(&context, "X", SocketOptions::default());
     dealer.connect(&endpoint).unwrap();
-    dealer.send("Hello");
-    let (from, _) = router.recv_timeout(FIVE).expect("Hello from X");
+    dealer.send("Hello").unwrap();
+    let (from, _) = router.recv_timeout(FIVE).unwrap().expect("Hello from X");
     assert_eq!(from.as_bytes(), b"X");
 
     // Now X is known, the send works.
     router.send(&from, "Hello").unwrap();
-    assert_eq!(dealer.recv_timeout(FIVE), Some(Message::from("Hello")));
+    assert_eq!(
+        dealer.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("Hello"))
+    );
 }
 
 #[test]
@@ -72,8 +75,11 @@ fn get_peer_state() {
 
     // A message from each dealer, to know both connections are ready.
     for dealer in [&mut dealer1, &mut dealer2] {
-        dealer.send("Hello");
-        router.recv_timeout(FIVE).expect("Hello from a dealer");
+        dealer.send("Hello").unwrap();
+        router
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("Hello from a dealer");
     }
 
     let x = RoutingId::new("X").unwrap();
@@ -90,7 +96,7 @@ fn get_peer_state() {
             Err(error) => panic!("Y is connected: {error}"),
         }
         // dealer2 is never read, so its queue fills.
-        while let Some(message) = dealer1.try_recv() {
+        while let Some(message) = dealer1.try_recv().unwrap() {
             assert_eq!(message, Message::from("Hello"));
             dealer1_received += 1;
         }

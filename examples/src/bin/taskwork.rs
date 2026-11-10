@@ -15,10 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sender.connect("tcp://localhost:5558")?;
 
     loop {
-        let workload = body(&receiver.recv());
+        let workload = body(&receiver.recv()?);
         print!("{workload}.");
         io::stdout().flush()?;
         sleep_ms(workload.parse()?);
-        sender.send("");
+        sender.send("")?;
     }
 }

@@ -41,13 +41,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut source = context.socket::<Push>();
     source.connect(&endpoint)?;
-    source.send("task 1");
+    source.send("task 1")?;
     let mut multipart = Message::new("header");
     multipart.push("body");
-    source.send(multipart);
+    source.send(multipart)?;
 
-    assert_eq!(sink.recv(), "task 1".into());
-    let message = sink.recv();
+    assert_eq!(sink.recv()?, "task 1".into());
+    let message = sink.recv()?;
     assert_eq!(message.len().get(), 2);
     assert_eq!(&**message.last(), b"body");
     Ok(())
@@ -70,7 +70,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut rep = context.socket::<Rep>();
     let endpoint = rep.bind("tcp://127.0.0.1:*")?.to_string();
     let server = thread::spawn(move || {
-        let request = rep.recv();
+        let request = rep.recv().unwrap();
         let name = String::from_utf8_lossy(request.body().last()).into_owned();
         request.reply(format!("hello, {name}"));
     });
@@ -102,9 +102,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     subscriber.subscribe("london");
     subscriber.connect("inproc://weather")?;
 
-    assert_eq!(publisher.send("paris 18C"), 0);
-    assert_eq!(publisher.send("london 12C"), 1);
-    assert_eq!(subscriber.recv(), "london 12C".into());
+    assert_eq!(publisher.send("paris 18C")?, 0);
+    assert_eq!(publisher.send("london 12C")?, 1);
+    assert_eq!(subscriber.recv()?, "london 12C".into());
     Ok(())
 }
 ```
@@ -127,13 +127,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..SocketOptions::default()
     });
     worker.connect(&endpoint)?;
-    worker.send("ready");
+    worker.send("ready")?;
 
-    let (from, message) = broker.recv();
+    let (from, message) = broker.recv()?;
     assert_eq!(from.as_bytes(), b"worker-1");
     assert_eq!(message, "ready".into());
     broker.send(&from, "job 42")?;
-    assert_eq!(worker.recv(), "job 42".into());
+    assert_eq!(worker.recv()?, "job 42".into());
 
     let stranger = RoutingId::new("nobody")?;
     assert!(broker.send(&stranger, "lost").is_err());
@@ -163,14 +163,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut boss = context.socket::<Push>();
     boss.connect("inproc://jobs")?;
-    boss.send("job 1");
+    boss.send("job 1")?;
 
-    let ready = zmq::poll_timeout([jobs.readable(), control.readable()], Duration::from_secs(1));
+    let ready = zmq::poll_timeout([jobs.readable(), control.readable()], Duration::from_secs(1))?;
     let Some([job, stop]) = ready else {
         return Ok(()); // nothing within a second
     };
     assert!(job && !stop);
-    assert_eq!(jobs.try_recv(), Some("job 1".into()));
+    assert_eq!(jobs.try_recv()?, Some("job 1".into()));
     Ok(())
 }
 ```
@@ -212,8 +212,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ..SocketOptions::default()
     });
     client.connect(&endpoint)?;
-    client.send("encrypted");
-    assert_eq!(server.recv(), "encrypted".into());
+    client.send("encrypted")?;
+    assert_eq!(server.recv()?, "encrypted".into());
     Ok(())
 }
 ```
@@ -252,8 +252,12 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
 - ROUTER `send` fails for an unknown routing id, as with libzmq's
   `ROUTER_MANDATORY`. Ignoring `try_send`'s error drops the message, which is
   libzmq's default.
-- REQ's `request` returns `PeerGone` if the peer's connection closes before
-  it replies; libzmq waits forever.
+- REQ's `request` fails with `RequestError::PeerGone` if the peer's
+  connection closes before it replies; libzmq waits forever.
+- `Context::shutdown` is `zmq_ctx_shutdown` and `zmq_ctx_term` in one call,
+  with a deadline: sends and receives on the context's sockets fail with
+  `Terminated` (libzmq's `ETERM`) at once, waking threads blocked in them,
+  and it returns without waiting for the sockets to be dropped.
 - Timeouts are per call: `recv_timeout` and `send_timeout` beside every
   blocking `recv` and `send`, rather than the `RCVTIMEO` and `SNDTIMEO`
   socket options. A send that times out hands the message back. REQ's

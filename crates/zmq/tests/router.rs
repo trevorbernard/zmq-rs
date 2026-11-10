@@ -10,7 +10,6 @@ use std::time::Duration;
 
 use zmq::{
     Context, Dealer, Frame, Hwm, Identity, Message, Router, RoutingId, SendError, SocketOptions,
-    UnknownPeer,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -74,7 +73,7 @@ fn send_to_an_unknown_routing_id_fails_at_once() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     let result = within(FIVE, move || router.send(&id("nobody"), "lost"));
-    assert_eq!(result, Err(UnknownPeer(Message::from("lost"))));
+    assert_eq!(result, Err(SendError::UnknownPeer(Message::from("lost"))));
 }
 
 #[test]
@@ -105,7 +104,13 @@ fn send_waits_while_the_peer_is_full() {
     wait.recv().unwrap();
     thread::sleep(Duration::from_millis(50));
     assert!(!sender.is_finished(), "the third message waits for room");
-    let received = within(FIVE, move || [dealer.recv(), dealer.recv(), dealer.recv()]);
+    let received = within(FIVE, move || {
+        [
+            dealer.recv().unwrap(),
+            dealer.recv().unwrap(),
+            dealer.recv().unwrap(),
+        ]
+    });
     assert_eq!(received, ["1", "2", "3"].map(Message::from));
     assert_eq!(sender.join().unwrap(), Ok(()));
 }
@@ -120,7 +125,10 @@ fn send_async_reaches_a_known_peer() {
     let sent = std::pin::pin!(router.send_async(&id("d"), "hi"))
         .poll(&mut TaskContext::from_waker(Waker::noop()));
     assert_eq!(sent, Poll::Ready(Ok(())));
-    assert_eq!(within(FIVE, move || dealer.recv()), Message::from("hi"));
+    assert_eq!(
+        within(FIVE, move || dealer.recv().unwrap()),
+        Message::from("hi")
+    );
 }
 
 #[test]
@@ -130,20 +138,20 @@ fn a_duplicate_identity_is_ignored_without_handover() {
     router.bind("inproc://dup").unwrap();
     let mut first = context.socket_with::<Dealer>(named("same"));
     first.connect("inproc://dup").unwrap();
-    first.send("first");
+    first.send("first").unwrap();
     let (from, _, mut router) = within(FIVE, move || {
-        let (from, message) = router.recv();
+        let (from, message) = router.recv().unwrap();
         (from, message, router)
     });
     assert_eq!(from, id("same"));
     let mut second = context.socket_with::<Dealer>(named("same"));
     second.connect("inproc://dup").unwrap();
-    second.send("second");
+    second.send("second").unwrap();
     thread::sleep(Duration::from_millis(50));
-    assert_eq!(router.try_recv(), None, "the newcomer is ignored");
+    assert_eq!(router.try_recv().unwrap(), None, "the newcomer is ignored");
     router.send(&id("same"), "to the first").unwrap();
     assert_eq!(
-        within(FIVE, move || first.recv()),
+        within(FIVE, move || first.recv().unwrap()),
         Message::from("to the first")
     );
 }
@@ -156,24 +164,31 @@ fn with_handover_a_duplicate_identity_takes_over() {
     router.bind("inproc://handover").unwrap();
     let mut first = context.socket_with::<Dealer>(named("same"));
     first.connect("inproc://handover").unwrap();
-    first.send("first");
+    first.send("first").unwrap();
     let mut router = within(FIVE, move || {
-        assert_eq!(router.recv(), (id("same"), Message::from("first")));
+        assert_eq!(router.recv().unwrap(), (id("same"), Message::from("first")));
         router
     });
     let mut second = context.socket_with::<Dealer>(named("same"));
     second.connect("inproc://handover").unwrap();
-    second.send("second");
+    second.send("second").unwrap();
     let mut router = within(FIVE, move || {
-        assert_eq!(router.recv(), (id("same"), Message::from("second")));
+        assert_eq!(
+            router.recv().unwrap(),
+            (id("same"), Message::from("second"))
+        );
         router
     });
     router.send(&id("same"), "to the second").unwrap();
     assert_eq!(
-        within(FIVE, move || second.recv()),
+        within(FIVE, move || second.recv().unwrap()),
         Message::from("to the second")
     );
-    assert_eq!(first.try_recv(), None, "the first lost its routing id");
+    assert_eq!(
+        first.try_recv().unwrap(),
+        None,
+        "the first lost its routing id"
+    );
     assert!(
         first.try_send("still there?").is_err(),
         "and was disconnected"
@@ -189,9 +204,9 @@ fn a_probing_router_greets_each_new_peer_with_an_empty_message() {
     let mut dealer = context.socket::<Dealer>();
     dealer.connect("inproc://probe").unwrap();
     // The ROUTER sees the peer once it next looks at its peers.
-    let _ = router.try_recv();
+    let _ = router.try_recv().unwrap();
     assert_eq!(
-        within(FIVE, move || dealer.recv()),
+        within(FIVE, move || dealer.recv().unwrap()),
         Message::new(Frame::new())
     );
 }
@@ -205,7 +220,7 @@ fn a_probing_dealer_greets_its_router_so_the_router_learns_its_id() {
     dealer.set_probe(true);
     dealer.connect("inproc://dealer-probe").unwrap();
     assert_eq!(
-        within(FIVE, move || router.recv()),
+        within(FIVE, move || router.recv().unwrap()),
         (id("prober"), Message::new(Frame::new()))
     );
 }
@@ -218,7 +233,7 @@ fn a_router_probes_the_peers_it_connects_to() {
     let mut router = context.socket::<Router>();
     router.set_probe(true);
     router.connect("inproc://router-to-router").unwrap();
-    let (from, message) = within(FIVE, move || listener.recv());
+    let (from, message) = within(FIVE, move || listener.recv().unwrap());
     assert_eq!(from.as_bytes()[0], 0, "a generated id");
     assert_eq!(message, Message::new(Frame::new()));
 }

@@ -52,7 +52,10 @@ fn nothing_queues_before_the_connection_is_up() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(immediate());
     push.connect(&free_endpoint()).unwrap();
-    assert_eq!(push.try_send("early"), Err(Message::from("early")));
+    assert_eq!(
+        push.try_send("early"),
+        Err(zmq::TrySendError::Full(Message::from("early")))
+    );
 }
 
 #[test]
@@ -65,10 +68,10 @@ fn messages_go_only_to_connections_that_are_up() {
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "0");
     for i in 1..10 {
-        push.send(i.to_string());
+        push.send(i.to_string()).unwrap();
     }
     let received = within(FIVE, move || {
-        (0..10).map(|_| pull.recv()).collect::<Vec<_>>()
+        (0..10).map(|_| pull.recv().unwrap()).collect::<Vec<_>>()
     });
     let expected: Vec<Message> = (0..10).map(|i| Message::from(i.to_string())).collect();
     assert_eq!(received, expected);
@@ -83,7 +86,7 @@ fn a_broken_connection_stops_queueing_until_it_is_back() {
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "first");
     let pull = within(FIVE, move || {
-        assert_eq!(pull.recv(), Message::from("first"));
+        assert_eq!(pull.recv().unwrap(), Message::from("first"));
         pull
     });
     drop(pull);
@@ -97,7 +100,7 @@ fn a_broken_connection_stops_queueing_until_it_is_back() {
     let mut pull = context.socket::<Pull>();
     rebind(&mut pull, &bound);
     send_when_connected(&mut push, "again");
-    let received = within(FIVE, move || pull.recv());
+    let received = within(FIVE, move || pull.recv().unwrap());
     assert_eq!(received, Message::from("again"));
 }
 
@@ -113,9 +116,9 @@ fn subscriptions_survive_a_reconnection() {
         let started = Instant::now();
         loop {
             assert!(started.elapsed() < FIVE, "never subscribed");
-            publisher.send("news");
+            publisher.send("news").unwrap();
             thread::sleep(Duration::from_millis(5));
-            if subscriber.try_recv().is_some() {
+            if subscriber.try_recv().unwrap().is_some() {
                 break;
             }
         }
@@ -147,13 +150,13 @@ fn a_dropped_socket_still_delivers_what_it_queued() {
     let mut push = context.socket_with::<Push>(immediate());
     push.connect(&bound.to_string()).unwrap();
     send_when_connected(&mut push, "0");
-    let reader = thread::spawn(move || (0..10_000).map(|_| pull.recv()).last());
+    let reader = thread::spawn(move || (0..10_000).map(|_| pull.recv().unwrap()).last());
     // Large enough that some are still queued when the socket goes.
     let filler = "x".repeat(10_000);
     for _ in 1..9_999 {
-        push.send(filler.clone());
+        push.send(filler.clone()).unwrap();
     }
-    push.send("last");
+    push.send("last").unwrap();
     drop(push);
     let last = within(FIVE, move || reader.join().unwrap());
     assert_eq!(last, Some(Message::from("last")));
@@ -166,8 +169,8 @@ fn next_event(xpub: &mut zmq::Socket<XPub>, subscriber: &mut zmq::Socket<Sub>) -
     let started = Instant::now();
     loop {
         assert!(started.elapsed() < FIVE, "no event");
-        assert_eq!(subscriber.try_recv(), None);
-        if let Some(event) = xpub.try_recv() {
+        assert_eq!(subscriber.try_recv().unwrap(), None);
+        if let Some(event) = xpub.try_recv().unwrap() {
             return event;
         }
         thread::sleep(Duration::from_millis(5));
@@ -212,7 +215,7 @@ fn a_topic_dropped_while_disconnected_is_not_resubscribed() {
     drop(xpub);
     // Wait until the SUB has lost the connection.
     thread::sleep(Duration::from_millis(100));
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(subscriber.try_recv().unwrap(), None);
     subscriber.unsubscribe("old");
     subscriber.subscribe("new");
     let mut xpub = context.socket::<XPub>();

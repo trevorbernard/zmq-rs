@@ -22,8 +22,8 @@ fn our_conflating_pull_keeps_the_latest_from_a_libzmq_push() {
     }
     // Time for all of them to arrive, each replacing the one before.
     thread::sleep(Duration::from_millis(200));
-    assert_eq!(pull.try_recv(), Some(Message::from("100")));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), Some(Message::from("100")));
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -59,7 +59,7 @@ fn our_conflating_sub_keeps_every_subscription_with_a_libzmq_pub() {
             assert!(started.elapsed() < FIVE, "{topic} never arrived");
             publisher.send(&[topic.as_bytes()]).unwrap();
             thread::sleep(Duration::from_millis(10));
-            if subscriber.try_recv() == Some(Message::from(topic)) {
+            if subscriber.try_recv().unwrap() == Some(Message::from(topic)) {
                 break;
             }
         }

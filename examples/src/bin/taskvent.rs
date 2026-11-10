@@ -18,13 +18,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Sending tasks to workers...");
 
     // The first message is "0" and signals start of batch
-    sink.send("0");
+    sink.send("0")?;
 
     let mut total_msec = 0;
     for _ in 0..100 {
         let workload = randof(100) + 1;
         total_msec += workload;
-        sender.send(workload.to_string());
+        sender.send(workload.to_string())?;
     }
     println!("Total expected cost: {total_msec} msec");
     Ok(())

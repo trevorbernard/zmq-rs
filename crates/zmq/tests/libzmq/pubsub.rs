@@ -20,8 +20,11 @@ fn test(address: &str) {
     // Wait a bit till the subscription gets to the publisher
     settle();
 
-    publisher.send("test");
-    assert_eq!(subscriber.recv_timeout(FIVE), Some(Message::from("test")));
+    publisher.send("test").unwrap();
+    assert_eq!(
+        subscriber.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("test"))
+    );
 }
 
 #[test]

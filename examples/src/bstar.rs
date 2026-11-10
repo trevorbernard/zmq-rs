@@ -23,7 +23,7 @@
 //! loop {
 //!     let timeout = bstar.timeout();
 //!     let [vote, peer] = bstar.readable();
-//!     let ready = zmq::poll_timeout([vote, peer, other.readable()], timeout);
+//!     let ready = zmq::poll_timeout([vote, peer, other.readable()], timeout)?;
 //!     let [vote, peer, other_ready] = ready.unwrap_or_default();
 //!     for event in bstar.handle([vote, peer])? {
 //!         if let Event::Request(client, request) = event {
@@ -188,7 +188,7 @@ impl BinaryStar {
         let mut events = Vec::new();
         if peer {
             // Receive state from peer, execute finite state machine
-            let state = text(self.statesub.recv().last());
+            let state = text(self.statesub.recv().unwrap().last());
             let event = match state.as_str() {
                 "1" => Some(FsmEvent::PeerPrimary),
                 "2" => Some(FsmEvent::PeerBackup),
@@ -206,7 +206,7 @@ impl BinaryStar {
         }
         if vote {
             // Application wants to speak to us, see if it's possible
-            let (client, request) = self.voter.recv();
+            let (client, request) = self.voter.recv().unwrap();
             match self.execute(FsmEvent::ClientRequest)? {
                 Outcome::Accepted(change) => {
                     events.extend(change);
@@ -218,7 +218,7 @@ impl BinaryStar {
         }
         // Publish our state to peer
         if Instant::now() >= self.send_state_at {
-            self.statepub.send((self.state as u8).to_string());
+            self.statepub.send((self.state as u8).to_string()).unwrap();
             self.send_state_at = Instant::now() + HEARTBEAT;
         }
         Ok(events)
@@ -233,7 +233,9 @@ impl BinaryStar {
     ) -> Result<(), Fatal> {
         loop {
             let timeout = self.timeout();
-            let ready = zmq::poll_timeout(self.readable(), timeout).unwrap_or_default();
+            let ready = zmq::poll_timeout(self.readable(), timeout)
+                .unwrap()
+                .unwrap_or_default();
             for event in self.handle(ready)? {
                 if let Event::Request(client, request) = event {
                     on_request(&mut self.voter, client, request);

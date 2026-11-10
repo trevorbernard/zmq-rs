@@ -181,10 +181,10 @@ mod tests {
         kvmsg.set_key("key");
         kvmsg.set_uuid();
         kvmsg.set_body("body");
-        output.send(kvmsg.to_message());
+        output.send(kvmsg.to_message()).unwrap();
         kvmsg.clone().store(&mut kvmap);
 
-        let received = KvMsg::from_message(&input.recv()).unwrap();
+        let received = KvMsg::from_message(&input.recv().unwrap()).unwrap();
         assert_eq!(received, kvmsg);
         assert_eq!(received.uuid().map(<[u8]>::len), Some(16));
         received.store(&mut kvmap);
@@ -199,9 +199,9 @@ mod tests {
         kvmsg.set_uuid();
         kvmsg.set_body("body");
         assert_eq!(kvmsg.prop("prop2"), "value2");
-        output.send(kvmsg.to_message());
+        output.send(kvmsg.to_message()).unwrap();
 
-        let received = KvMsg::from_message(&input.recv()).unwrap();
+        let received = KvMsg::from_message(&input.recv().unwrap()).unwrap();
         assert_eq!(received.key(), Some("key"));
         assert_eq!(received.prop("prop1"), "value1");
         assert_eq!(received.prop("prop2"), "value2");

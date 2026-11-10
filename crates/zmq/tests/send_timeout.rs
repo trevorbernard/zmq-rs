@@ -89,7 +89,7 @@ fn push() {
         push,
         |s| s.try_send("x").is_ok(),
         |s, t| s.send_timeout("x", t).is_ok(),
-        move || while pull.try_recv().is_some() {},
+        move || while pull.try_recv().unwrap().is_some() {},
     );
 }
 
@@ -104,7 +104,7 @@ fn pair() {
         left,
         |s| s.try_send("x").is_ok(),
         |s, t| s.send_timeout("x", t).is_ok(),
-        move || while right.try_recv().is_some() {},
+        move || while right.try_recv().unwrap().is_some() {},
     );
 }
 
@@ -119,7 +119,7 @@ fn dealer() {
         dealer,
         |s| s.try_send("x").is_ok(),
         |s, t| s.send_timeout("x", t).is_ok(),
-        move || while other.try_recv().is_some() {},
+        move || while other.try_recv().unwrap().is_some() {},
     );
 }
 
@@ -137,16 +137,16 @@ fn router() {
         ..tiny()
     });
     dealer.connect("inproc://router").unwrap();
-    dealer.send("hello");
+    dealer.send("hello").unwrap();
     assert_eq!(
-        router.recv_timeout(FIVE).map(|(id, _)| id),
+        router.recv_timeout(FIVE).unwrap().map(|(id, _)| id),
         Some(dealer_id())
     );
     check(
         router,
         |s| s.try_send(&dealer_id(), "x").is_ok(),
         |s, t| s.send_timeout(&dealer_id(), "x", t).is_ok(),
-        move || while dealer.try_recv().is_some() {},
+        move || while dealer.try_recv().unwrap().is_some() {},
     );
 }
 
@@ -172,8 +172,8 @@ fn router_reports_a_full_peer_after_the_timeout() {
         ..tiny()
     });
     dealer.connect("inproc://full").unwrap();
-    dealer.send("hello");
-    assert!(router.recv_timeout(FIVE).is_some());
+    dealer.send("hello").unwrap();
+    assert!(router.recv_timeout(FIVE).unwrap().is_some());
     while router.try_send(&dealer_id(), "fill").is_ok() {}
     assert_eq!(
         router.send_timeout(&dealer_id(), "x", SHORT),
@@ -185,7 +185,10 @@ fn router_reports_a_full_peer_after_the_timeout() {
 fn a_timed_out_send_hands_the_message_back() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    assert_eq!(push.send_timeout("kept", SHORT), Err(Message::from("kept")));
+    assert_eq!(
+        push.send_timeout("kept", SHORT),
+        Err(zmq::TrySendError::Full(Message::from("kept")))
+    );
 }
 
 #[test]
@@ -197,14 +200,14 @@ fn xpub_send_all() {
     sub.subscribe("");
     sub.connect("inproc://nodrop").unwrap();
     assert!(
-        xpub.recv_timeout(FIVE).is_some(),
+        xpub.recv_timeout(FIVE).unwrap().is_some(),
         "the subscription arrived"
     );
     check(
         xpub,
         |s| s.try_send_all("x").is_ok(),
         |s, t| s.send_all_timeout("x", t).is_ok(),
-        move || while sub.try_recv().is_some() {},
+        move || while sub.try_recv().unwrap().is_some() {},
     );
 }
 
@@ -224,7 +227,7 @@ mod draft {
             client,
             |s| s.try_send("x").is_ok(),
             |s, t| s.send_timeout("x", t).is_ok(),
-            move || while server.try_recv().is_some() {},
+            move || while server.try_recv().unwrap().is_some() {},
         );
     }
 
@@ -239,7 +242,7 @@ mod draft {
             scatter,
             |s| s.try_send("x").is_ok(),
             |s, t| s.send_timeout("x", t).is_ok(),
-            move || while gather.try_recv().is_some() {},
+            move || while gather.try_recv().unwrap().is_some() {},
         );
     }
 
@@ -254,7 +257,7 @@ mod draft {
             left,
             |s| s.try_send("x").is_ok(),
             |s, t| s.send_timeout("x", t).is_ok(),
-            move || while right.try_recv().is_some() {},
+            move || while right.try_recv().unwrap().is_some() {},
         );
     }
 
@@ -265,13 +268,16 @@ mod draft {
         server.bind("inproc://server").unwrap();
         let mut client = context.socket_with::<Client>(tiny());
         client.connect("inproc://server").unwrap();
-        client.send("hello");
-        let (id, _) = server.recv_timeout(FIVE).expect("the client said hello");
+        client.send("hello").unwrap();
+        let (id, _) = server
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("the client said hello");
         check(
             (server, id),
             |(s, id)| s.try_send(*id, "x").is_ok(),
             |(s, id), t| s.send_timeout(*id, "x", t).is_ok(),
-            move || while client.try_recv().is_some() {},
+            move || while client.try_recv().unwrap().is_some() {},
         );
     }
 
@@ -286,7 +292,7 @@ mod draft {
             (other, id),
             |(s, id)| s.try_send(*id, "x").is_ok(),
             |(s, id), t| s.send_timeout(*id, "x", t).is_ok(),
-            move || while peer.try_recv().is_some() {},
+            move || while peer.try_recv().unwrap().is_some() {},
         );
     }
 

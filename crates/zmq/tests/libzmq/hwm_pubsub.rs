@@ -33,7 +33,7 @@ fn xpub_and_sub(send_hwm: usize, endpoint: &str) -> (Socket<XPub>, Socket<Sub>) 
 
     // Wait before sending till the one subscriber has subscribed
     assert_eq!(
-        pub_socket.recv_timeout(FIVE),
+        pub_socket.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Subscribe("".into()))
     );
     (pub_socket, sub_socket)
@@ -44,14 +44,14 @@ fn defaults(send_hwm: usize, msg_cnt: usize, endpoint: &str) -> usize {
 
     // Send until we reach the mute state
     let mut send_count = 0;
-    while send_count < msg_cnt && pub_socket.send("test message") == 1 {
+    while send_count < msg_cnt && pub_socket.send("test message").unwrap() == 1 {
         send_count += 1;
     }
     assert_eq!(send_count, send_hwm);
     settle();
 
     let mut recv_count = 0;
-    while sub_socket.try_recv().is_some() {
+    while sub_socket.try_recv().unwrap().is_some() {
         recv_count += 1;
     }
     assert_eq!(recv_count, send_hwm);
@@ -63,7 +63,7 @@ fn defaults(send_hwm: usize, msg_cnt: usize, endpoint: &str) -> usize {
 /// whether it came.
 fn receive(socket: &mut Socket<Sub>) -> (usize, bool) {
     let mut recv_count = 0;
-    while let Some(message) = socket.recv_timeout(Duration::from_millis(10)) {
+    while let Some(message) = socket.recv_timeout(Duration::from_millis(10)).unwrap() {
         recv_count += 1;
         if message == Message::from("end") {
             return (recv_count, true);
@@ -101,7 +101,7 @@ fn blocking(send_hwm: usize, msg_cnt: usize, endpoint: &str, must_block: bool) -
     // termination message
     let (received, mut is_termination) = receive(&mut sub_socket);
     recv_count += received;
-    pub_socket.send("end");
+    pub_socket.send("end").unwrap();
     // Now block on the SUB side till we get the termination message
     while !is_termination {
         let (received, terminated) = receive(&mut sub_socket);
@@ -137,14 +137,14 @@ fn reset_hwm() {
 
     for count in [first_count, second_count] {
         let mut send_count = 0;
-        while send_count < count && pub_socket.send("") == 1 {
+        while send_count < count && pub_socket.send("").unwrap() == 1 {
             send_count += 1;
         }
         assert_eq!(send_count, count);
         settle();
 
         let mut recv_count = 0;
-        while sub_socket.try_recv().is_some() {
+        while sub_socket.try_recv().unwrap().is_some() {
             recv_count += 1;
         }
         assert_eq!(recv_count, count);

@@ -31,7 +31,7 @@ fn our_immediate_push_sends_only_to_the_libzmq_pull_that_is_up() {
         thread::sleep(Duration::from_millis(5));
     }
     for i in 1..10 {
-        push.send(i.to_string());
+        push.send(i.to_string()).unwrap();
     }
     for i in 0..10 {
         assert_eq!(pull.recv().unwrap(), [i.to_string().into_bytes()]);

@@ -15,12 +15,12 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
     let mut dealer = context.socket::<Dealer>();
     dealer.connect("tcp://127.0.0.1:6000")?;
 
-    dealer.send("fetch");
+    dealer.send("fetch")?;
     let mut total = 0; // Total bytes received
     let mut chunks = 0; // Total chunks received
 
     loop {
-        let size = dealer.recv().last().len();
+        let size = dealer.recv()?.last().len();
         chunks += 1;
         total += size;
         if size == 0 {
@@ -46,7 +46,7 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
     loop {
         // First frame in each message is the sender identity, which the
         // ROUTER hands us separately
-        let (identity, command) = router.recv();
+        let (identity, command) = router.recv()?;
         assert_eq!(&**command.last(), b"fetch");
 
         loop {

@@ -22,17 +22,20 @@ fn test() {
     subscriber.subscribe("");
 
     // Pass the subscription upstream through the device
-    let subscription = xpub.recv_timeout(FIVE).expect("a subscription");
-    xsub.forward(subscription);
+    let subscription = xpub.recv_timeout(FIVE).unwrap().expect("a subscription");
+    xsub.forward(subscription).unwrap();
 
     // Wait a bit till the subscription gets to the publisher
     settle();
 
-    publisher.send("");
+    publisher.send("").unwrap();
 
     // Pass the message downstream through the device
-    let message = xsub.recv_timeout(FIVE).expect("a message");
-    xpub.send(message);
+    let message = xsub.recv_timeout(FIVE).unwrap().expect("a message");
+    xpub.send(message).unwrap();
 
-    assert_eq!(subscriber.recv_timeout(FIVE), Some(Message::from("")));
+    assert_eq!(
+        subscriber.recv_timeout(FIVE).unwrap(),
+        Some(Message::from(""))
+    );
 }

@@ -6,8 +6,7 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Frame, Message, PeerGone, Reconnect, Rep, Req, RequestError, RouteOutcome,
-    SocketOptions,
+    Context, Frame, Message, Reconnect, Rep, Req, RequestError, RouteOutcome, SocketOptions,
 };
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_test_ports::free_endpoint;
@@ -68,7 +67,7 @@ fn our_rep_answers_a_libzmq_req() {
     req.connect(addr);
     req.send(&[b"question"]).unwrap();
     let outcome = within(FIVE, move || {
-        let request = rep.recv();
+        let request = rep.recv().unwrap();
         assert_eq!(*request.body(), Message::from("question"));
         request.reply("answer")
     });
@@ -83,7 +82,7 @@ fn our_req_and_rep_talk_to_each_other() {
     let addr = rep.bind(&free_endpoint()).unwrap();
     let server = spawn(move || {
         for _ in 0..3 {
-            let request = rep.recv();
+            let request = rep.recv().unwrap();
             let text = String::from_utf8(request.body().get(0).unwrap().to_vec()).unwrap();
             request.reply(text.to_uppercase());
         }
@@ -125,7 +124,7 @@ fn rep_returns_the_whole_envelope_for_multi_hop_requests() {
     dealer.connect(addr);
     dealer.send(&[b"client-7", b"", b"q1", b"q2"]).unwrap();
     within(FIVE, move || {
-        let request = rep.recv();
+        let request = rep.recv().unwrap();
         assert_eq!(*request.body(), message(&[b"q1", b"q2"]));
         request.reply(message(&[b"a1", b"a2"]));
     });
@@ -174,7 +173,10 @@ fn a_peer_closing_before_replying_fails_the_request() {
     let answer = spawn(move || req.request("anyone?"));
     rep.recv().unwrap();
     drop(rep);
-    assert_eq!(answer.recv_timeout(FIVE).unwrap(), Err(PeerGone));
+    assert_eq!(
+        answer.recv_timeout(FIVE).unwrap(),
+        Err(RequestError::PeerGone)
+    );
 }
 
 #[test]
@@ -205,10 +207,10 @@ fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Sender<()>, mpsc
     let addr = rep.bind(&free_endpoint()).unwrap();
     let (abandoned, heard) = mpsc::channel();
     let done = spawn(move || {
-        let first = rep.recv();
+        let first = rep.recv().unwrap();
         heard.recv().unwrap();
         first.reply("stale");
-        rep.recv().reply("fresh");
+        rep.recv().unwrap().reply("fresh");
     });
     (addr.to_string(), abandoned, done)
 }
@@ -246,7 +248,7 @@ fn without_correlation_an_abandoned_reply_can_be_taken() {
 fn try_recv_does_not_block() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    assert!(rep.try_recv().is_none());
+    assert!(rep.try_recv().unwrap().is_none());
 }
 
 #[test]

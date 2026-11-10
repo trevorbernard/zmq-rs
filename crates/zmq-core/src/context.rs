@@ -6,12 +6,13 @@ use std::io;
 use std::net::SocketAddr;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 
 use std::sync::mpsc;
 use std::task::{Context as TaskContext, Poll};
 use std::time::{Duration, Instant};
 
+use atomic_waker::AtomicWaker;
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
 use zmtp::{Established, Frame, Identity, Message, MessageMetadata, Metadata, SocketType, Version};
 
@@ -48,6 +49,43 @@ struct Inner {
     /// The `inproc` names bound in this context, and connections waiting
     /// for a name to be bound.
     inproc: Mutex<InprocRegistry>,
+    termination: Termination,
+}
+
+/// Whether the context was shut down, and the sockets to wake when it is,
+/// as libzmq's `ctx_t::_terminating` and its `stop` command to each socket.
+#[derive(Debug, Default)]
+struct Termination {
+    terminated: AtomicBool,
+    /// One per live socket; a dropped socket's is pruned as others join.
+    watchers: Mutex<Vec<Weak<AtomicWaker>>>,
+}
+
+impl Termination {
+    fn watch(&self) -> Arc<AtomicWaker> {
+        let watcher = Arc::new(AtomicWaker::new());
+        let mut watchers = self.watchers.lock().unwrap_or_else(PoisonError::into_inner);
+        watchers.retain(|watcher| watcher.strong_count() > 0);
+        watchers.push(Arc::downgrade(&watcher));
+        watcher
+    }
+
+    fn terminate(&self) {
+        // Set before waking: a socket registers its waker, then looks again.
+        self.terminated.store(true, Ordering::SeqCst);
+        // Woken outside the lock: a waker may run anything, such as code
+        // that makes a socket.
+        let watchers: Vec<_> = self
+            .watchers
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .iter()
+            .filter_map(Weak::upgrade)
+            .collect();
+        for watcher in watchers {
+            watcher.wake();
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -694,6 +732,7 @@ impl Context {
                 io_threads,
                 next: AtomicUsize::new(0),
                 inproc: Mutex::default(),
+                termination: Termination::default(),
             }),
         })
     }
@@ -978,13 +1017,28 @@ impl Context {
     /// queued messages for up to `timeout` (or less, per their [`Linger`]),
     /// then stops the I/O threads. Affects every clone of this context.
     ///
+    /// From the start, the context [is terminated](Self::is_terminated) and
+    /// every socket waiting on it is woken, as libzmq's `zmq_ctx_shutdown`.
+    ///
     /// Dropping the last clone does the same with no timeout, waiting as
     /// long as each connection's linger allows, as libzmq's `zmq_ctx_term`.
     pub fn shutdown(&self, timeout: Duration) -> Result<(), ShutdownTimedOut> {
+        self.inner.termination.terminate();
         match self.inner.shutdown(Instant::now().checked_add(timeout)) {
             0 => Ok(()),
             abandoned => Err(ShutdownTimedOut { abandoned }),
         }
+    }
+
+    /// Whether [`shutdown`](Self::shutdown) has been called on any clone:
+    /// libzmq's `ETERM` condition.
+    pub fn is_terminated(&self) -> bool {
+        self.inner.termination.terminated.load(Ordering::Acquire)
+    }
+
+    /// A waker slot that [`shutdown`](Self::shutdown) wakes, for one socket.
+    pub(crate) fn watch_termination(&self) -> Arc<AtomicWaker> {
+        self.inner.termination.watch()
     }
 
     /// The next I/O thread, round robin.

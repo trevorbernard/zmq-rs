@@ -214,7 +214,7 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
     let mut xpub = context.socket::<XPub>();
     xpub.connect(&endpoint).unwrap();
     let (heard, event) = mpsc::channel();
-    thread::spawn(move || heard.send(xpub.recv()));
+    thread::spawn(move || heard.send(xpub.recv().unwrap()));
     assert_eq!(
         event.recv_timeout(FIVE).unwrap(),
         XPubEvent::Subscribe(zmq::Frame::new())
@@ -232,7 +232,7 @@ fn we_pull_from_an_old_push(libzmq: Libzmq) {
     };
     push.send(&[b"one"]);
     push.send(&[b"two", b"", b"parts"]);
-    let first = pull.recv_timeout(FIVE).expect("the first message");
+    let first = pull.recv_timeout(FIVE).unwrap().expect("the first message");
     assert_eq!(first, message(&["one"]));
     assert_eq!(
         first.property("Socket-Type"),
@@ -244,7 +244,7 @@ fn we_pull_from_an_old_push(libzmq: Libzmq) {
         Some(b"127.0.0.1".as_slice())
     );
     assert_eq!(
-        pull.recv_timeout(FIVE),
+        pull.recv_timeout(FIVE).unwrap(),
         Some(message(&["two", "", "parts"]))
     );
 }
@@ -257,8 +257,8 @@ fn an_old_pull_takes_from_our_push(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
-    push.send("one");
-    push.send(message(&["two", "", "parts"]));
+    push.send("one").unwrap();
+    push.send(message(&["two", "", "parts"])).unwrap();
     assert_eq!(pull.recv(), Some(message(&["one"])));
     assert_eq!(pull.recv(), Some(message(&["two", "", "parts"])));
 }
@@ -286,7 +286,7 @@ fn an_old_req_asks_our_rep(libzmq: Libzmq) {
         return;
     };
     req.send(&[b"question"]);
-    let request = rep.recv_timeout(FIVE).expect("the request");
+    let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &message(&["question"]));
     request.reply("answer");
     assert_eq!(req.recv(), Some(message(&["answer"])));
@@ -307,7 +307,10 @@ fn our_router_answers_an_old_dealer_by_its_identity(libzmq: Libzmq) {
         return;
     };
     dealer.send(&[b"hello"]);
-    let (from, request) = router.recv_timeout(FIVE).expect("the dealer's message");
+    let (from, request) = router
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("the dealer's message");
     assert_eq!(from.as_bytes(), b"old");
     assert_eq!(request, message(&["hello"]));
     router
@@ -324,10 +327,13 @@ fn an_old_router_answers_our_dealer_by_its_identity(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut dealer = context.socket_with::<Dealer>(named("ours"));
     dealer.connect(&endpoint).unwrap();
-    dealer.send("hello");
+    dealer.send("hello").unwrap();
     assert_eq!(router.recv(), Some(message(&["ours", "hello"])));
     router.send(&[b"ours", b"welcome"]);
-    assert_eq!(dealer.recv_timeout(FIVE), Some(message(&["welcome"])));
+    assert_eq!(
+        dealer.recv_timeout(FIVE).unwrap(),
+        Some(message(&["welcome"]))
+    );
 }
 
 /// Over ZMTP 1.0 the subscriber filters for itself, as it never tells us
@@ -352,8 +358,8 @@ fn an_old_sub_gets_only_its_topic_from_our_pub(libzmq: Libzmq) {
         move || {
             let started = Instant::now();
             while !done.load(Ordering::Relaxed) && started.elapsed() < FIVE {
-                publisher.send("sports: skipped");
-                publisher.send("news: wanted");
+                publisher.send("sports: skipped").unwrap();
+                publisher.send("news: wanted").unwrap();
                 thread::sleep(Duration::from_millis(5));
             }
         }
@@ -381,7 +387,7 @@ fn our_sub_gets_only_its_topic_from_an_old_pub(libzmq: Libzmq) {
         assert!(started.elapsed() < FIVE, "got {received:?}");
         publisher.send(&[b"sports: skipped"]);
         publisher.send(&[b"news: wanted"]);
-        if let Some(message) = sub.recv_timeout(Duration::from_millis(10)) {
+        if let Some(message) = sub.recv_timeout(Duration::from_millis(10)).unwrap() {
             received.push(message);
         }
     }
@@ -405,5 +411,5 @@ fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
         return;
     };
     push.send(&[b"unauthenticated"]);
-    assert_eq!(pull.recv_timeout(Duration::from_millis(500)), None);
+    assert_eq!(pull.recv_timeout(Duration::from_millis(500)).unwrap(), None);
 }

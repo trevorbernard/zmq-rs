@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut cycles = 0;
     loop {
-        let request = server.recv();
+        let request = server.recv()?;
         cycles += 1;
 
         // Simulate various problems, after a few cycles

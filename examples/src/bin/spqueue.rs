@@ -23,14 +23,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let [from_worker, from_client] = zmq::poll([
             backend.readable(),
             frontend.readable().when(!workers.is_empty()),
-        ]);
+        ])?;
 
         // Handle worker activity on backend
         if from_worker {
             // Use worker identity for load-balancing; a worker's message
             // is its envelope delimiter, then READY or a client's routing
             // id, an empty frame and the reply
-            let (worker, message) = backend.recv();
+            let (worker, message) = backend.recv()?;
             workers.push_back(worker);
             let mut frames = message.into_iter().skip(1);
             let Some(first) = frames.next() else {
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if from_client {
             // Get client request, route to first available worker
-            let (client, request) = frontend.recv();
+            let (client, request) = frontend.recv()?;
             let worker = workers.pop_front().ok_or("no worker is free")?;
             let mut message = Message::new("");
             message.push(client.as_bytes().to_vec());

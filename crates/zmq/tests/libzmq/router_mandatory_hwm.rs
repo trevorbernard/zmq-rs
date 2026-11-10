@@ -44,8 +44,8 @@ fn router_mandatory_hwm() {
         ..SocketOptions::default()
     });
     dealer.connect(&endpoint).unwrap();
-    dealer.send("Hello");
-    let (x, _) = router.recv_timeout(FIVE).expect("Hello from X");
+    dealer.send("Hello").unwrap();
+    let (x, _) = router.recv_timeout(FIVE).unwrap().expect("Hello from X");
 
     // This should stop after one message, but kernel buffering may let a
     // few more through.

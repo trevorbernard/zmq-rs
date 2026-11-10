@@ -42,7 +42,7 @@ pub(crate) fn on_request(
     event: XPubEvent,
     act: impl FnOnce(&mut zmq::SubscriptionRequest<'_>),
 ) {
-    let mut request = publisher.recv_timeout(FIVE).expect("a request");
+    let mut request = publisher.recv_timeout(FIVE).unwrap().expect("a request");
     assert_eq!(request.event(), &event);
     act(&mut request);
 }
@@ -62,13 +62,13 @@ pub(crate) trait Receives: zmq::SocketType + Sized {
 
 impl Receives for Sub {
     fn recv(socket: &mut Socket<Self>, timeout: Duration) -> Option<Message> {
-        socket.recv_timeout(timeout)
+        socket.recv_timeout(timeout).unwrap()
     }
 }
 
 impl Receives for XSub {
     fn recv(socket: &mut Socket<Self>, timeout: Duration) -> Option<Message> {
-        socket.recv_timeout(timeout)
+        socket.recv_timeout(timeout).unwrap()
     }
 }
 
@@ -85,14 +85,14 @@ pub(crate) mod cases {
             .connect("inproc://libzmq-xpub-manual-basic")
             .unwrap();
 
-        subscriber.send(subscription(b"A"));
+        subscriber.send(subscription(b"A")).unwrap();
         // Subscribe the subscriber for B instead
         on_request(&mut publisher, subscribed("A"), |request| {
             assert!(request.subscribe("B"));
         });
 
-        publisher.send("A");
-        publisher.send("B");
+        publisher.send("A").unwrap();
+        publisher.send("B").unwrap();
         expect(&mut subscriber, Message::from("B"));
     }
 
@@ -107,8 +107,8 @@ pub(crate) mod cases {
             .connect("inproc://libzmq-xpub-manual-unsubscribe")
             .unwrap();
 
-        subscriber.send(subscription(b"A"));
-        subscriber.send(subscription(b"B"));
+        subscriber.send(subscription(b"A")).unwrap();
+        subscriber.send(subscription(b"B")).unwrap();
         on_request(&mut publisher, subscribed("A"), |request| {
             assert!(request.subscribe("XA"));
         });
@@ -116,13 +116,13 @@ pub(crate) mod cases {
             assert!(request.subscribe("XB"));
         });
 
-        subscriber.send(cancel(b"A"));
+        subscriber.send(cancel(b"A")).unwrap();
         on_request(&mut publisher, cancelled("A"), |request| {
             assert!(request.unsubscribe("XA"));
         });
 
-        publisher.send("XA");
-        publisher.send("XB");
+        publisher.send("XA").unwrap();
+        publisher.send("XB").unwrap();
         // The subscriber should receive XB only
         expect(&mut subscriber, Message::from("XB"));
 
@@ -154,7 +154,7 @@ pub(crate) mod cases {
         on_request(&mut xpub_proxy, subscribed("1"), |request| {
             assert!(request.subscribe("1"));
         });
-        xsub_proxy.send(subscription(b"1"));
+        xsub_proxy.send(subscription(b"1")).unwrap();
 
         // And the second
         let mut sub2 = context.socket::<Sub>();
@@ -168,15 +168,15 @@ pub(crate) mod cases {
                 assert!(request.send(data("1", "X")));
             }
         });
-        xsub_proxy.send(subscription(b"1"));
+        xsub_proxy.send(subscription(b"1")).unwrap();
         settle();
 
         // The publisher sends a message, which the proxy passes on
-        publisher.send(data("1", "X"));
+        publisher.send(data("1", "X")).unwrap();
         settle();
-        let message = xsub_proxy.recv_timeout(FIVE).expect("the message");
+        let message = xsub_proxy.recv_timeout(FIVE).unwrap().expect("the message");
         assert_eq!(message, data("1", "X"));
-        xpub_proxy.send(message);
+        xpub_proxy.send(message).unwrap();
         settle();
 
         // Each subscriber gets the message, and sub2 the last value too
@@ -194,12 +194,12 @@ pub(crate) mod cases {
             on_request(&mut xpub_proxy, cancelled("1"), |request| {
                 assert!(!request.unsubscribe("1"), "the peer is gone");
             });
-            xsub_proxy.send(cancel(b"1"));
+            xsub_proxy.send(cancel(b"1")).unwrap();
         }
         settle();
 
         // Nothing should come to the proxy any more
-        publisher.send(data("1", "X"));
+        publisher.send(data("1", "X")).unwrap();
         settle();
         expect_nothing(&mut xsub_proxy, SETTLE);
     }
@@ -223,7 +223,7 @@ pub(crate) mod cases {
         on_request(&mut xpub_proxy, subscribed("1"), |request| {
             assert!(request.subscribe("1"));
         });
-        xsub_proxy.send(subscription(b"1"));
+        xsub_proxy.send(subscription(b"1")).unwrap();
 
         let mut sub2 = context.socket::<Sub>();
         sub2.connect(&backend).unwrap();
@@ -232,18 +232,18 @@ pub(crate) mod cases {
         on_request(&mut xpub_proxy, subscribed("2"), |request| {
             assert!(request.subscribe("2"));
         });
-        xsub_proxy.send(subscription(b"2"));
+        xsub_proxy.send(subscription(b"2")).unwrap();
         settle();
 
         // The publisher sends two messages, each with its own topic, which
         // the proxy passes on
-        publisher.send(data("1", "X"));
-        publisher.send(data("2", "X"));
+        publisher.send(data("1", "X")).unwrap();
+        publisher.send(data("2", "X")).unwrap();
         settle();
         for expected in [data("1", "X"), data("2", "X")] {
-            let message = xsub_proxy.recv_timeout(FIVE).expect("a message");
+            let message = xsub_proxy.recv_timeout(FIVE).unwrap().expect("a message");
             assert_eq!(message, expected);
-            xpub_proxy.send(message);
+            xpub_proxy.send(message).unwrap();
         }
         settle();
 
@@ -259,12 +259,12 @@ pub(crate) mod cases {
         let mut subscriber = context.socket::<XSub>();
         subscriber.connect(&endpoint).unwrap();
 
-        subscriber.send(subscription(b"A"));
+        subscriber.send(subscription(b"A")).unwrap();
         on_request(&mut publisher, subscribed("A"), |request| {
             assert!(request.subscribe("XA"));
         });
-        publisher.send("XA");
-        publisher.send("XB");
+        publisher.send("XA").unwrap();
+        publisher.send("XB").unwrap();
         expect(&mut subscriber, Message::from("XA"));
         expect_nothing(&mut subscriber, SETTLE);
 
@@ -278,12 +278,12 @@ pub(crate) mod cases {
         // Reconnect, and subscribe for B, overwritten to XB
         let mut subscriber = context.socket::<XSub>();
         subscriber.connect(&endpoint).unwrap();
-        subscriber.send(subscription(b"B"));
+        subscriber.send(subscription(b"B")).unwrap();
         on_request(&mut publisher, subscribed("B"), |request| {
             assert!(request.subscribe("XB"));
         });
-        publisher.send("XA");
-        publisher.send("XB");
+        publisher.send("XA").unwrap();
+        publisher.send("XB").unwrap();
         expect(&mut subscriber, Message::from("XB"));
         expect_nothing(&mut subscriber, SETTLE);
     }
@@ -327,9 +327,9 @@ fn user_message() {
         .unwrap();
 
     let message = Message::from(&b"\x02A"[..]);
-    subscriber.send(message.clone());
+    subscriber.send(message.clone()).unwrap();
     assert_eq!(
-        publisher.recv_timeout(FIVE),
+        publisher.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Message(message))
     );
 }

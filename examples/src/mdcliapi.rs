@@ -65,8 +65,8 @@ impl MdClient {
 
         let mut retries_left = self.retries;
         while retries_left > 0 {
-            self.client.send(request.clone());
-            if let Some(reply) = self.client.recv_timeout(self.timeout) {
+            self.client.send(request.clone()).unwrap();
+            if let Some(reply) = self.client.recv_timeout(self.timeout).unwrap() {
                 if self.verbose {
                     log("I: received reply:");
                     dump(&reply);

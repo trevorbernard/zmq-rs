@@ -28,11 +28,14 @@ fn a_pair_talks_both_ways_over_tcp() {
     let bound = left.bind(&free_endpoint()).unwrap();
     let mut right = context.socket::<Pair>();
     right.connect(&bound.to_string()).unwrap();
-    right.send("ping");
-    let (received, mut left) = within(FIVE, move || (left.recv(), left));
+    right.send("ping").unwrap();
+    let (received, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
     assert_eq!(received, Message::from("ping"));
-    left.send("pong");
-    assert_eq!(within(FIVE, move || right.recv()), Message::from("pong"));
+    left.send("pong").unwrap();
+    assert_eq!(
+        within(FIVE, move || right.recv().unwrap()),
+        Message::from("pong")
+    );
 }
 
 #[test]
@@ -42,10 +45,10 @@ fn a_pair_talks_both_ways_over_inproc() {
     left.bind("inproc://pair").unwrap();
     let mut right = context.socket::<Pair>();
     right.connect("inproc://pair").unwrap();
-    left.send("to right");
-    right.send("to left");
-    assert_eq!(right.try_recv(), Some(Message::from("to right")));
-    assert_eq!(left.try_recv(), Some(Message::from("to left")));
+    left.send("to right").unwrap();
+    right.send("to left").unwrap();
+    assert_eq!(right.try_recv().unwrap(), Some(Message::from("to right")));
+    assert_eq!(left.try_recv().unwrap(), Some(Message::from("to left")));
 }
 
 #[test]
@@ -53,12 +56,18 @@ fn sending_waits_until_a_peer_connects() {
     let context = Context::new().unwrap();
     let mut left = context.socket::<Pair>();
     left.bind("inproc://later").unwrap();
-    assert_eq!(left.try_send("too early"), Err(Message::from("too early")));
-    let sender = thread::spawn(move || left.send("waited"));
+    assert_eq!(
+        left.try_send("too early"),
+        Err(zmq::TrySendError::Full(Message::from("too early")))
+    );
+    let sender = thread::spawn(move || left.send("waited").unwrap());
     thread::sleep(Duration::from_millis(50));
     let mut right = context.socket::<Pair>();
     right.connect("inproc://later").unwrap();
-    assert_eq!(within(FIVE, move || right.recv()), Message::from("waited"));
+    assert_eq!(
+        within(FIVE, move || right.recv().unwrap()),
+        Message::from("waited")
+    );
     sender.join().unwrap();
 }
 
@@ -71,9 +80,12 @@ fn a_second_peer_is_turned_away() {
     first.connect("inproc://taken").unwrap();
     let mut second = context.socket::<Pair>();
     second.connect("inproc://taken").unwrap();
-    left.send("for the first");
-    assert_eq!(first.try_recv(), Some(Message::from("for the first")));
-    assert_eq!(second.try_recv(), None);
+    left.send("for the first").unwrap();
+    assert_eq!(
+        first.try_recv().unwrap(),
+        Some(Message::from("for the first"))
+    );
+    assert_eq!(second.try_recv().unwrap(), None);
     assert!(
         second.try_send("anyone?").is_err(),
         "its connection was closed"
@@ -87,13 +99,13 @@ fn the_next_peer_is_accepted_once_the_first_leaves() {
     left.bind("inproc://succession").unwrap();
     let mut first = context.socket::<Pair>();
     first.connect("inproc://succession").unwrap();
-    first.send("goodbye");
+    first.send("goodbye").unwrap();
     drop(first);
     let mut second = context.socket::<Pair>();
     second.connect("inproc://succession").unwrap();
-    second.send("hello");
-    assert_eq!(left.try_recv(), Some(Message::from("goodbye")));
-    assert_eq!(left.try_recv(), Some(Message::from("hello")));
-    left.send("welcome");
-    assert_eq!(second.try_recv(), Some(Message::from("welcome")));
+    second.send("hello").unwrap();
+    assert_eq!(left.try_recv().unwrap(), Some(Message::from("goodbye")));
+    assert_eq!(left.try_recv().unwrap(), Some(Message::from("hello")));
+    left.send("welcome").unwrap();
+    assert_eq!(second.try_recv().unwrap(), Some(Message::from("welcome")));
 }

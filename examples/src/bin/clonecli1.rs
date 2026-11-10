@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut kvmap = HashMap::new();
     loop {
-        let Some(kvmsg) = KvMsg::from_message(&updates.recv()) else {
+        let Some(kvmsg) = KvMsg::from_message(&updates.recv()?) else {
             continue;
         };
         kvmsg.store(&mut kvmap);

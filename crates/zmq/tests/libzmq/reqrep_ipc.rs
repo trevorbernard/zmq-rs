@@ -32,7 +32,7 @@ fn leak() {
     let requester = std::thread::spawn(move || {
         let _ = sc.request_timeout("leakymsg", Duration::from_millis(100));
     });
-    let request = sb.recv_timeout(FIVE).expect("the request");
+    let request = sb.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &msg(&["leakymsg"]));
     requester.join().unwrap();
     settle();

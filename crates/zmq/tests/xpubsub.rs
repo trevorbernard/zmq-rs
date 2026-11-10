@@ -42,12 +42,16 @@ fn xpub_hears_subscriptions_once_per_topic() {
     second.connect("inproc://hear").unwrap();
     first.subscribe("x");
     second.subscribe("x");
-    assert_eq!(xpub.try_recv(), Some(subscribed("x")));
-    assert_eq!(xpub.try_recv(), None, "the second subscriber is not news");
+    assert_eq!(xpub.try_recv().unwrap(), Some(subscribed("x")));
+    assert_eq!(
+        xpub.try_recv().unwrap(),
+        None,
+        "the second subscriber is not news"
+    );
     first.unsubscribe("x");
-    assert_eq!(xpub.try_recv(), None);
+    assert_eq!(xpub.try_recv().unwrap(), None);
     second.unsubscribe("x");
-    assert_eq!(xpub.try_recv(), Some(cancelled("x")));
+    assert_eq!(xpub.try_recv().unwrap(), Some(cancelled("x")));
 }
 
 #[test]
@@ -58,9 +62,9 @@ fn xpub_hears_a_departing_subscriber_cancel() {
     let mut subscriber = context.socket::<Sub>();
     subscriber.connect("inproc://depart").unwrap();
     subscriber.subscribe("x");
-    assert_eq!(xpub.try_recv(), Some(subscribed("x")));
+    assert_eq!(xpub.try_recv().unwrap(), Some(subscribed("x")));
     drop(subscriber);
-    assert_eq!(within(FIVE, move || xpub.recv()), cancelled("x"));
+    assert_eq!(within(FIVE, move || xpub.recv().unwrap()), cancelled("x"));
 }
 
 #[test]
@@ -71,9 +75,9 @@ fn xpub_publishes_like_pub() {
     let mut subscriber = context.socket::<Sub>();
     subscriber.connect("inproc://publish").unwrap();
     subscriber.subscribe("news");
-    assert_eq!(xpub.send("sports"), 0);
-    assert_eq!(xpub.send("news"), 1);
-    assert_eq!(subscriber.try_recv(), Some(Message::from("news")));
+    assert_eq!(xpub.send("sports").unwrap(), 0);
+    assert_eq!(xpub.send("news").unwrap(), 1);
+    assert_eq!(subscriber.try_recv().unwrap(), Some(Message::from("news")));
 }
 
 #[test]
@@ -83,15 +87,15 @@ fn xsub_talks_upstream_and_filters_downstream() {
     xpub.bind("inproc://upstream").unwrap();
     let mut xsub = context.socket::<XSub>();
     xsub.connect("inproc://upstream").unwrap();
-    xsub.send("hello upstream");
+    xsub.send("hello upstream").unwrap();
     xsub.subscribe("a");
     assert_eq!(
-        xpub.try_recv(),
+        xpub.try_recv().unwrap(),
         Some(XPubEvent::Message(Message::from("hello upstream")))
     );
-    assert_eq!(xpub.try_recv(), Some(subscribed("a")));
-    assert_eq!(xpub.send("a1"), 1);
-    assert_eq!(xsub.try_recv(), Some(Message::from("a1")));
+    assert_eq!(xpub.try_recv().unwrap(), Some(subscribed("a")));
+    assert_eq!(xpub.send("a1").unwrap(), 1);
+    assert_eq!(xsub.try_recv().unwrap(), Some(Message::from("a1")));
 }
 
 #[test]
@@ -101,10 +105,10 @@ fn xsub_sending_a_subscription_subscribes() {
     publisher.bind("inproc://raw-subscription").unwrap();
     let mut xsub = context.socket::<XSub>();
     xsub.connect("inproc://raw-subscription").unwrap();
-    xsub.send(&b"\x01a"[..]);
-    assert_eq!(publisher.send("a1"), 1);
+    xsub.send(&b"\x01a"[..]).unwrap();
+    assert_eq!(publisher.send("a1").unwrap(), 1);
     assert_eq!(
-        xsub.try_recv(),
+        xsub.try_recv().unwrap(),
         Some(Message::from("a1")),
         "and filters by it"
     );
@@ -126,12 +130,12 @@ fn a_proxy_forwards_subscriptions_up_and_messages_down() {
         move || {
             while !stop.load(Ordering::Relaxed) {
                 let mut idle = true;
-                while let Some(event) = backend.try_recv() {
-                    frontend.forward(event);
+                while let Some(event) = backend.try_recv().unwrap() {
+                    frontend.forward(event).unwrap();
                     idle = false;
                 }
-                while let Some(message) = frontend.try_recv() {
-                    backend.send(message);
+                while let Some(message) = frontend.try_recv().unwrap() {
+                    backend.send(message).unwrap();
                     idle = false;
                 }
                 if idle {
@@ -145,7 +149,7 @@ fn a_proxy_forwards_subscriptions_up_and_messages_down() {
     subscriber.connect("inproc://proxy").unwrap();
     subscriber.subscribe("news");
     let started = Instant::now();
-    while publisher.send("news: through the proxy") == 0 {
+    while publisher.send("news: through the proxy").unwrap() == 0 {
         assert!(
             started.elapsed() < FIVE,
             "the subscription never got upstream"
@@ -153,12 +157,12 @@ fn a_proxy_forwards_subscriptions_up_and_messages_down() {
         thread::sleep(Duration::from_millis(5));
     }
     assert_eq!(
-        publisher.send("sports"),
+        publisher.send("sports").unwrap(),
         0,
         "only wanted topics go upstream"
     );
     assert_eq!(
-        within(FIVE, move || subscriber.recv()),
+        within(FIVE, move || subscriber.recv().unwrap()),
         Message::from("news: through the proxy")
     );
     stop.store(true, Ordering::Relaxed);
@@ -172,10 +176,10 @@ fn forwarding_a_cancel_unsubscribes() {
     publisher.bind("inproc://forward-cancel").unwrap();
     let mut xsub = context.socket::<XSub>();
     xsub.connect("inproc://forward-cancel").unwrap();
-    xsub.forward(subscribed("x"));
-    assert_eq!(publisher.send("x1"), 1);
-    xsub.forward(cancelled("x"));
-    assert_eq!(publisher.send("x2"), 0);
+    xsub.forward(subscribed("x")).unwrap();
+    assert_eq!(publisher.send("x1").unwrap(), 1);
+    xsub.forward(cancelled("x")).unwrap();
+    assert_eq!(publisher.send("x2").unwrap(), 0);
 }
 
 #[test]
@@ -189,8 +193,12 @@ fn xsub_subscriptions_are_never_dropped_however_many() {
     }
     xsub.connect("inproc://xsub-many-topics").unwrap();
     for i in 0..3000 {
-        assert_eq!(publisher.send(format!("topic {i}")), 1, "topic {i}");
-        assert!(xsub.try_recv().is_some());
+        assert_eq!(
+            publisher.send(format!("topic {i}")).unwrap(),
+            1,
+            "topic {i}"
+        );
+        assert!(xsub.try_recv().unwrap().is_some());
     }
 }
 
@@ -206,13 +214,16 @@ fn a_flooding_subscriber_cannot_keep_xpub_from_returning() {
         let stop = stop.clone();
         thread::spawn(move || {
             while !stop.load(Ordering::Relaxed) {
-                xsub.send(Message::from(&b"\x01a"[..]));
+                xsub.send(Message::from(&b"\x01a"[..])).unwrap();
             }
         })
     };
     let heard = within(FIVE, move || {
-        let first = xpub.recv();
-        (first, xpub.recv_timeout(Duration::from_millis(200)))
+        let first = xpub.recv().unwrap();
+        (
+            first,
+            xpub.recv_timeout(Duration::from_millis(200)).unwrap(),
+        )
     });
     stop.store(true, Ordering::Relaxed);
     flooding.join().unwrap();
@@ -232,10 +243,10 @@ fn xsub_drops_messages_at_the_hwm_but_never_subscriptions() {
     let mut xsub = context.socket_with::<XSub>(marks(2));
     xsub.connect("inproc://xsub-hwm").unwrap();
     for i in 0..10 {
-        xsub.send(format!("upstream {i}"));
+        xsub.send(format!("upstream {i}")).unwrap();
     }
-    xsub.send(Message::from(&b"\x01news"[..]));
-    let events: Vec<XPubEvent> = std::iter::from_fn(|| xpub.try_recv()).collect();
+    xsub.send(Message::from(&b"\x01news"[..])).unwrap();
+    let events: Vec<XPubEvent> = std::iter::from_fn(|| xpub.try_recv().unwrap()).collect();
     // An inproc pipe holds what both ends would: 2 + 1.
     let expected: Vec<XPubEvent> = (0..3)
         .map(|i| XPubEvent::Message(Message::from(format!("upstream {i}"))))

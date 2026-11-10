@@ -4,7 +4,9 @@ use std::fmt;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
-use crate::wait;
+use crate::socket::noop;
+use crate::socket::sealed::Terminates;
+use crate::{Terminated, wait};
 
 /// A socket to [`poll`], and what to wait for. Made by
 /// [`Socket::readable`](crate::Socket::readable),
@@ -25,13 +27,13 @@ enum Target<'a> {
 }
 
 /// A socket that can be polled until a receive would not wait.
-pub(crate) trait PollReadable {
+pub(crate) trait PollReadable: Terminates {
     /// Ready once a receive would return at once; registers `cx` if not.
     fn poll_readable(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
 
 /// A socket that can be polled until a send would not wait.
-pub(crate) trait PollWritable {
+pub(crate) trait PollWritable: Terminates {
     /// Ready once a send would succeed at once; registers `cx` if not.
     fn poll_writable(&mut self, cx: &mut Context<'_>) -> Poll<()>;
 }
@@ -54,14 +56,14 @@ impl<'a> PollItem<'a> {
     /// # let mut idle = context.socket::<Dealer>();
     /// # frontend.bind("inproc://frontend")?;
     /// # idle.connect("inproc://frontend")?;
-    /// # idle.send("request");
+    /// # idle.send("request")?;
     /// let workers_free = false;
     /// // Take requests only while a worker is free to handle them.
     /// let ready = zmq::poll_timeout(
     ///     [backend.readable(), frontend.readable().when(workers_free)],
     ///     std::time::Duration::from_millis(10),
     /// );
-    /// assert_eq!(ready, None);
+    /// assert_eq!(ready, Ok(None));
     /// # Ok(())
     /// # }
     /// ```
@@ -113,6 +115,19 @@ impl<'a> PollItem<'a> {
     }
 }
 
+impl PollItem<'_> {
+    /// Whether the socket's context is shut down; if not, a shutdown wakes
+    /// `cx`.
+    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool {
+        match &self.target {
+            Target::Readable(socket) => socket.poll_terminated(cx),
+            Target::Writable(socket) => socket.poll_terminated(cx),
+            Target::Either(socket) => Terminates::poll_terminated(&**socket, cx),
+            Target::Skipped => false,
+        }
+    }
+}
+
 impl fmt::Debug for PollItem<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let interest = match self.target {
@@ -143,15 +158,15 @@ impl fmt::Debug for PollItem<'_> {
 /// control.bind("inproc://control")?;
 /// let mut boss = context.socket::<Push>();
 /// boss.connect("inproc://control")?;
-/// boss.send("stop");
+/// boss.send("stop")?;
 ///
 /// loop {
-///     let [job, stop] = zmq::poll([jobs.readable(), control.readable()]);
+///     let [job, stop] = zmq::poll([jobs.readable(), control.readable()])?;
 ///     if stop {
 ///         break;
 ///     }
 ///     if job {
-///         let _job = jobs.try_recv().expect("readable");
+///         let _job = jobs.try_recv()?.expect("readable");
 ///     }
 /// }
 /// # Ok(())
@@ -163,9 +178,9 @@ impl fmt::Debug for PollItem<'_> {
 /// ```compile_fail
 /// zmq::poll([]);
 /// ```
-pub fn poll<const N: usize>(items: [PollItem<'_>; N]) -> [bool; N] {
+pub fn poll<const N: usize>(items: [PollItem<'_>; N]) -> Result<[bool; N], Terminated> {
     const { assert!(N > 0, "polling no sockets would wait forever") };
-    wait_until(items, None).expect("no deadline")
+    wait_until(items, None).map(|ready| ready.expect("no deadline"))
 }
 
 /// Waits at most `timeout` for at least one of `items` to be ready, as
@@ -173,21 +188,27 @@ pub fn poll<const N: usize>(items: [PollItem<'_>; N]) -> [bool; N] {
 pub fn poll_timeout<const N: usize>(
     items: [PollItem<'_>; N],
     timeout: Duration,
-) -> Option<[bool; N]> {
+) -> Result<Option<[bool; N]>, Terminated> {
     wait_until(items, wait::deadline(timeout))
 }
 
 fn wait_until<const N: usize>(
     mut items: [PollItem<'_>; N],
     deadline: Option<Instant>,
-) -> Option<[bool; N]> {
+) -> Result<Option<[bool; N]>, Terminated> {
     wait::block_on_until(deadline, |cx| {
+        if items.iter().any(|item| item.poll_terminated(&mut noop())) {
+            return Poll::Ready(Err(Terminated));
+        }
         // Each item is polled, ready or not, so that each registers `cx`.
         let ready = items.each_mut().map(|item| item.poll(cx).is_ready());
         if ready.contains(&true) {
-            Poll::Ready(ready)
+            Poll::Ready(Ok(ready))
+        } else if items.iter().any(|item| item.poll_terminated(cx)) {
+            Poll::Ready(Err(Terminated))
         } else {
             Poll::Pending
         }
     })
+    .transpose()
 }

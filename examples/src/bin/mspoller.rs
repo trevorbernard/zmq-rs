@@ -13,13 +13,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Process messages from both sockets
     loop {
-        let [task, update] = zmq::poll([receiver.readable(), subscriber.readable()]);
+        let [task, update] = zmq::poll([receiver.readable(), subscriber.readable()])?;
         if task {
-            let _task = receiver.recv();
+            let _task = receiver.recv()?;
             // Process task
         }
         if update {
-            let _update = subscriber.recv();
+            let _update = subscriber.recv()?;
             // Process weather update
         }
     }

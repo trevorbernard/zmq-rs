@@ -31,11 +31,11 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
             let mut request = Message::new("fetch");
             request.push(offset.to_string());
             request.push(CHUNK_SIZE.to_string());
-            dealer.send(request);
+            dealer.send(request)?;
             offset += CHUNK_SIZE;
             credit -= 1;
         }
-        let size = dealer.recv().last().len();
+        let size = dealer.recv()?.last().len();
         chunks += 1;
         credit += 1;
         total += size;
@@ -61,7 +61,7 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
     });
     router.bind("tcp://*:6000")?;
     loop {
-        let (identity, request) = router.recv();
+        let (identity, request) = router.recv()?;
         let [command, offset, chunksz] = request.iter().collect::<Vec<_>>()[..] else {
             continue;
         };

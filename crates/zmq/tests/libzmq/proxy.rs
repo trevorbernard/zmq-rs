@@ -60,19 +60,20 @@ pub(crate) fn client_task(context: Context, control_context: Context, endpoint: 
             let ready = zmq::poll_timeout(
                 [client.readable(), control.readable()],
                 Duration::from_millis(10),
-            );
+            )
+            .unwrap();
             let Some([reply, command]) = ready else {
                 continue;
             };
             if reply {
-                let content = client.try_recv().expect("readable");
+                let content = client.try_recv().unwrap().expect("readable");
                 assert_eq!(content.len().get(), 1, "a single part");
                 let body = content.last();
                 assert_eq!(body.len(), CONTENT_SIZE);
                 assert!(body.starts_with(b"request #"));
             }
             if command {
-                let command = control.try_recv().expect("readable");
+                let command = control.try_recv().unwrap().expect("readable");
                 let command = command.last();
                 if command.starts_with(b"TERMINATE") {
                     break 'run;
@@ -86,7 +87,7 @@ pub(crate) fn client_task(context: Context, control_context: Context, endpoint: 
         if keep_sending {
             request_nbr += 1;
             // CONTENT_SIZE octets: libzmq sends the C string's NUL too
-            client.send(format!("request #{request_nbr:03}\0"));
+            client.send(format!("request #{request_nbr:03}\0")).unwrap();
         }
     }
 }
@@ -100,7 +101,7 @@ pub(crate) fn server_worker(context: Context, control_context: Context) {
 
     let mut keep_sending = true;
     loop {
-        if let Some(command) = control.try_recv() {
+        if let Some(command) = control.try_recv().unwrap() {
             let command = command.last();
             if command.starts_with(b"TERMINATE") {
                 return;
@@ -110,7 +111,7 @@ pub(crate) fn server_worker(context: Context, control_context: Context) {
             }
         }
         // The DEALER gives us the reply envelope and the request
-        let Some(request) = worker.try_recv() else {
+        let Some(request) = worker.try_recv().unwrap() else {
             thread::sleep(Duration::from_millis(1));
             continue;
         };
@@ -123,7 +124,7 @@ pub(crate) fn server_worker(context: Context, control_context: Context) {
                 thread::sleep(Duration::from_millis(rand(10) + 1));
                 let mut reply = Message::new(routing_id.clone());
                 reply.push(content.last().clone());
-                worker.send(reply);
+                worker.send(reply).unwrap();
             }
         }
     }
@@ -162,9 +163,9 @@ fn proxy() {
         let steering = thread::spawn(move || {
             // Run for 500 ms, then stop and terminate everyone
             thread::sleep(Duration::from_millis(500));
-            control.send("STOP");
+            control.send("STOP").unwrap();
             thread::sleep(Duration::from_millis(500));
-            control.send("TERMINATE");
+            control.send("TERMINATE").unwrap();
             thread::sleep(Duration::from_millis(500));
             proxy_control.terminate();
         });

@@ -29,10 +29,16 @@ fn received_with(transport: &str, options: SocketOptions) -> (Message, Message) 
     let endpoint = server.bind(transport).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(named("id"));
     client.connect(&endpoint).unwrap();
-    client.send("first");
-    client.send("second");
-    let first = server.recv_timeout(FIVE).expect("the first message");
-    let second = server.recv_timeout(FIVE).expect("the second message");
+    client.send("first").unwrap();
+    client.send("second").unwrap();
+    let first = server
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("the first message");
+    let second = server
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("the second message");
     (first, second)
 }
 
@@ -118,16 +124,16 @@ fn a_message_passed_on_drops_its_first_connections_metadata() {
     let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
-    push.send("passed on");
-    let message = pull.recv_timeout(FIVE).expect("over tcp");
+    push.send("passed on").unwrap();
+    let message = pull.recv_timeout(FIVE).unwrap().expect("over tcp");
     assert!(message.metadata().is_some());
 
     let mut onward = context.socket::<Pull>();
     onward.bind("inproc://onward").unwrap();
     let mut forwarder = context.socket::<Push>();
     forwarder.connect("inproc://onward").unwrap();
-    forwarder.send(message);
-    let message = onward.recv_timeout(FIVE).expect("over inproc");
+    forwarder.send(message).unwrap();
+    let message = onward.recv_timeout(FIVE).unwrap().expect("over inproc");
     assert!(message.metadata().is_none());
 }
 
@@ -142,8 +148,8 @@ fn a_conflated_message_carries_its_connections_metadata() {
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     for i in 0..100 {
-        push.send(format!("m{i}"));
+        push.send(format!("m{i}")).unwrap();
     }
-    let message = pull.recv_timeout(FIVE).expect("a message");
+    let message = pull.recv_timeout(FIVE).unwrap().expect("a message");
     assert_eq!(message.property("Socket-Type"), Some(b"PUSH".as_slice()));
 }

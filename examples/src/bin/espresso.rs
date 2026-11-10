@@ -16,7 +16,7 @@ fn subscriber_thread(context: Context) -> Result<(), zmq::Error> {
     subscriber.subscribe("B");
 
     for _ in 0..5 {
-        subscriber.recv();
+        subscriber.recv()?;
     }
     Ok(())
 }
@@ -28,7 +28,7 @@ fn publisher_thread(context: Context) -> Result<(), zmq::Error> {
 
     loop {
         let topic = char::from(b'A' + randof(10) as u8);
-        publisher.send(format!("{topic}-{:05}", randof(100_000)));
+        publisher.send(format!("{topic}-{:05}", randof(100_000)))?;
         sleep_ms(100);
     }
 }
@@ -37,7 +37,7 @@ fn publisher_thread(context: Context) -> Result<(), zmq::Error> {
 // pipe. In CZMQ, the pipe is a pair of PAIR sockets connected over inproc.
 fn listener_thread(mut pipe: zmq::Socket<Pair>) {
     loop {
-        dump(&pipe.recv());
+        dump(&pipe.recv().unwrap());
     }
 }
 

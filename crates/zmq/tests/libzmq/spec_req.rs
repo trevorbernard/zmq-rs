@@ -33,7 +33,7 @@ fn round_robin_out(bind_address: &str) {
     // Send our peer-replies, and expect every REP it used once in order
     for rep in &mut reps {
         let requesting = Requesting::start(req, msg(&["ABC"]));
-        let request = rep.recv_timeout(FIVE).expect("this REP's turn");
+        let request = rep.recv_timeout(FIVE).unwrap().expect("this REP's turn");
         assert_eq!(request.body(), &msg(&["ABC"]));
         request.reply("DEF");
         let reply;
@@ -66,7 +66,7 @@ fn req_message_format(bind_address: &str) {
     let requesting = Requesting::start(req, msg(&["ABC", "DEF"]));
 
     // A ROUTER hands over the peer's routing id apart from the message.
-    let (peer, request) = router.recv_timeout(FIVE).expect("the request");
+    let (peer, request) = router.recv_timeout(FIVE).unwrap().expect("the request");
     assert!(!peer.as_bytes().is_empty());
     assert_eq!(request, msg(&["", "ABC", "DEF"]));
 
@@ -133,7 +133,10 @@ fn req_only_listens_to_current_peer(bind_address: &str) {
         let requesting = Requesting::start(req, msg(&["ABC"]));
 
         // Receive on router i
-        let (from, request) = routers[i].recv_timeout(FIVE).expect("router i's turn");
+        let (from, request) = routers[i]
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("router i's turn");
         assert_eq!(from, a);
         assert_eq!(request, msg(&["", "ABC"]));
 

@@ -48,7 +48,10 @@ fn publisher_thread_main(context: Context) -> u64 {
     publisher.connect("inproc://frontend").unwrap();
 
     // Wait for the one subscriber to subscribe before sending
-    assert_eq!(publisher.recv(), XPubEvent::Subscribe(zmq::Frame::new()));
+    assert_eq!(
+        publisher.recv().unwrap(),
+        XPubEvent::Subscribe(zmq::Frame::new())
+    );
 
     let mut send_count = 0;
     let payload = vec![b'A'; NUM_BYTES_PER_MSG];
@@ -69,12 +72,13 @@ fn subscriber_thread_main(context: Context) -> u64 {
 
     // The first message may take a while; after it, 100 ms with nothing
     // means the publisher has stopped.
-    subscriber.recv();
+    subscriber.recv().unwrap();
     let mut received = 1;
     loop {
         thread::sleep(Duration::from_millis(100));
         if subscriber
             .recv_timeout(Duration::from_millis(100))
+            .unwrap()
             .is_none()
         {
             return received;

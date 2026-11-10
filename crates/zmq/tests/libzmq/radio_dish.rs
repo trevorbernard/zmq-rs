@@ -22,7 +22,7 @@ fn group(name: &str) -> Group {
 /// Receives the next message and checks its group and body.
 fn recv_cmp(mut dish: Socket<Dish>, group_name: &str, body: &str) -> Socket<Dish> {
     let (received_group, frame, dish) = within(FIVE, move || {
-        let (received_group, frame) = dish.recv();
+        let (received_group, frame) = dish.recv().unwrap();
         (received_group, frame, dish)
     });
     assert_eq!(received_group, group(group_name));
@@ -62,7 +62,7 @@ fn long_group() {
     dish.connect(&endpoint).unwrap();
     settle();
 
-    radio.send(&group(long), "HELLO");
+    radio.send(&group(long), "HELLO").unwrap();
     recv_cmp(dish, long, "HELLO");
 }
 
@@ -88,25 +88,25 @@ fn radio_dish_tcp_poll(loopback: &str) {
     settle();
 
     // Only the Movies message is for the dish.
-    radio.send(&group("TV"), "Friends");
-    radio.send(&group("Movies"), "Godfather");
+    radio.send(&group("TV"), "Friends").unwrap();
+    radio.send(&group("Movies"), "Godfather").unwrap();
     let mut dish = recv_cmp(dish, "Movies", "Godfather");
 
     // Join a group while connected.
     assert!(dish.join(&group("TV")));
     thread::sleep(Duration::from_secs(1));
-    radio.send(&group("TV"), "Friends");
+    radio.send(&group("TV"), "Friends").unwrap();
     let mut dish = recv_cmp(dish, "TV", "Friends");
 
     assert!(dish.leave(&group("TV")));
     thread::sleep(Duration::from_secs(1));
-    radio.send(&group("TV"), "Friends");
-    radio.send(&group("Movies"), "Godfather");
+    radio.send(&group("TV"), "Friends").unwrap();
+    radio.send(&group("Movies"), "Godfather").unwrap();
 
     // libzmq polls the radio too and finds it not readable; RADIO never
     // receives, so here it has no `readable` to poll.
     assert_eq!(
-        zmq::poll_timeout([dish.readable()], Duration::from_secs(2)),
+        zmq::poll_timeout([dish.readable()], Duration::from_secs(2)).unwrap(),
         Some([true])
     );
     recv_cmp(dish, "Movies", "Godfather");

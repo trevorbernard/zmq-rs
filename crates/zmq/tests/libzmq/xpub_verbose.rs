@@ -22,15 +22,18 @@ fn cancelled(topic: &'static str) -> Option<XPubEvent> {
 }
 
 fn expect(publisher: &mut Socket<XPub>, event: Option<XPubEvent>) {
-    assert_eq!(publisher.recv_timeout(FIVE), event);
+    assert_eq!(publisher.recv_timeout(FIVE).unwrap(), event);
 }
 
 fn expect_nothing(publisher: &mut Socket<XPub>) {
-    assert_eq!(publisher.recv_timeout(SETTLE), None);
+    assert_eq!(publisher.recv_timeout(SETTLE).unwrap(), None);
 }
 
 fn expect_message(subscriber: &mut Socket<Sub>, topic: &'static str) {
-    assert_eq!(subscriber.recv_timeout(FIVE), Some(Message::from(topic)));
+    assert_eq!(
+        subscriber.recv_timeout(FIVE).unwrap(),
+        Some(Message::from(topic))
+    );
 }
 
 fn xpub_with_subs<const N: usize>(endpoint: &str) -> (Socket<XPub>, [Socket<Sub>; N]) {
@@ -76,8 +79,8 @@ fn xpub_verbose_one_sub() {
     sub.subscribe(TOPIC_A);
     expect(&mut publisher, subscribed(TOPIC_A));
 
-    publisher.send(TOPIC_A);
-    publisher.send(TOPIC_B);
+    publisher.send(TOPIC_A).unwrap();
+    publisher.send(TOPIC_B).unwrap();
     expect_message(&mut sub, TOPIC_A);
     expect_message(&mut sub, TOPIC_B);
 }
@@ -95,8 +98,8 @@ fn xpub_verbose_two_subs() {
     sub1.subscribe(TOPIC_A);
     expect(&mut publisher, subscribed(TOPIC_A));
 
-    publisher.send(TOPIC_A);
-    publisher.send(TOPIC_B);
+    publisher.send(TOPIC_A).unwrap();
+    publisher.send(TOPIC_B).unwrap();
     expect_message(&mut sub0, TOPIC_A);
     expect_message(&mut sub1, TOPIC_A);
     expect_message(&mut sub0, TOPIC_B);
@@ -134,7 +137,7 @@ fn xpub_verboser_one_sub() {
     expect(&mut publisher, subscribed(TOPIC_A));
 
     // Make sure everything still works
-    publisher.send(TOPIC_A);
+    publisher.send(TOPIC_A).unwrap();
     expect_message(&mut sub, TOPIC_A);
 
     assert!(sub.unsubscribe(TOPIC_A));
@@ -168,7 +171,7 @@ fn xpub_verboser_two_subs() {
     expect(&mut publisher, subscribed(TOPIC_A));
 
     // Make sure everything still works
-    publisher.send(TOPIC_A);
+    publisher.send(TOPIC_A).unwrap();
     expect_message(&mut sub0, TOPIC_A);
     expect_message(&mut sub1, TOPIC_A);
 

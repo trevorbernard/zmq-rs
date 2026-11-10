@@ -7,7 +7,7 @@ use std::sync::mpsc::{self, RecvTimeoutError};
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Dealer, Frame, Linger, Message, Pair, PeerGone, Rep, Req, Socket, SocketOptions};
+use zmq::{Dealer, Frame, Linger, Message, Pair, Rep, Req, RequestError, Socket, SocketOptions};
 
 /// How long a test waits for something that should happen.
 pub(crate) const FIVE: Duration = Duration::from_secs(5);
@@ -77,11 +77,11 @@ pub(crate) fn bounce_dealer(server: &mut Socket<Dealer>, client: &mut Socket<Dea
     client
         .send_timeout(content.clone(), FIVE)
         .expect("sent to the server");
-    assert_eq!(server.recv_timeout(FIVE), Some(content.clone()));
+    assert_eq!(server.recv_timeout(FIVE).unwrap(), Some(content.clone()));
     server
         .send_timeout(content.clone(), FIVE)
         .expect("sent back");
-    assert_eq!(client.recv_timeout(FIVE), Some(content));
+    assert_eq!(client.recv_timeout(FIVE).unwrap(), Some(content));
 }
 
 /// libzmq's `bounce` between PAIRs.
@@ -90,11 +90,11 @@ pub(crate) fn bounce_pair(server: &mut Socket<Pair>, client: &mut Socket<Pair>) 
     client
         .send_timeout(content.clone(), FIVE)
         .expect("sent to the server");
-    assert_eq!(server.recv_timeout(FIVE), Some(content.clone()));
+    assert_eq!(server.recv_timeout(FIVE).unwrap(), Some(content.clone()));
     server
         .send_timeout(content.clone(), FIVE)
         .expect("sent back");
-    assert_eq!(client.recv_timeout(FIVE), Some(content));
+    assert_eq!(client.recv_timeout(FIVE).unwrap(), Some(content));
 }
 
 /// libzmq's `bounce` between a REQ and a REP: a two-part request from
@@ -102,7 +102,7 @@ pub(crate) fn bounce_pair(server: &mut Socket<Pair>, client: &mut Socket<Pair>) 
 pub(crate) fn bounce_req_rep(rep: &mut Socket<Rep>, req: Socket<Req>) -> Socket<Req> {
     let content = bounce_content();
     let requesting = Requesting::start(req, content.clone());
-    let request = rep.recv_timeout(FIVE).expect("the request");
+    let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &content);
     request.reply(content.clone());
     let (req, reply) = requesting.finish();
@@ -112,7 +112,7 @@ pub(crate) fn bounce_req_rep(rep: &mut Socket<Rep>, req: Socket<Req>) -> Socket<
 
 /// A request made on another thread, so the test can play the peer
 /// meanwhile, as libzmq's tests do by sending and receiving separately.
-pub(crate) struct Requesting(mpsc::Receiver<(Socket<Req>, Result<Message, PeerGone>)>);
+pub(crate) struct Requesting(mpsc::Receiver<(Socket<Req>, Result<Message, RequestError>)>);
 
 impl Requesting {
     pub(crate) fn start(mut req: Socket<Req>, message: Message) -> Self {

@@ -29,7 +29,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn publish_until(publisher: &mut zmq::Socket<Pub>, message: &str, subscribers: usize) -> usize {
     let started = Instant::now();
     let mut missed = 0;
-    while publisher.send(message.to_owned()) < subscribers {
+    while publisher.send(message.to_owned()).unwrap() < subscribers {
         missed += 1;
         assert!(started.elapsed() < FIVE, "subscribers never arrived");
         thread::sleep(Duration::from_millis(5));
@@ -47,9 +47,11 @@ fn subscribers_receive_only_their_topics_over_tcp() {
     subscriber.connect(&bound.to_string()).unwrap();
 
     publish_until(&mut publisher, "news: first", 1);
-    assert_eq!(publisher.send("sports"), 0, "nobody wants sports");
-    assert_eq!(publisher.send("news: second"), 1);
-    let received = within(FIVE, move || [subscriber.recv(), subscriber.recv()]);
+    assert_eq!(publisher.send("sports").unwrap(), 0, "nobody wants sports");
+    assert_eq!(publisher.send("news: second").unwrap(), 1);
+    let received = within(FIVE, move || {
+        [subscriber.recv().unwrap(), subscriber.recv().unwrap()]
+    });
     assert_eq!(
         received,
         [Message::from("news: first"), Message::from("news: second")]
@@ -63,11 +65,11 @@ fn subscribing_after_connecting_works_too() {
     publisher.bind("inproc://late-subscription").unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.connect("inproc://late-subscription").unwrap();
-    assert_eq!(publisher.send("before"), 0);
+    assert_eq!(publisher.send("before").unwrap(), 0);
     subscriber.subscribe("");
-    assert_eq!(publisher.send("after"), 1);
+    assert_eq!(publisher.send("after").unwrap(), 1);
     assert_eq!(
-        within(FIVE, move || subscriber.recv()),
+        within(FIVE, move || subscriber.recv().unwrap()),
         Message::from("after")
     );
 }
@@ -79,8 +81,8 @@ fn a_subscriber_that_subscribed_to_nothing_receives_nothing() {
     publisher.bind("inproc://silence").unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.connect("inproc://silence").unwrap();
-    assert_eq!(publisher.send("x"), 0);
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(publisher.send("x").unwrap(), 0);
+    assert_eq!(subscriber.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -96,9 +98,12 @@ fn every_subscriber_gets_a_copy() {
             subscriber
         })
         .collect();
-    assert_eq!(publisher.send("to all"), 3);
+    assert_eq!(publisher.send("to all").unwrap(), 3);
     for subscriber in &mut subscribers {
-        assert_eq!(subscriber.try_recv(), Some(Message::from("to all")));
+        assert_eq!(
+            subscriber.try_recv().unwrap(),
+            Some(Message::from("to all"))
+        );
     }
 }
 
@@ -112,12 +117,12 @@ fn unsubscribing_stops_delivery() {
     subscriber.subscribe("a");
     subscriber.subscribe("a");
     assert!(subscriber.unsubscribe("a"));
-    assert_eq!(publisher.send("a1"), 1, "one subscription is left");
-    assert_eq!(subscriber.try_recv(), Some(Message::from("a1")));
+    assert_eq!(publisher.send("a1").unwrap(), 1, "one subscription is left");
+    assert_eq!(subscriber.try_recv().unwrap(), Some(Message::from("a1")));
     assert!(subscriber.unsubscribe("a"));
-    assert_eq!(publisher.send("a2"), 0);
+    assert_eq!(publisher.send("a2").unwrap(), 0);
     assert!(!subscriber.unsubscribe("a"), "no subscription left");
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(subscriber.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -128,9 +133,9 @@ fn messages_queued_before_unsubscribing_are_filtered_out() {
     let mut subscriber = context.socket::<Sub>();
     subscriber.connect("inproc://in-flight").unwrap();
     subscriber.subscribe("a");
-    assert_eq!(publisher.send("a1"), 1);
+    assert_eq!(publisher.send("a1").unwrap(), 1);
     subscriber.unsubscribe("a");
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(subscriber.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -148,11 +153,13 @@ fn a_publisher_drops_for_slow_subscribers_instead_of_blocking() {
     });
     subscriber.subscribe("");
     subscriber.connect("inproc://slow").unwrap();
-    let delivered: Vec<usize> = (0..5).map(|i| publisher.send(format!("{i}"))).collect();
+    let delivered: Vec<usize> = (0..5)
+        .map(|i| publisher.send(format!("{i}")).unwrap())
+        .collect();
     assert_eq!(delivered, [1, 1, 0, 0, 0]);
-    assert_eq!(subscriber.try_recv(), Some(Message::from("0")));
-    assert_eq!(subscriber.try_recv(), Some(Message::from("1")));
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(subscriber.try_recv().unwrap(), Some(Message::from("0")));
+    assert_eq!(subscriber.try_recv().unwrap(), Some(Message::from("1")));
+    assert_eq!(subscriber.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -167,8 +174,12 @@ fn subscriptions_are_never_dropped_however_many() {
     }
     subscriber.connect("inproc://many-topics").unwrap();
     for i in 0..3000 {
-        assert_eq!(publisher.send(format!("topic {i}")), 1, "topic {i}");
-        assert!(subscriber.try_recv().is_some());
+        assert_eq!(
+            publisher.send(format!("topic {i}")).unwrap(),
+            1,
+            "topic {i}"
+        );
+        assert!(subscriber.try_recv().unwrap().is_some());
     }
 }
 
@@ -181,7 +192,7 @@ fn a_bound_subscriber_tells_publishers_that_connect() {
     let mut publisher = context.socket::<Pub>();
     publisher.connect(&bound.to_string()).unwrap();
     let (done, received) = mpsc::channel();
-    thread::spawn(move || done.send(subscriber.recv()));
+    thread::spawn(move || done.send(subscriber.recv().unwrap()));
     publish_until(&mut publisher, "x marks the spot", 1);
     assert_eq!(
         received.recv_timeout(FIVE).unwrap(),
@@ -197,11 +208,11 @@ fn unsubscribing_drops_a_message_a_poll_already_took() {
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("a");
     subscriber.connect("inproc://held").unwrap();
-    assert_eq!(publisher.send("a1"), 1);
+    assert_eq!(publisher.send("a1").unwrap(), 1);
     assert_eq!(
-        zmq::poll_timeout([subscriber.readable()], FIVE),
+        zmq::poll_timeout([subscriber.readable()], FIVE).unwrap(),
         Some([true])
     );
     assert!(subscriber.unsubscribe("a"));
-    assert_eq!(subscriber.try_recv(), None);
+    assert_eq!(subscriber.try_recv().unwrap(), None);
 }

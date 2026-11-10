@@ -61,7 +61,7 @@ impl CloneServer {
             if let Some([request, update]) = zmq::poll_timeout(
                 [self.snapshot.readable(), self.collector.readable()],
                 timeout,
-            ) {
+            )? {
                 if request {
                     self.send_snapshot()?;
                 }
@@ -79,7 +79,7 @@ impl CloneServer {
     // We handle ICANHAZ? requests by sending snapshot data to the client
     // that requested it, ending with a KTHXBAI message
     fn send_snapshot(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let (identity, request) = self.snapshot.recv();
+        let (identity, request) = self.snapshot.recv()?;
         // Request is in second frame of message
         let (command, rest) = request.split_first();
         if **command != *b"ICANHAZ?" {
@@ -107,12 +107,12 @@ impl CloneServer {
     // We store each update with a new sequence number, and if necessary, a
     // time-to-live. We publish updates immediately on our publisher socket
     fn collect(&mut self) {
-        let Some(mut kvmsg) = KvMsg::from_message(&self.collector.recv()) else {
+        let Some(mut kvmsg) = KvMsg::from_message(&self.collector.recv().unwrap()) else {
             return;
         };
         self.sequence += 1;
         kvmsg.set_sequence(self.sequence);
-        self.publisher.send(kvmsg.to_message());
+        self.publisher.send(kvmsg.to_message()).unwrap();
         let ttl: i64 = kvmsg.prop("ttl").parse().unwrap_or(0);
         if ttl != 0 {
             kvmsg.set_prop("ttl", (now_ms() + ttl * 1000).to_string());
@@ -142,7 +142,7 @@ impl CloneServer {
             self.sequence += 1;
             kvmsg.set_sequence(self.sequence);
             kvmsg.set_body("");
-            self.publisher.send(kvmsg.to_message());
+            self.publisher.send(kvmsg.to_message()).unwrap();
             log(&format!("I: publishing delete={}", self.sequence));
         }
     }

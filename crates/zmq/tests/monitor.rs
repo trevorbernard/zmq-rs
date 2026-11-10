@@ -239,8 +239,11 @@ fn a_zero_handshake_timeout_means_none() {
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
     expect(&mut client, |kind| *kind == EventKind::HandshakeSucceeded);
-    push.send("through");
-    assert_eq!(pull.recv_timeout(FIVE), Some(zmq::Message::from("through")));
+    push.send("through").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(zmq::Message::from("through"))
+    );
 }
 
 #[test]

@@ -33,7 +33,7 @@ fn our_push_feeds_a_libzmq_pull() {
     let pull = Socket::new(Kind::Pull);
     pull.connect(addr);
     for i in 0..10 {
-        push.send(format!("task {i}"));
+        push.send(format!("task {i}")).unwrap();
     }
     for i in 0..10 {
         assert_eq!(pull.recv().unwrap(), [format!("task {i}").into_bytes()]);
@@ -51,7 +51,9 @@ fn our_pull_drains_a_libzmq_push() {
         push.send(&[format!("task {i}").as_bytes()]).unwrap();
     }
     let received = within(Duration::from_secs(5), move || {
-        (0..10).map(|_| text(&pull.recv())).collect::<Vec<_>>()
+        (0..10)
+            .map(|_| text(&pull.recv().unwrap()))
+            .collect::<Vec<_>>()
     });
     let expected: Vec<String> = (0..10).map(|i| format!("task {i}")).collect();
     assert_eq!(received, expected);
@@ -67,7 +69,7 @@ fn push_round_robins_across_pull_peers() {
             .unwrap();
     }
     for i in 0..30 {
-        push.send(format!("{i}"));
+        push.send(format!("{i}")).unwrap();
     }
     for (peer, pull) in pulls.iter().enumerate() {
         let got: Vec<usize> = (0..10)
@@ -101,7 +103,9 @@ fn pull_fair_queues_across_push_peers() {
     // Let every peer's messages arrive before reading, so fairness shows.
     thread::sleep(Duration::from_millis(200));
     let received = within(Duration::from_secs(5), move || {
-        (0..15).map(|_| text(&pull.recv())).collect::<Vec<_>>()
+        (0..15)
+            .map(|_| text(&pull.recv().unwrap()))
+            .collect::<Vec<_>>()
     });
     let first_three: std::collections::BTreeSet<&str> =
         received[..3].iter().map(|m| &m[..1]).collect();
@@ -125,9 +129,12 @@ fn pull_fair_queues_across_push_peers() {
 fn try_operations_do_not_block() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    assert_eq!(push.try_send("nowhere"), Err(Message::from("nowhere")));
+    assert_eq!(
+        push.try_send("nowhere"),
+        Err(zmq::TrySendError::Full(Message::from("nowhere")))
+    );
     let mut pull = context.socket::<Pull>();
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -140,11 +147,11 @@ fn async_push_and_pull_between_our_sockets() {
     let received = within(Duration::from_secs(5), move || {
         block_on(async move {
             for i in 0..100 {
-                push.send_async(format!("{i}")).await;
+                push.send_async(format!("{i}")).await.unwrap();
             }
             let mut received = Vec::new();
             for _ in 0..100 {
-                received.push(text(&pull.recv_async().await));
+                received.push(text(&pull.recv_async().await.unwrap()));
             }
             received
         })

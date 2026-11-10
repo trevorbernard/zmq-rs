@@ -18,10 +18,10 @@ fn ipc_wildcard() {
     within(FIVE, move || {
         let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");
         message.push("12345678ABCDEFGH12345678abcdefgh");
-        client.send(message.clone());
-        let received = server.recv();
+        client.send(message.clone()).unwrap();
+        let received = server.recv().unwrap();
         assert_eq!(received, message);
-        server.send(received);
-        assert_eq!(client.recv(), message);
+        server.send(received).unwrap();
+        assert_eq!(client.recv().unwrap(), message);
     });
 }

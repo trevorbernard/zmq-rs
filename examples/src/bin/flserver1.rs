@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("I: echo service is ready at {endpoint}");
     loop {
-        let request = server.recv();
+        let request = server.recv()?;
         let echo = request.body().clone();
         request.reply(echo);
     }

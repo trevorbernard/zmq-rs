@@ -43,16 +43,16 @@ fn push_round_robin_out(bind_address: &str) {
 
     // Send 2N messages
     for _ in &pulls {
-        push.send("ABC");
+        push.send("ABC").unwrap();
     }
     for _ in &pulls {
-        push.send("DEF");
+        push.send("DEF").unwrap();
     }
 
     // Expect every PULL got one of each
     for pull in &mut pulls {
-        assert_eq!(pull.recv_timeout(FIVE), Some(msg(&["ABC"])));
-        assert_eq!(pull.recv_timeout(FIVE), Some(msg(&["DEF"])));
+        assert_eq!(pull.recv_timeout(FIVE).unwrap(), Some(msg(&["ABC"])));
+        assert_eq!(pull.recv_timeout(FIVE).unwrap(), Some(msg(&["DEF"])));
     }
 }
 
@@ -88,8 +88,8 @@ fn pull_fair_queue_in(bind_address: &str) {
     for (peer, push) in (b'A'..).zip(&mut pushes) {
         let first = (peer as char).to_string();
         let second = ((peer + 5) as char).to_string();
-        push.send(first.clone());
-        push.send(second.clone());
+        push.send(first.clone()).unwrap();
+        push.send(second.clone()).unwrap();
         first_half.insert(msg(&[&first]));
         second_half.insert(msg(&[&second]));
     }
@@ -98,12 +98,12 @@ fn pull_fair_queue_in(bind_address: &str) {
 
     // Expect to pull one from each first
     for _ in &pushes {
-        let message = pull.recv_timeout(FIVE).expect("a message");
+        let message = pull.recv_timeout(FIVE).unwrap().expect("a message");
         assert!(first_half.remove(&message), "{message:?} out of turn");
     }
     // And then get the second batch
     for _ in &pushes {
-        let message = pull.recv_timeout(FIVE).expect("a message");
+        let message = pull.recv_timeout(FIVE).unwrap().expect("a message");
         assert!(second_half.remove(&message), "{message:?} out of turn");
     }
 }
@@ -150,8 +150,8 @@ fn destroy_queue_on_disconnect_inproc() {
 
     // Send two messages, one should be stuck in A's outgoing queue, the
     // other arrives at B.
-    a.send("ABC");
-    a.send("DEF");
+    a.send("ABC").unwrap();
+    a.send("DEF").unwrap();
     // Both queues should now be full, indicated by A blocking on send.
     assert!(a.try_send(Message::new("")).is_err());
 
@@ -160,17 +160,17 @@ fn destroy_queue_on_disconnect_inproc() {
     settle();
 
     // Can't receive old data on B.
-    assert_eq!(b.try_recv(), None);
+    assert_eq!(b.try_recv().unwrap(), None);
     // Sending fails.
     assert!(a.try_send(Message::new("")).is_err());
 
     // Reconnect B
     b.connect(&endpoint).unwrap();
     // Still can't receive old data on B.
-    assert_eq!(b.try_recv(), None);
+    assert_eq!(b.try_recv().unwrap(), None);
     // two messages should be sendable before the queues are filled up.
-    a.send("ABC");
-    a.send("DEF");
+    a.send("ABC").unwrap();
+    a.send("DEF").unwrap();
     assert!(a.try_send(Message::new("")).is_err());
 }
 
@@ -198,15 +198,15 @@ fn push_multipart_atomic_drop(bind_address: &str, block: bool) {
     settle();
 
     // Normal case - exercise the queues
-    push.send(with_large_frame(&["0", "0"], b'a'));
+    push.send(with_large_frame(&["0", "0"], b'a')).unwrap();
     assert_eq!(
-        pull.recv_timeout(FIVE),
+        pull.recv_timeout(FIVE).unwrap(),
         Some(with_large_frame(&["0", "0"], b'a'))
     );
 
     // Fill the HWMs of sender and receiver, one message each
-    push.send("1");
-    push.send(with_large_frame(&["2", "2"], b'b'));
+    push.send("1").unwrap();
+    push.send(with_large_frame(&["2", "2"], b'b')).unwrap();
 
     // Disconnect, and let the pipes start to be deallocated
     pull.disconnect(&connect_address).unwrap();
@@ -217,23 +217,23 @@ fn push_multipart_atomic_drop(bind_address: &str, block: bool) {
     let mut three = with_large_frame(&["3", "3"], b'c');
     three.push("3b");
     if block {
-        push.send(three.clone());
+        push.send(three.clone()).unwrap();
     } else if let Err(back) = push.try_send(three.clone()) {
         // inproc won't fail, much faster to connect/disconnect pipes than
         // TCP; at this point the new pipe is there and it works
-        push.send(back);
+        push.send(back.into_inner()).unwrap();
     }
     settle();
 
-    push.send(with_large_frame(&["5", "5"], b'd'));
+    push.send(with_large_frame(&["5", "5"], b'd')).unwrap();
 
     // On very slow machines the message will not be lost, as it will be
     // sent when the new pipe is already in place.
-    let first = pull.recv_timeout(FIVE).expect("a message");
+    let first = pull.recv_timeout(FIVE).unwrap().expect("a message");
     if first != with_large_frame(&["5", "5"], b'd') {
         assert_eq!(first, three);
         assert_eq!(
-            pull.recv_timeout(FIVE),
+            pull.recv_timeout(FIVE).unwrap(),
             Some(with_large_frame(&["5", "5"], b'd'))
         );
     }

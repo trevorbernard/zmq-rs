@@ -22,6 +22,9 @@ fn connections_with_keepalive_carry_messages_both_ways_of_connecting() {
     let bound = pull.bind(&free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(keepalive);
     push.connect(&bound).unwrap();
-    push.send("probed");
-    assert_eq!(pull.recv_timeout(FIVE), Some(Message::from("probed")));
+    push.send("probed").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("probed"))
+    );
 }

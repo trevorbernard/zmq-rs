@@ -49,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     while workers_fired < NBR_WORKERS {
         // Next message gives us least recently used worker; its envelope
         // delimiter and response are not needed
-        let (identity, _) = broker.recv();
+        let (identity, _) = broker.recv()?;
         let mut reply = Message::new("");
         if Instant::now() < end_time {
             reply.push("Work harder");

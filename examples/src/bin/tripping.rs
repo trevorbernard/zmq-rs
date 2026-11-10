@@ -16,8 +16,8 @@ fn client_task(context: Context, mut pipe: zmq::Socket<Pair>) -> Result<(), zmq:
     println!("Synchronous round-trip test...");
     let start = Instant::now();
     for _ in 0..10_000 {
-        client.send("hello");
-        client.recv();
+        client.send("hello")?;
+        client.recv()?;
     }
     println!(
         " {:.0} calls/second",
@@ -27,16 +27,16 @@ fn client_task(context: Context, mut pipe: zmq::Socket<Pair>) -> Result<(), zmq:
     println!("Asynchronous round-trip test...");
     let start = Instant::now();
     for _ in 0..100_000 {
-        client.send("hello");
+        client.send("hello")?;
     }
     for _ in 0..100_000 {
-        client.recv();
+        client.recv()?;
     }
     println!(
         " {:.0} calls/second",
         100_000.0 / start.elapsed().as_secs_f64()
     );
-    pipe.send("done");
+    pipe.send("done")?;
     Ok(())
 }
 
@@ -47,8 +47,8 @@ fn worker_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     worker.connect("tcp://localhost:5556")?;
 
     loop {
-        let message = worker.recv();
-        worker.send(message);
+        let message = worker.recv()?;
+        worker.send(message)?;
     }
 }
 
@@ -79,6 +79,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     thread::spawn(broker_task);
 
     // Wait for the client to signal it's done
-    client.recv();
+    client.recv()?;
     Ok(())
 }

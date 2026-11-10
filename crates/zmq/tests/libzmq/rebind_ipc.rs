@@ -22,9 +22,9 @@ fn rebind_ipc() {
     let mut pull = context.socket::<Pull>();
     pull.connect(&endpoint).unwrap();
 
-    first.send("42");
+    first.send("42").unwrap();
     let mut pull = within(FIVE, move || {
-        assert_eq!(pull.recv(), Message::from("42"));
+        assert_eq!(pull.recv().unwrap(), Message::from("42"));
         pull
     });
 
@@ -32,7 +32,7 @@ fn rebind_ipc() {
     second.bind(&endpoint).unwrap();
     within(FIVE, move || {
         // Waits for the pull to reconnect.
-        second.send("42");
-        assert_eq!(pull.recv(), Message::from("42"));
+        second.send("42").unwrap();
+        assert_eq!(pull.recv().unwrap(), Message::from("42"));
     });
 }

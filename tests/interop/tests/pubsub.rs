@@ -30,7 +30,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 /// Publishes `message` until a subscriber takes it.
 fn publish_until_taken(publisher: &mut zmq::Socket<Pub>, message: &'static str) {
     let started = Instant::now();
-    while publisher.send(message) == 0 {
+    while publisher.send(message).unwrap() == 0 {
         assert!(started.elapsed() < FIVE, "no subscriber arrived");
         thread::sleep(Duration::from_millis(5));
     }
@@ -50,7 +50,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
     loop {
         publisher.send(&[b"sports"]).unwrap();
         publisher.send(&[b"news", b"two frames"]).unwrap();
-        if let Some(message) = subscriber.try_recv() {
+        if let Some(message) = subscriber.try_recv().unwrap() {
             let expected = vec![Frame::from("news"), Frame::from("two frames")];
             assert_eq!(message, Message::try_from(expected).unwrap());
             break;
@@ -63,7 +63,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
     // Earlier rounds may still be queued; none of them is sports.
     within(FIVE, move || {
         loop {
-            let message = subscriber.recv();
+            let message = subscriber.recv().unwrap();
             assert_ne!(message, Message::from("sports"));
             if message == Message::from("news: last") {
                 break;
@@ -83,8 +83,8 @@ fn a_libzmq_sub_receives_its_topics_from_our_pub() {
     subscriber.connect(bound.clone());
 
     publish_until_taken(&mut publisher, "news: first");
-    assert_eq!(publisher.send("sports"), 0);
-    assert_eq!(publisher.send("news: second"), 1);
+    assert_eq!(publisher.send("sports").unwrap(), 0);
+    assert_eq!(publisher.send("news: second").unwrap(), 1);
     assert_eq!(subscriber.recv().unwrap(), [b"news: first"]);
     assert_eq!(subscriber.recv().unwrap(), [b"news: second"]);
 }
@@ -100,7 +100,7 @@ fn a_libzmq_sub_unsubscribing_stops_our_pub() {
     publish_until_taken(&mut publisher, "a");
     subscriber.unsubscribe(b"a");
     let started = Instant::now();
-    while publisher.send("a") != 0 {
+    while publisher.send("a").unwrap() != 0 {
         assert!(started.elapsed() < FIVE, "the cancel never arrived");
         thread::sleep(Duration::from_millis(5));
     }
@@ -127,7 +127,7 @@ fn our_sub_filters_what_a_careless_publisher_sends() {
         publisher.send(&Message::from(text)).unwrap();
     }
     assert_eq!(
-        within(FIVE, move || subscriber.recv()),
+        within(FIVE, move || subscriber.recv().unwrap()),
         Message::from("news: rain")
     );
 }

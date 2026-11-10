@@ -26,7 +26,7 @@ const BATCH: usize = 256;
 /// events are `0x01`/`0x00`-prefixed messages, which an XSUB sends upstream
 /// as subscriptions. REQ and REP cannot be proxied: their lockstep does not
 /// fit a pass-through.
-pub trait ProxyEnd: sealed::Sealed + Send {
+pub trait ProxyEnd: sealed::Sealed + sealed::Terminates + Send {
     /// The next message this socket received, or `Pending`. Always
     /// `Pending` for sockets that cannot receive.
     #[doc(hidden)]
@@ -204,12 +204,14 @@ impl<'a> Proxy<'a> {
     }
 
     /// Forwards messages, blocking the thread, until
-    /// [`ProxyControl::terminate`] is called. Returns the final statistics.
+    /// [`ProxyControl::terminate`] is called or a socket's context is
+    /// [shut down](crate::Context::shutdown). Returns the final statistics.
     pub fn run(&mut self) -> ProxyStatistics {
         wait::block_on(|cx| self.poll(cx))
     }
 
-    /// Forwards messages until [`ProxyControl::terminate`] is called.
+    /// Forwards messages until [`ProxyControl::terminate`] is called or a
+    /// socket's context is [shut down](crate::Context::shutdown).
     pub async fn run_async(&mut self) -> ProxyStatistics {
         poll_fn(|cx| self.poll(cx)).await
     }
@@ -220,6 +222,9 @@ impl<'a> Proxy<'a> {
             // The control's waker brings us back on resume.
             Mode::Paused => return Poll::Pending,
             Mode::Running => {}
+        }
+        if self.frontend.poll_terminated(cx) || self.backend.poll_terminated(cx) {
+            return Poll::Ready(self.control.statistics());
         }
         let shared = &*self.control.shared;
         let busy_backwards = pump(
@@ -479,7 +484,7 @@ impl ProxyEnd for Socket<Pub> {
 
     fn poll_give(&mut self, slot: &mut Option<Message>, _: &mut TaskContext<'_>) -> Poll<()> {
         if let Some(message) = slot.take() {
-            self.send(message);
+            let _ = self.send(message);
         }
         Poll::Ready(())
     }
@@ -506,7 +511,7 @@ impl ProxyEnd for Socket<XPub> {
 
     fn poll_give(&mut self, slot: &mut Option<Message>, _: &mut TaskContext<'_>) -> Poll<()> {
         if let Some(message) = slot.take() {
-            self.send(message);
+            let _ = self.send(message);
         }
         Poll::Ready(())
     }
@@ -524,7 +529,7 @@ impl ProxyEnd for Socket<XSub> {
     fn poll_give(&mut self, slot: &mut Option<Message>, _: &mut TaskContext<'_>) -> Poll<()> {
         // Subscription-shaped messages subscribe; others go upstream.
         if let Some(message) = slot.take() {
-            self.send(message);
+            let _ = self.send(message);
         }
         Poll::Ready(())
     }
@@ -532,7 +537,7 @@ impl ProxyEnd for Socket<XSub> {
 
 impl Capture for Socket<Pub> {
     fn capture(&mut self, message: &Message) {
-        self.send(message.clone());
+        let _ = self.send(message.clone());
     }
 }
 

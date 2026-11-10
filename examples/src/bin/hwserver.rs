@@ -9,7 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut responder = context.socket::<Rep>();
     responder.bind("tcp://*:5555")?;
     loop {
-        let request = responder.recv();
+        let request = responder.recv()?;
         println!("Received Hello");
         sleep_ms(1000);
         request.reply("World");

@@ -22,9 +22,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kvmap = HashMap::new();
 
     // Get state snapshot
-    snapshot.send("ICANHAZ?");
+    snapshot.send("ICANHAZ?")?;
     let mut sequence = loop {
-        let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()) else {
+        let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()?) else {
             continue;
         };
         if kvmsg.key() == Some("KTHXBAI") {
@@ -36,7 +36,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Now apply pending updates, discard out-of-sequence messages
     loop {
-        let Some(kvmsg) = KvMsg::from_message(&subscriber.recv()) else {
+        let Some(kvmsg) = KvMsg::from_message(&subscriber.recv()?) else {
             continue;
         };
         if kvmsg.sequence() > sequence {

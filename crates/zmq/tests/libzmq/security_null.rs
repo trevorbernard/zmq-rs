@@ -19,9 +19,9 @@ use crate::support::{FIVE, SETTLE, bounce_content, bounce_dealer, zero_linger};
 /// Neither direction gets through, as libzmq's `expect_bounce_fail`.
 fn expect_bounce_fail(server: &mut Socket<Dealer>, client: &mut Socket<Dealer>) {
     let _ = client.try_send(bounce_content());
-    assert_eq!(server.recv_timeout(SETTLE), None);
+    assert_eq!(server.recv_timeout(SETTLE).unwrap(), None);
     let _ = server.try_send(bounce_content());
-    assert_eq!(client.recv_timeout(SETTLE), None);
+    assert_eq!(client.recv_timeout(SETTLE).unwrap(), None);
 }
 
 /// A server authenticating NULL peers in `domain` with libzmq's test
@@ -99,5 +99,8 @@ fn vanilla_socket() {
     // An anonymous ZMTP 1.0 greeting, then a sneaky message.
     stream.write_all(b"\x01\x00").unwrap();
     stream.write_all(b"\x08\x00sneaky\0").unwrap();
-    assert_eq!(server.recv_timeout(Duration::from_millis(250)), None);
+    assert_eq!(
+        server.recv_timeout(Duration::from_millis(250)).unwrap(),
+        None
+    );
 }

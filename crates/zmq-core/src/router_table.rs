@@ -47,6 +47,8 @@ pub enum SendError<T> {
     UnknownPeer(T),
     /// The peer's queue is full (libzmq's `EAGAIN`).
     Full(T),
+    /// The context was shut down (libzmq's `ETERM`).
+    Terminated(T),
 }
 
 impl<T> fmt::Display for SendError<T> {
@@ -54,6 +56,7 @@ impl<T> fmt::Display for SendError<T> {
         f.write_str(match self {
             Self::UnknownPeer(_) => "no peer has that id",
             Self::Full(_) => "the peer's queue is full",
+            Self::Terminated(_) => "the context was shut down",
         })
     }
 }

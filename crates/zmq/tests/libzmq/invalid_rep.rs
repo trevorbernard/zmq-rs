@@ -18,7 +18,10 @@ fn invalid_rep() {
     let requesting = Requesting::start(req_socket, msg(&["r"]));
 
     // Receive the request.
-    let (addr, request) = router_socket.recv_timeout(FIVE).expect("the request");
+    let (addr, request) = router_socket
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("the request");
     assert_eq!(request, msg(&["", "r"]));
 
     // Send invalid replies. libzmq sends the address alone, a reply of no

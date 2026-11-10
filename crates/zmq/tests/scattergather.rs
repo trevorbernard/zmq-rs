@@ -31,10 +31,10 @@ fn scatter_and_gather_over_tcp() {
     let mut scatter = context.socket::<Scatter>();
     scatter.connect(&bound.to_string()).unwrap();
     for i in 0..10 {
-        scatter.send(format!("{i}"));
+        scatter.send(format!("{i}")).unwrap();
     }
     let received = within(FIVE, move || {
-        (0..10).map(|_| gather.recv()).collect::<Vec<_>>()
+        (0..10).map(|_| gather.recv().unwrap()).collect::<Vec<_>>()
     });
     let expected: Vec<Frame> = (0..10).map(|i| Frame::from(format!("{i}"))).collect();
     assert_eq!(received, expected);
@@ -55,12 +55,12 @@ fn scatter_round_robins_across_gathers() {
         scatter.connect(&format!("inproc://gather-{n}")).unwrap();
     }
     for i in 0..4 {
-        scatter.send(format!("{i}"));
+        scatter.send(format!("{i}")).unwrap();
     }
-    assert_eq!(gathers[0].try_recv(), Some(Frame::from("0")));
-    assert_eq!(gathers[1].try_recv(), Some(Frame::from("1")));
-    assert_eq!(gathers[0].try_recv(), Some(Frame::from("2")));
-    assert_eq!(gathers[1].try_recv(), Some(Frame::from("3")));
+    assert_eq!(gathers[0].try_recv().unwrap(), Some(Frame::from("0")));
+    assert_eq!(gathers[1].try_recv().unwrap(), Some(Frame::from("1")));
+    assert_eq!(gathers[0].try_recv().unwrap(), Some(Frame::from("2")));
+    assert_eq!(gathers[1].try_recv().unwrap(), Some(Frame::from("3")));
 }
 
 #[test]
@@ -77,10 +77,12 @@ fn gather_fair_queues_from_scatters() {
         .collect();
     for (n, scatter) in scatters.iter_mut().enumerate() {
         for i in 0..2 {
-            scatter.send(format!("{n}.{i}"));
+            scatter.send(format!("{n}.{i}")).unwrap();
         }
     }
-    let received: Vec<Frame> = (0..4).map(|_| gather.try_recv().unwrap()).collect();
+    let received: Vec<Frame> = (0..4)
+        .map(|_| gather.try_recv().unwrap().unwrap())
+        .collect();
     assert_eq!(
         received,
         ["0.0", "1.0", "0.1", "1.1"].map(Frame::from),
@@ -92,7 +94,10 @@ fn gather_fair_queues_from_scatters() {
 fn a_scatter_without_gathers_hands_the_frame_back() {
     let context = Context::new().unwrap();
     let mut scatter = context.socket::<Scatter>();
-    assert_eq!(scatter.try_send("nobody"), Err(Frame::from("nobody")));
+    assert_eq!(
+        scatter.try_send("nobody"),
+        Err(zmq::TrySendError::Full(Frame::from("nobody")))
+    );
 }
 
 #[test]
@@ -103,5 +108,5 @@ fn only_scatters_and_gathers_pair() {
     let mut push = context.socket::<zmq::Push>();
     push.connect("inproc://strangers").unwrap();
     assert!(push.try_send("not a scatter").is_err());
-    assert_eq!(gather.try_recv(), None);
+    assert_eq!(gather.try_recv().unwrap(), None);
 }

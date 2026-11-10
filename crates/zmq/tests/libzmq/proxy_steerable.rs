@@ -64,10 +64,10 @@ fn proxy_steerable() {
             proxy_control.resume();
             pause();
             let ran = proxy_control.statistics();
-            control.send("STOP");
+            control.send("STOP").unwrap();
             let stopped = proxy_control.statistics();
             pause();
-            control.send("TERMINATE");
+            control.send("TERMINATE").unwrap();
             pause();
             let terminated = proxy_control.statistics();
             pause();

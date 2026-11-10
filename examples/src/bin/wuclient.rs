@@ -18,7 +18,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let updates = 100;
     let mut total_temp = 0;
     for _ in 0..updates {
-        let update = body(&subscriber.recv());
+        let update = body(&subscriber.recv()?);
         let temperature: i64 = update
             .split_whitespace()
             .nth(1)

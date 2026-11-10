@@ -37,7 +37,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // status messages back from peers. The receive timeout defines our own
     // heartbeat
     loop {
-        match statefe.recv_timeout(Duration::from_secs(1)) {
+        match statefe.recv_timeout(Duration::from_secs(1))? {
             // Handle incoming status messages
             Some(status) => {
                 let peer_name = text(status.split_first().0);
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             None => {
                 let mut status = Message::new(me.clone());
                 status.push(randof(10).to_string());
-                statebe.send(status);
+                statebe.send(status)?;
             }
         }
     }

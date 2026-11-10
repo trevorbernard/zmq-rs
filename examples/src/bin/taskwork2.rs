@@ -18,13 +18,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Process tasks forever, or until killed
     loop {
-        let [task, kill] = zmq::poll([receiver.readable(), controller.readable()]);
+        let [task, kill] = zmq::poll([receiver.readable(), controller.readable()])?;
         if task {
-            let workload = body(&receiver.recv());
+            let workload = body(&receiver.recv()?);
             print!("{workload}.");
             io::stdout().flush()?;
             sleep_ms(workload.parse()?);
-            sender.send("");
+            sender.send("")?;
         }
         // Any waiting controller command acts as 'KILL'
         if kill {

@@ -163,11 +163,11 @@ fn multipart(ours: bool, frames: usize, count: usize) -> f64 {
         push.connect(&bound.to_string()).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {
-                push.send(ours_message(frames, 64));
+                push.send(ours_message(frames, 64)).unwrap();
             }
             push
         });
-        let mut receive = || assert_eq!(pull.recv().len().get(), frames);
+        let mut receive = || assert_eq!(pull.recv().unwrap().len().get(), frames);
         receive();
         let started = Instant::now();
         for _ in 1..count {
@@ -229,7 +229,7 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
                 let mut seen_warm = false;
                 let mut got = 0;
                 while got < count {
-                    let message = sub.recv();
+                    let message = sub.recv().unwrap();
                     if message.last().len() == SIZE {
                         got += 1;
                     } else if !seen_warm {
@@ -241,12 +241,12 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
             }));
         }
         while warmed.load(Ordering::SeqCst) < subs {
-            publisher.send(vec![0u8; 1]);
+            publisher.send(vec![0u8; 1]).unwrap();
             thread::sleep(Duration::from_millis(1));
         }
         let started = Instant::now();
         for _ in 0..count {
-            publisher.send(vec![0u8; SIZE]);
+            publisher.send(vec![0u8; SIZE]).unwrap();
         }
         for t in threads {
             t.join().unwrap();
@@ -312,15 +312,15 @@ fn fanin(ours: bool, pushers: usize, count: usize) -> f64 {
             push.connect(&bound).unwrap();
             threads.push(thread::spawn(move || {
                 for _ in 0..each {
-                    push.send(vec![0u8; SIZE]);
+                    push.send(vec![0u8; SIZE]).unwrap();
                 }
                 push
             }));
         }
-        assert_eq!(pull.recv().last().len(), SIZE);
+        assert_eq!(pull.recv().unwrap().last().len(), SIZE);
         let started = Instant::now();
         for _ in 1..total {
-            assert_eq!(pull.recv().last().len(), SIZE);
+            assert_eq!(pull.recv().unwrap().last().len(), SIZE);
         }
         elapsed = started.elapsed();
         for t in threads {
@@ -373,15 +373,15 @@ fn router(ours: bool, dealers: usize, count: usize) -> f64 {
             dealer.connect(&bound).unwrap();
             threads.push(thread::spawn(move || {
                 for _ in 0..each {
-                    dealer.send(vec![0u8; SIZE]);
+                    dealer.send(vec![0u8; SIZE]).unwrap();
                 }
                 dealer
             }));
         }
-        assert_eq!(router.recv().1.last().len(), SIZE);
+        assert_eq!(router.recv().unwrap().1.last().len(), SIZE);
         let started = Instant::now();
         for _ in 1..total {
-            assert_eq!(router.recv().1.last().len(), SIZE);
+            assert_eq!(router.recv().unwrap().1.last().len(), SIZE);
         }
         elapsed = started.elapsed();
         for t in threads {
@@ -439,14 +439,14 @@ fn curve(ours: bool, size: usize, count: usize) -> f64 {
         push.connect(&bound.to_string()).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {
-                push.send(vec![0u8; size]);
+                push.send(vec![0u8; size]).unwrap();
             }
             push
         });
-        assert_eq!(pull.recv().last().len(), size);
+        assert_eq!(pull.recv().unwrap().last().len(), size);
         let started = Instant::now();
         for _ in 1..count {
-            assert_eq!(pull.recv().last().len(), size);
+            assert_eq!(pull.recv().unwrap().last().len(), size);
         }
         let elapsed = started.elapsed();
         drop(sender.join());

@@ -595,7 +595,7 @@ fn throughput(case: Case, count: usize) -> f64 {
                     payload.resize(size, hint::black_box(0));
                     Frame::from(payload)
                 };
-                push.send(Message::from(frame));
+                push.send(Message::from(frame)).unwrap();
             }
             End::Ours(push)
         }
@@ -609,7 +609,7 @@ fn throughput(case: Case, count: usize) -> f64 {
     let elapsed = match receiver {
         End::Ours(mut pull) => {
             let mut receive = || {
-                let message = pull.recv();
+                let message = pull.recv().unwrap();
                 assert_eq!(message.len().get(), 1, "single frame");
                 assert_eq!(message.last().len(), size, "message size");
             };
@@ -670,7 +670,7 @@ fn latency(case: Case, count: usize) -> Latency {
     let replying = thread::spawn(move || match replier {
         End::Ours(mut rep) => {
             for _ in 0..rounds {
-                let request = rep.recv();
+                let request = rep.recv().unwrap();
                 assert_eq!(request.body().last().len(), size, "request size");
                 let body = request.body().clone();
                 assert_eq!(request.reply(body), zmq::RouteOutcome::Sent, "reply sent");

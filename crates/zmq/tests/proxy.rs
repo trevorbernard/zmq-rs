@@ -50,7 +50,7 @@ fn a_router_dealer_proxy_is_a_shared_queue() {
             rep.connect("inproc://workers").unwrap();
             thread::spawn(move || {
                 for _ in 0..2 {
-                    let request = rep.recv();
+                    let request = rep.recv().unwrap();
                     let text = String::from_utf8_lossy(request.body().get(0).unwrap());
                     let answer = format!("worker {n}: {text}");
                     request.reply(answer);
@@ -110,7 +110,7 @@ fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
         subscriber.connect("inproc://downstream").unwrap();
         subscriber.subscribe("news");
         let started = Instant::now();
-        while publisher.send("news: forwarded") == 0 {
+        while publisher.send("news: forwarded").unwrap() == 0 {
             assert!(
                 started.elapsed() < FIVE,
                 "the subscription never got upstream"
@@ -118,12 +118,12 @@ fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
             thread::sleep(Duration::from_millis(1));
         }
         assert_eq!(
-            publisher.send("sports"),
+            publisher.send("sports").unwrap(),
             0,
             "only wanted topics go upstream"
         );
         assert_eq!(
-            within(FIVE, move || subscriber.recv()),
+            within(FIVE, move || subscriber.recv().unwrap()),
             Message::from("news: forwarded")
         );
         control.terminate();
@@ -161,7 +161,7 @@ fn a_publisher_connecting_after_a_subscription_still_hears_it() {
         let mut publisher = context.socket::<XPub>();
         publisher.connect("inproc://late-upstream").unwrap();
         assert_eq!(
-            within(FIVE, move || publisher.recv()),
+            within(FIVE, move || publisher.recv().unwrap()),
             zmq::XPubEvent::Subscribe(zmq::Frame::from("news"))
         );
         control.terminate();
@@ -186,10 +186,10 @@ fn a_pull_push_proxy_is_a_streamer() {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
         for i in 0..1000 {
-            source.send(format!("{i}"));
+            source.send(format!("{i}")).unwrap();
         }
         let received = within(FIVE, move || {
-            (0..1000).map(|_| sink.recv()).collect::<Vec<_>>()
+            (0..1000).map(|_| sink.recv().unwrap()).collect::<Vec<_>>()
         });
         let expected: Vec<Message> = (0..1000).map(|i| Message::from(format!("{i}"))).collect();
         assert_eq!(received, expected, "in order, none lost");
@@ -223,20 +223,20 @@ fn capture_sees_both_directions() {
     thread::scope(|scope| {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
-        left.send("to the right");
+        left.send("to the right").unwrap();
         assert_eq!(
             within(FIVE, move || {
-                let message = right.recv();
-                right.send("to the left");
+                let message = right.recv().unwrap();
+                right.send("to the left").unwrap();
                 message
             }),
             Message::from("to the right")
         );
         assert_eq!(
-            within(FIVE, move || left.recv()),
+            within(FIVE, move || left.recv().unwrap()),
             Message::from("to the left")
         );
-        let copies = within(FIVE, move || [tap.recv(), tap.recv()]);
+        let copies = within(FIVE, move || [tap.recv().unwrap(), tap.recv().unwrap()]);
         assert_eq!(
             copies,
             [Message::from("to the right"), Message::from("to the left")]
@@ -263,12 +263,15 @@ fn pausing_holds_messages_until_resumed() {
     thread::scope(|scope| {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
-        source.send("held");
+        source.send("held").unwrap();
         thread::sleep(Duration::from_millis(100));
-        assert_eq!(sink.try_recv(), None, "nothing moves while paused");
+        assert_eq!(sink.try_recv().unwrap(), None, "nothing moves while paused");
         assert_eq!(control.statistics(), ProxyStatistics::default());
         control.resume();
-        assert_eq!(within(FIVE, move || sink.recv()), Message::from("held"));
+        assert_eq!(
+            within(FIVE, move || sink.recv().unwrap()),
+            Message::from("held")
+        );
         // The proxy counts a send once it returns, which may be after the
         // sink has the message: only the final statistics are settled.
         control.terminate();
@@ -323,15 +326,15 @@ fn a_slow_backend_holds_up_only_its_own_direction() {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
         for i in 0..10 {
-            left.send(format!("{i}"));
+            left.send(format!("{i}")).unwrap();
         }
         // Nobody reads `right`: its queue fills and the proxy holds the rest.
         thread::sleep(Duration::from_millis(50));
-        right.send("meanwhile");
-        let (heard, mut left) = within(FIVE, move || (left.recv(), left));
+        right.send("meanwhile").unwrap();
+        let (heard, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
         assert_eq!(heard, Message::from("meanwhile"));
         let received = within(FIVE, move || {
-            (0..10).map(|_| right.recv()).collect::<Vec<_>>()
+            (0..10).map(|_| right.recv().unwrap()).collect::<Vec<_>>()
         });
         assert_eq!(received.len(), 10, "nothing lost while held");
         let _ = &mut left;

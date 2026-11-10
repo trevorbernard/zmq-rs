@@ -37,8 +37,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 /// Dumps the next message with its identity frame, as libzmq's ROUTER
 /// presents it, then replies so the REQ is released.
-fn dump_and_answer(sink: &mut zmq::Socket<Router>) -> Result<(), zmq::UnknownPeer<zmq::Message>> {
-    let (from, message) = sink.recv();
+fn dump_and_answer(sink: &mut zmq::Socket<Router>) -> Result<(), zmq::SendError<zmq::Message>> {
+    let (from, message) = sink.recv().unwrap();
     let mut framed = Message::new(from.as_bytes().to_vec());
     framed.extend(message);
     dump(&framed);

@@ -117,32 +117,32 @@ trait Step {
 
 impl Step for Socket<Pub> {
     fn step(&mut self) {
-        self.send("topic body");
+        let _ = self.send("topic body");
     }
 }
 
 impl Step for Socket<Sub> {
     fn step(&mut self) {
-        while self.try_recv().is_some() {}
+        while matches!(self.try_recv(), Ok(Some(_))) {}
     }
 }
 
 impl Step for Socket<XPub> {
     fn step(&mut self) {
-        while self.try_recv().is_some() {}
-        self.send("topic body");
+        while matches!(self.try_recv(), Ok(Some(_))) {}
+        let _ = self.send("topic body");
     }
 }
 
 impl Step for Socket<XSub> {
     fn step(&mut self) {
-        while self.try_recv().is_some() {}
+        while matches!(self.try_recv(), Ok(Some(_))) {}
     }
 }
 
 impl Step for Socket<Pull> {
     fn step(&mut self) {
-        while self.try_recv().is_some() {}
+        while matches!(self.try_recv(), Ok(Some(_))) {}
     }
 }
 
@@ -154,7 +154,7 @@ impl Step for Socket<Push> {
 
 impl Step for Socket<Pair> {
     fn step(&mut self) {
-        while let Some(message) = self.try_recv() {
+        while let Ok(Some(message)) = self.try_recv() {
             let _ = self.try_send(message);
         }
     }
@@ -162,7 +162,7 @@ impl Step for Socket<Pair> {
 
 impl Step for Socket<Dealer> {
     fn step(&mut self) {
-        while let Some(message) = self.try_recv() {
+        while let Ok(Some(message)) = self.try_recv() {
             let _ = self.try_send(message);
         }
     }
@@ -170,7 +170,7 @@ impl Step for Socket<Dealer> {
 
 impl Step for Socket<Router> {
     fn step(&mut self) {
-        while let Some((from, message)) = self.try_recv() {
+        while let Ok(Some((from, message))) = self.try_recv() {
             let _ = self.try_send(&from, message);
         }
     }
@@ -178,7 +178,7 @@ impl Step for Socket<Router> {
 
 impl Step for Socket<Rep> {
     fn step(&mut self) {
-        while let Some(request) = self.try_recv() {
+        while let Ok(Some(request)) = self.try_recv() {
             request.reply("reply");
         }
     }

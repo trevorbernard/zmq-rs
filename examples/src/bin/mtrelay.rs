@@ -10,7 +10,7 @@ fn step1(context: Context) -> Result<(), zmq::Error> {
     let mut xmitter = context.socket::<Pair>();
     xmitter.connect("inproc://step2")?;
     println!("Step 1 ready, signaling step 2");
-    xmitter.send("READY");
+    xmitter.send("READY")?;
     Ok(())
 }
 
@@ -24,13 +24,13 @@ fn step2(context: Context) -> Result<(), zmq::Error> {
     });
 
     // Wait for signal and pass it on
-    receiver.recv();
+    receiver.recv()?;
 
     // Connect to step3 and tell it we're ready
     let mut xmitter = context.socket::<Pair>();
     xmitter.connect("inproc://step3")?;
     println!("Step 2 ready, signaling step 3");
-    xmitter.send("READY");
+    xmitter.send("READY")?;
     step1.join().expect("step 1 panicked")
 }
 
@@ -46,7 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Wait for signal
-    receiver.recv();
+    receiver.recv()?;
     step2.join().expect("step 2 panicked")?;
     println!("Test successful!");
     Ok(())

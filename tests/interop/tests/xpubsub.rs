@@ -31,7 +31,9 @@ fn our_xpub_hears_a_libzmq_sub() {
     subscriber.subscribe(b"a");
     subscriber.subscribe(b"b");
     subscriber.connect(bound);
-    let (first, second, mut xpub) = within(FIVE, move || (xpub.recv(), xpub.recv(), xpub));
+    let (first, second, mut xpub) = within(FIVE, move || {
+        (xpub.recv().unwrap(), xpub.recv().unwrap(), xpub)
+    });
     let mut heard = [first, second];
     heard.sort_by_key(|event| format!("{event:?}"));
     assert_eq!(
@@ -42,11 +44,11 @@ fn our_xpub_hears_a_libzmq_sub() {
         ]
     );
     subscriber.unsubscribe(b"a");
-    let (cancel, mut xpub) = within(FIVE, move || (xpub.recv(), xpub));
+    let (cancel, mut xpub) = within(FIVE, move || (xpub.recv().unwrap(), xpub));
     assert_eq!(cancel, XPubEvent::Cancel(Frame::from("a")));
     drop(subscriber);
     assert_eq!(
-        within(FIVE, move || xpub.recv()),
+        within(FIVE, move || xpub.recv().unwrap()),
         XPubEvent::Cancel(Frame::from("b")),
         "a departing subscriber's topics are cancelled"
     );
@@ -62,7 +64,7 @@ fn our_xpub_hears_what_a_libzmq_xsub_sends_upstream() {
     xsub.send(&[b"hello", b"upstream"]).unwrap();
     let expected = Message::try_from(vec![Frame::from("hello"), Frame::from("upstream")]).unwrap();
     assert_eq!(
-        within(FIVE, move || xpub.recv()),
+        within(FIVE, move || xpub.recv().unwrap()),
         XPubEvent::Message(expected)
     );
 }
@@ -76,7 +78,7 @@ fn our_xsub_talks_to_a_libzmq_xpub() {
     let mut xsub = context.socket::<XSub>();
     xsub.connect(&format!("tcp://{addr}")).unwrap();
     xsub.subscribe("a");
-    xsub.send("hello");
+    xsub.send("hello").unwrap();
     // libzmq hands XPUB applications subscriptions in the message form.
     let mut heard = [xpub.recv().unwrap(), xpub.recv().unwrap()];
     heard.sort();
@@ -86,7 +88,7 @@ fn our_xsub_talks_to_a_libzmq_xpub() {
     loop {
         xpub.send(&[b"b: unwanted"]).unwrap();
         xpub.send(&[b"a: wanted"]).unwrap();
-        if let Some(message) = xsub.try_recv() {
+        if let Some(message) = xsub.try_recv().unwrap() {
             assert_eq!(message, Message::from("a: wanted"));
             break;
         }

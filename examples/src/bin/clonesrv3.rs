@@ -26,19 +26,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut sequence = 0;
     let mut kvmap = HashMap::new();
     loop {
-        let [update, request] = zmq::poll([collector.readable(), snapshot.readable()]);
+        let [update, request] = zmq::poll([collector.readable(), snapshot.readable()])?;
 
         // Apply state update sent from client
-        if update && let Some(mut kvmsg) = KvMsg::from_message(&collector.recv()) {
+        if update && let Some(mut kvmsg) = KvMsg::from_message(&collector.recv()?) {
             sequence += 1;
             kvmsg.set_sequence(sequence);
-            publisher.send(kvmsg.to_message());
+            publisher.send(kvmsg.to_message())?;
             kvmsg.store(&mut kvmap);
             println!("I: publishing update {sequence:5}");
         }
         // Execute state snapshot request
         if request {
-            let (identity, request) = snapshot.recv();
+            let (identity, request) = snapshot.recv()?;
             if body(&request) != "ICANHAZ?" {
                 println!("E: bad request, aborting");
                 return Ok(());

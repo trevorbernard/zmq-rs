@@ -21,6 +21,14 @@ pub enum Error {
     /// [`Socket::unbind`](crate::Socket::unbind) and
     /// [`Socket::disconnect`](crate::Socket::disconnect).
     UnknownEndpoint(String),
+    /// The context was shut down (libzmq's `ETERM`).
+    Terminated,
+}
+
+impl From<crate::Terminated> for Error {
+    fn from(_: crate::Terminated) -> Self {
+        Self::Terminated
+    }
 }
 
 /// Where a socket is bound, as [`Socket::bind`](crate::Socket::bind)
@@ -307,6 +315,7 @@ impl fmt::Display for Error {
             Self::UnknownEndpoint(endpoint) => {
                 write!(f, "not bound or connected at \"{endpoint}\"")
             }
+            Self::Terminated => crate::Terminated.fmt(f),
         }
     }
 }

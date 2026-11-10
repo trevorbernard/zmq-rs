@@ -73,8 +73,11 @@ fn an_accepted_peer_talks_and_zap_saw_its_address() {
     let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     push.connect(&bound.to_string()).unwrap();
-    push.send("let in");
-    assert_eq!(within(FIVE, move || pull.recv()), Message::from("let in"));
+    push.send("let in").unwrap();
+    assert_eq!(
+        within(FIVE, move || pull.recv().unwrap()),
+        Message::from("let in")
+    );
     let request = requests.recv_timeout(FIVE).unwrap();
     assert_eq!(request.credentials, ZapCredentials::Null);
     assert_eq!(request.credentials.mechanism(), "NULL");
@@ -97,7 +100,7 @@ fn a_denied_peer_hears_400_and_gets_nothing_through() {
     let denied = EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 });
     assert_eq!(expect(&mut server, |kind| *kind == denied), denied);
     assert_eq!(expect(&mut client, |kind| *kind == denied), denied);
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -130,5 +133,5 @@ fn a_zmtp_1_0_peer_is_refused() {
             EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Greeting(_)))
         )
     });
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }

@@ -115,9 +115,9 @@ fn connect(context: &Context, mechanism: Mechanism, authenticator: impl Authenti
 /// Neither direction gets through, as libzmq's `expect_bounce_fail`.
 fn expect_bounce_fail(pair: &mut Pair) {
     let _ = pair.client.try_send(content());
-    assert_eq!(pair.server.recv_timeout(SETTLE), None);
+    assert_eq!(pair.server.recv_timeout(SETTLE).unwrap(), None);
     let _ = pair.server.try_send(content());
-    assert_eq!(pair.client.recv_timeout(SETTLE), None);
+    assert_eq!(pair.client.recv_timeout(SETTLE).unwrap(), None);
 }
 
 /// The handshake failures `monitor` has reported, waiting at most

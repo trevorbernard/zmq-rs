@@ -46,14 +46,14 @@ impl Flclient {
 
         // Blast the request to all connected servers
         for _ in 0..self.servers {
-            self.socket.send(message.clone());
+            self.socket.send(message.clone()).unwrap();
         }
 
         // Wait for a matching reply to arrive from anywhere
         let endtime = Instant::now() + GLOBAL_TIMEOUT;
         loop {
             let remaining = endtime.checked_duration_since(Instant::now())?;
-            let reply = self.socket.recv_timeout(remaining)?;
+            let reply = self.socket.recv_timeout(remaining).unwrap()?;
             // Reply is [empty][sequence][OK]
             assert_eq!(reply.len().get(), 3);
             if reply.get(1).is_some_and(|frame| text(frame) == sequence) {

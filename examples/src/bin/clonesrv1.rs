@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut kvmsg = KvMsg::new(sequence);
         kvmsg.set_key(randof(10_000).to_string());
         kvmsg.set_body(randof(1_000_000).to_string());
-        publisher.send(kvmsg.to_message());
+        publisher.send(kvmsg.to_message())?;
         kvmsg.store(&mut kvmap);
     }
 }

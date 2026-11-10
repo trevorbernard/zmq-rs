@@ -28,12 +28,12 @@ fn topic(len: usize) -> Vec<u8> {
 fn subscribe_cancel(xpub: &mut Socket<XPub>, sub: &mut Socket<Sub>, topic: &[u8]) {
     sub.subscribe(topic);
     assert_eq!(
-        xpub.recv_timeout(FIVE),
+        xpub.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Subscribe(topic.to_vec().into()))
     );
     assert!(sub.unsubscribe(topic));
     assert_eq!(
-        xpub.recv_timeout(FIVE),
+        xpub.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Cancel(topic.to_vec().into()))
     );
 }

@@ -21,9 +21,12 @@ fn test() {
 
     // Receive the welcome subscription
     assert_eq!(
-        publisher.recv_timeout(FIVE),
+        publisher.recv_timeout(FIVE).unwrap(),
         Some(XPubEvent::Subscribe("W".into()))
     );
     // Receive the welcome message
-    assert_eq!(subscriber.recv_timeout(FIVE), Some(Message::from("W")));
+    assert_eq!(
+        subscriber.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("W"))
+    );
 }

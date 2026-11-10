@@ -99,7 +99,7 @@ fn our_radio_sends_group_and_body_to_a_dish_that_joined() {
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Dish, b"").unwrap();
     peer.send_command(&Command::Join(group("news"))).unwrap();
     let started = Instant::now();
-    while radio.send(&group("news"), "rain") == 0 {
+    while radio.send(&group("news"), "rain").unwrap() == 0 {
         assert!(started.elapsed() < FIVE, "the JOIN never arrived");
         thread::sleep(Duration::from_millis(5));
     }
@@ -122,7 +122,7 @@ fn a_libzmq_radio_reaches_our_dish() {
     let (heard_group, body) = loop {
         radio.send_to_group("sports", b"not joined").unwrap();
         radio.send_to_group("weather", b"sunny").unwrap();
-        if let Some(received) = dish.try_recv() {
+        if let Some(received) = dish.try_recv().unwrap() {
             break received;
         }
         assert!(started.elapsed() < FIVE, "nothing arrived");
@@ -145,11 +145,11 @@ fn our_radio_reaches_a_libzmq_dish() {
     dish.join("weather");
     dish.connect(bound);
     let started = Instant::now();
-    while radio.send(&group("weather"), "sunny") == 0 {
+    while radio.send(&group("weather"), "sunny").unwrap() == 0 {
         assert!(started.elapsed() < FIVE, "libzmq's JOIN never arrived");
         thread::sleep(Duration::from_millis(5));
     }
-    assert_eq!(radio.send(&group("sports"), "not joined"), 0);
+    assert_eq!(radio.send(&group("sports"), "not joined").unwrap(), 0);
     assert_eq!(
         dish.recv_from_group().unwrap(),
         ("weather".to_owned(), b"sunny".to_vec())

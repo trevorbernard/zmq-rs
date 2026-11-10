@@ -113,18 +113,21 @@ impl Fixture {
 
     /// A message from `client` to the server and back.
     fn bounce(&mut self, client: &mut Socket<Dealer>) {
-        client.send(bounce_content());
-        assert_eq!(self.server.recv_timeout(FIVE), Some(bounce_content()));
-        self.server.send(bounce_content());
-        assert_eq!(client.recv_timeout(FIVE), Some(bounce_content()));
+        client.send(bounce_content()).unwrap();
+        assert_eq!(
+            self.server.recv_timeout(FIVE).unwrap(),
+            Some(bounce_content())
+        );
+        self.server.send(bounce_content()).unwrap();
+        assert_eq!(client.recv_timeout(FIVE).unwrap(), Some(bounce_content()));
     }
 
     /// Neither direction gets through.
     fn expect_bounce_fail(&mut self, client: &mut Socket<Dealer>) {
         let _ = client.try_send(bounce_content());
-        assert_eq!(self.server.recv_timeout(SETTLE), None);
+        assert_eq!(self.server.recv_timeout(SETTLE).unwrap(), None);
         let _ = self.server.try_send(bounce_content());
-        assert_eq!(client.recv_timeout(SETTLE), None);
+        assert_eq!(client.recv_timeout(SETTLE).unwrap(), None);
     }
 
     fn raw_client(&self) -> TcpStream {
@@ -299,7 +302,7 @@ fn curve_security_unauthenticated_message() {
     // An anonymous ZMTP 1.0 greeting, then a sneaky message.
     stream.write_all(b"\x01\x00").unwrap();
     stream.write_all(b"\x08\x00sneaky\0").unwrap();
-    assert_eq!(fixture.server.recv_timeout(TIMEOUT), None);
+    assert_eq!(fixture.server.recv_timeout(TIMEOUT).unwrap(), None);
 }
 
 fn read_frame(stream: &mut TcpStream) -> Vec<u8> {

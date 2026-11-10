@@ -18,10 +18,12 @@ fn scatter_gather() {
     let mut gather2 = context.socket::<Gather>();
     gather2.connect("inproc://test-scatter-gather").unwrap();
 
-    scatter.send("1");
-    scatter.send("2");
+    scatter.send("1").unwrap();
+    scatter.send("2").unwrap();
 
-    let (first, second) = within(FIVE, move || (gather.recv(), gather2.recv()));
+    let (first, second) = within(FIVE, move || {
+        (gather.recv().unwrap(), gather2.recv().unwrap())
+    });
     assert_eq!(first, Frame::from("1"));
     assert_eq!(second, Frame::from("2"));
 }

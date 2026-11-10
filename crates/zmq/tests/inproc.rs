@@ -47,10 +47,10 @@ fn push_and_pull_over_inproc() {
     let mut push = context.socket::<Push>();
     push.connect("inproc://pipeline").unwrap();
     for i in 0..10 {
-        push.send(format!("{i}"));
+        push.send(format!("{i}")).unwrap();
     }
     let received = within(FIVE, move || {
-        (0..10).map(|_| pull.recv()).collect::<Vec<_>>()
+        (0..10).map(|_| pull.recv().unwrap()).collect::<Vec<_>>()
     });
     let expected: Vec<Message> = (0..10).map(|i| Message::from(format!("{i}"))).collect();
     assert_eq!(received, expected);
@@ -61,11 +61,11 @@ fn connect_may_come_before_bind() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
     push.connect("inproc://later").unwrap();
-    push.send("queued before bind");
+    push.send("queued before bind").unwrap();
     let mut pull = context.socket::<Pull>();
     pull.bind("inproc://later").unwrap();
     assert_eq!(
-        within(FIVE, move || pull.recv()),
+        within(FIVE, move || pull.recv().unwrap()),
         Message::from("queued before bind")
     );
 }
@@ -83,11 +83,11 @@ fn dealer_and_router_exchange_identities() {
     worker.connect("inproc://broker").unwrap();
     let mut anonymous = context.socket::<Dealer>();
     anonymous.connect("inproc://broker").unwrap();
-    worker.send("from worker");
-    anonymous.send("from anonymous");
+    worker.send("from worker").unwrap();
+    anonymous.send("from anonymous").unwrap();
 
     let (received, mut router) = within(FIVE, move || {
-        let received: Vec<(RoutingId, Message)> = (0..2).map(|_| router.recv()).collect();
+        let received: Vec<(RoutingId, Message)> = (0..2).map(|_| router.recv().unwrap()).collect();
         (received, router)
     });
     let worker_id = RoutingId::new("worker").unwrap();
@@ -106,11 +106,11 @@ fn dealer_and_router_exchange_identities() {
     router.send(&worker_id, "to worker").unwrap();
     router.send(generated, "to anonymous").unwrap();
     assert_eq!(
-        within(FIVE, move || worker.recv()),
+        within(FIVE, move || worker.recv().unwrap()),
         Message::from("to worker")
     );
     assert_eq!(
-        within(FIVE, move || anonymous.recv()),
+        within(FIVE, move || anonymous.recv().unwrap()),
         Message::from("to anonymous")
     );
 }
@@ -121,7 +121,7 @@ fn req_and_rep_over_inproc() {
     let mut rep = context.socket::<Rep>();
     rep.bind("inproc://service").unwrap();
     let server = thread::spawn(move || {
-        let request = rep.recv();
+        let request = rep.recv().unwrap();
         let answer = format!(
             "echo {}",
             String::from_utf8_lossy(request.body().get(0).unwrap())
@@ -159,9 +159,9 @@ fn a_name_is_free_again_once_its_socket_is_gone() {
     second.bind("inproc://reused").unwrap();
     let mut push = context.socket::<Push>();
     push.connect("inproc://reused").unwrap();
-    push.send("to the new owner");
+    push.send("to the new owner").unwrap();
     assert_eq!(
-        within(FIVE, move || second.recv()),
+        within(FIVE, move || second.recv().unwrap()),
         Message::from("to the new owner")
     );
 }
@@ -176,7 +176,7 @@ fn incompatible_sockets_are_never_paired() {
     let mut dealer = context.socket::<Dealer>();
     dealer.connect("inproc://wrong").unwrap();
     assert!(dealer.try_send("dealers cannot feed a PULL").is_err());
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -187,9 +187,9 @@ fn contexts_do_not_share_inproc_names() {
     pull.bind("inproc://private").unwrap();
     let mut push = second.socket::<Push>();
     push.connect("inproc://private").unwrap();
-    push.send("never arrives");
+    push.send("never arrives").unwrap();
     thread::sleep(Duration::from_millis(100));
-    assert_eq!(pull.try_recv(), None);
+    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
@@ -201,8 +201,8 @@ fn large_frames_cross_without_copying() {
     push.connect("inproc://zero-copy").unwrap();
     let frame = Frame::from(vec![7u8; 64 * 1024]);
     let address = frame.as_ptr() as usize;
-    push.send(Message::new(frame));
-    let received = within(FIVE, move || pull.recv());
+    push.send(Message::new(frame)).unwrap();
+    let received = within(FIVE, move || pull.recv().unwrap());
     assert_eq!(received.get(0).unwrap().as_ptr() as usize, address);
 }
 

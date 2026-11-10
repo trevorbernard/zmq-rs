@@ -13,13 +13,13 @@ fn x() {
     let mut server = context.socket::<Dealer>();
     let mut client = context.socket::<Dealer>();
     client.connect(&endpoint).unwrap();
-    client.send("foobar");
-    client.send("baz");
-    client.send("buzz");
+    client.send("foobar").unwrap();
+    client.send("baz").unwrap();
+    client.send("buzz").unwrap();
     server.bind(&endpoint).unwrap();
     within(FIVE, move || {
-        assert_eq!(server.recv(), Message::from("foobar"));
-        assert_eq!(server.recv(), Message::from("baz"));
-        assert_eq!(server.recv(), Message::from("buzz"));
+        assert_eq!(server.recv().unwrap(), Message::from("foobar"));
+        assert_eq!(server.recv().unwrap(), Message::from("baz"));
+        assert_eq!(server.recv().unwrap(), Message::from("buzz"));
     });
 }

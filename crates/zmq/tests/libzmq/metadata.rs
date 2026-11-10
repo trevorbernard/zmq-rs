@@ -55,8 +55,8 @@ fn metadata() {
     let mut client = context.socket::<Dealer>();
     client.connect(&endpoint).unwrap();
 
-    client.send("This is a message");
-    let message = server.recv_timeout(FIVE).expect("the message");
+    client.send("This is a message").unwrap();
+    let message = server.recv_timeout(FIVE).unwrap().expect("the message");
     assert_eq!(message, Message::from("This is a message"));
     assert_eq!(message.property("Hello"), Some(b"World".as_slice()));
     assert_eq!(message.property("Socket-Type"), Some(b"DEALER".as_slice()));
@@ -84,7 +84,7 @@ fn router_prefetch_metadata() {
 
     let asking = thread::spawn(move || client.request("This is a message"));
     settle();
-    let (from, request) = server.recv_timeout(FIVE).expect("the request");
+    let (from, request) = server.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.property("Hello"), Some(b"World".as_slice()));
     let frames: Vec<Frame> = request.into_iter().collect();
     assert_eq!(frames, [Frame::new(), Frame::from("This is a message")]);

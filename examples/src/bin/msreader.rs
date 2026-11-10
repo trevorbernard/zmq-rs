@@ -15,10 +15,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Process messages from both sockets, prioritizing traffic from the
     // task ventilator
     loop {
-        while let Some(_task) = receiver.try_recv() {
+        while let Some(_task) = receiver.try_recv()? {
             // Process task
         }
-        while let Some(_update) = subscriber.try_recv() {
+        while let Some(_update) = subscriber.try_recv()? {
             // Process weather update
         }
         sleep_ms(1);

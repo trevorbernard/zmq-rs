@@ -34,9 +34,9 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
         let mut request = Message::new("fetch");
         request.push(total.to_string());
         request.push(CHUNK_SIZE.to_string());
-        dealer.send(request);
+        dealer.send(request)?;
 
-        let size = dealer.recv().last().len();
+        let size = dealer.recv()?.last().len();
         chunks += 1;
         total += size;
         if size < CHUNK_SIZE {
@@ -55,7 +55,7 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
     let mut router = context.socket_with::<Router>(one());
     router.bind("tcp://*:6000")?;
     loop {
-        let (identity, request) = router.recv();
+        let (identity, request) = router.recv()?;
         let [command, offset, chunksz] = request.iter().collect::<Vec<_>>()[..] else {
             continue;
         };

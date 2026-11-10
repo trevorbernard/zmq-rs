@@ -22,7 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Third, get our updates and report how many we got
     let mut update_nbr = 0;
-    while subscriber.recv() != "END".into() {
+    while subscriber.recv()? != "END".into() {
         update_nbr += 1;
     }
     println!("Received {update_nbr} updates");

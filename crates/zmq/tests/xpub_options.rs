@@ -36,13 +36,13 @@ fn events(xpub: &mut zmq::Socket<XPub>, count: usize) -> Vec<XPubEvent> {
     let mut events = Vec::new();
     while events.len() < count {
         assert!(started.elapsed() < FIVE, "only {events:?}");
-        match xpub.try_recv() {
+        match xpub.try_recv().unwrap() {
             Some(event) => events.push(event),
             None => thread::sleep(Duration::from_millis(1)),
         }
     }
     thread::sleep(Duration::from_millis(50));
-    events.extend(std::iter::from_fn(|| xpub.try_recv()));
+    events.extend(std::iter::from_fn(|| xpub.try_recv().unwrap()));
     events
 }
 
@@ -61,12 +61,12 @@ fn an_xpub_welcomes_each_new_subscriber() {
     xpub.bind("inproc://welcome").unwrap();
     let mut sub = subscriber(&context, "inproc://welcome", "WELCOME");
     let (done, welcomed) = mpsc::channel();
-    thread::spawn(move || done.send(sub.recv()));
+    thread::spawn(move || done.send(sub.recv().unwrap()));
     let started = Instant::now();
     let welcome = loop {
         assert!(started.elapsed() < FIVE, "never welcomed");
         // The XPUB greets peers as it takes them in.
-        let _ = xpub.try_recv();
+        let _ = xpub.try_recv().unwrap();
         if let Ok(welcome) = welcomed.try_recv() {
             break welcome;
         }
@@ -144,14 +144,14 @@ fn inverted_matching_publishes_what_does_not_match() {
     sub.connect("inproc://inverted").unwrap();
     // Over inproc the subscription arrives with the peer.
     let started = Instant::now();
-    while publisher.send("b0") == 0 {
+    while publisher.send("b0").unwrap() == 0 {
         assert!(started.elapsed() < FIVE, "never connected");
         thread::yield_now();
     }
-    assert_eq!(publisher.send("a1"), 0);
-    assert_eq!(publisher.send("b1"), 1);
-    assert_eq!(sub.recv(), Message::from("b0"));
-    assert_eq!(sub.recv(), Message::from("b1"));
+    assert_eq!(publisher.send("a1").unwrap(), 0);
+    assert_eq!(publisher.send("b1").unwrap(), 1);
+    assert_eq!(sub.recv().unwrap(), Message::from("b0"));
+    assert_eq!(sub.recv().unwrap(), Message::from("b1"));
 }
 
 #[test]
@@ -162,8 +162,8 @@ fn an_inverted_xpub_skips_matching_subscribers() {
     xpub.bind("inproc://inverted-x").unwrap();
     let _sub = subscriber(&context, "inproc://inverted-x", "a");
     assert_eq!(events(&mut xpub, 1), [subscribed("a")]);
-    assert_eq!(xpub.send("a1"), 0);
-    assert_eq!(xpub.send("b1"), 1);
+    assert_eq!(xpub.send("a1").unwrap(), 0);
+    assert_eq!(xpub.send("b1").unwrap(), 1);
 }
 
 fn one() -> Hwm {
@@ -195,7 +195,7 @@ fn publisher_and_slow_subscribers(
     // Each then has one message queued.
     for topic in ["a", "b"] {
         let started = Instant::now();
-        while publisher.send(topic) == 0 {
+        while publisher.send(topic).unwrap() == 0 {
             assert!(started.elapsed() < FIVE, "never subscribed");
             thread::yield_now();
         }
@@ -208,7 +208,10 @@ fn try_send_all_hands_back_what_a_full_subscriber_would_miss() {
     let context = Context::new().unwrap();
     let (mut publisher, _a, _b) = publisher_and_slow_subscribers(&context, "nodrop");
     assert_eq!(publisher.try_send_all("a"), Ok(1));
-    assert_eq!(publisher.try_send_all("a"), Err(Message::from("a")));
+    assert_eq!(
+        publisher.try_send_all("a"),
+        Err(zmq::TrySendError::Full(Message::from("a")))
+    );
     assert_eq!(publisher.try_send_all("b"), Ok(1), "only a is full");
     assert_eq!(publisher.try_send_all("c"), Ok(0));
 }
@@ -218,10 +221,12 @@ fn send_all_waits_for_every_matching_subscriber() {
     let context = Context::new().unwrap();
     let (mut publisher, mut a, _b) = publisher_and_slow_subscribers(&context, "nodrop-wait");
     publisher.try_send_all("a").unwrap();
-    let sender = thread::spawn(move || publisher.send_all("a-last"));
+    let sender = thread::spawn(move || publisher.send_all("a-last").unwrap());
     thread::sleep(Duration::from_millis(50));
     assert!(!sender.is_finished(), "waits for room");
-    let received = within(FIVE, move || [a.recv(), a.recv(), a.recv()]);
+    let received = within(FIVE, move || {
+        [a.recv().unwrap(), a.recv().unwrap(), a.recv().unwrap()]
+    });
     assert_eq!(received, ["a", "a", "a-last"].map(Message::from));
     assert_eq!(sender.join().unwrap(), 1);
 }
@@ -243,10 +248,13 @@ fn an_xpub_can_send_without_dropping_too() {
     assert_eq!(events(&mut xpub, 1), [subscribed("a")]);
     assert_eq!(xpub.try_send_all("a"), Ok(1));
     assert_eq!(xpub.try_send_all("a"), Ok(1));
-    assert_eq!(xpub.try_send_all("a"), Err(Message::from("a")));
+    assert_eq!(
+        xpub.try_send_all("a"),
+        Err(zmq::TrySendError::Full(Message::from("a")))
+    );
     let _sub = within(FIVE, move || {
-        sub.recv();
+        sub.recv().unwrap();
         sub
     });
-    assert_eq!(xpub.send_all("a"), 1);
+    assert_eq!(xpub.send_all("a").unwrap(), 1);
 }

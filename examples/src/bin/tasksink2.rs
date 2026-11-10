@@ -14,17 +14,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     controller.bind("tcp://*:5559")?;
 
     // Wait for start of batch
-    receiver.recv();
+    receiver.recv()?;
     let start = Instant::now();
 
     for task_nbr in 0..100 {
-        receiver.recv();
+        receiver.recv()?;
         print!("{}", if task_nbr % 10 == 0 { ":" } else { "." });
         io::stdout().flush()?;
     }
     println!("Total elapsed time: {} msec", start.elapsed().as_millis());
 
     // Send kill signal to workers
-    controller.send("KILL");
+    controller.send("KILL")?;
     Ok(())
 }

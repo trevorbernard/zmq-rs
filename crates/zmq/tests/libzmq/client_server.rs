@@ -22,14 +22,17 @@ fn routing_id() {
     let context = Context::new().unwrap();
     let (mut server, mut client) = inproc_client_server_pair(&context, "test-client-server");
 
-    client.send("X");
+    client.send("X").unwrap();
     let (routing_id, frame, mut server) = within(FIVE, move || {
-        let (id, frame) = server.recv();
+        let (id, frame) = server.recv().unwrap();
         (id, frame, server)
     });
     assert_eq!(frame, Frame::from("X"));
 
     server.send(routing_id, vec![2]).unwrap();
     // A client's messages carry no routing id: it has one peer.
-    assert_eq!(within(FIVE, move || client.recv()), Frame::from(vec![2]));
+    assert_eq!(
+        within(FIVE, move || client.recv().unwrap()),
+        Frame::from(vec![2])
+    );
 }

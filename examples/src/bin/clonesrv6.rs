@@ -109,7 +109,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 server.subscriber.readable().when(server.passive),
             ],
             timeout,
-        )
+        )?
         .unwrap_or_default();
 
         for event in bstar.handle([vote, peer_state])? {
@@ -190,13 +190,13 @@ impl CloneServer {
     // passive. The active applies them immediately to its kvmap, whereas
     // the passive queues them as pending
     fn collect(&mut self) {
-        let Some(mut kvmsg) = KvMsg::from_message(&self.collector.recv()) else {
+        let Some(mut kvmsg) = KvMsg::from_message(&self.collector.recv().unwrap()) else {
             return;
         };
         if self.active {
             self.sequence += 1;
             kvmsg.set_sequence(self.sequence);
-            self.publisher.send(kvmsg.to_message());
+            self.publisher.send(kvmsg.to_message()).unwrap();
             let ttl: i64 = kvmsg.prop("ttl").parse().unwrap_or(0);
             if ttl != 0 {
                 kvmsg.set_prop("ttl", (now_ms() + ttl * 1000).to_string());
@@ -232,7 +232,7 @@ impl CloneServer {
             self.sequence += 1;
             kvmsg.set_sequence(self.sequence);
             kvmsg.set_body("");
-            self.publisher.send(kvmsg.to_message());
+            self.publisher.send(kvmsg.to_message()).unwrap();
             log(&format!("I: publishing delete={}", self.sequence));
         }
     }
@@ -244,7 +244,7 @@ impl CloneServer {
         let mut kvmsg = KvMsg::new(self.sequence);
         kvmsg.set_key("HUGZ");
         kvmsg.set_body("");
-        self.publisher.send(kvmsg.to_message());
+        self.publisher.send(kvmsg.to_message()).unwrap();
     }
 
     // When we switch from passive to active, we apply our pending list so
@@ -255,7 +255,7 @@ impl CloneServer {
         for mut kvmsg in std::mem::take(&mut self.pending) {
             self.sequence += 1;
             kvmsg.set_sequence(self.sequence);
-            self.publisher.send(kvmsg.to_message());
+            self.publisher.send(kvmsg.to_message()).unwrap();
             kvmsg.store(self.kvmap());
             log(&format!("I: publishing pending={}", self.sequence));
         }
@@ -282,9 +282,9 @@ impl CloneServer {
             let mut request = Message::new("ICANHAZ?");
             // Blank subtree to get all
             request.push("");
-            snapshot.send(request);
+            snapshot.send(request)?;
             loop {
-                let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()) else {
+                let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()?) else {
                     continue;
                 };
                 if kvmsg.key() == Some("KTHXBAI") {
@@ -298,7 +298,7 @@ impl CloneServer {
         }
 
         // Find and remove update off pending list
-        let Some(kvmsg) = KvMsg::from_message(&self.subscriber.recv()) else {
+        let Some(kvmsg) = KvMsg::from_message(&self.subscriber.recv()?) else {
             return Ok(());
         };
         if kvmsg.key() == Some("HUGZ") {

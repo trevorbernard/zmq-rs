@@ -43,7 +43,7 @@ fn proxy_terminate() {
     publisher.connect(&endpoint).unwrap();
     settle();
     for _ in 0..3 {
-        publisher.send("This is a test");
+        publisher.send("This is a test").unwrap();
         thread::sleep(Duration::from_millis(50));
     }
 

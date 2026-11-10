@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     subscriber.subscribe("B");
 
     loop {
-        let message = subscriber.recv();
+        let message = subscriber.recv()?;
         let (address, contents) = message.split_first();
         let contents = contents
             .first()

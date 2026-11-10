@@ -30,9 +30,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // We first request a state snapshot of our subtree
     let mut request = Message::new("ICANHAZ?");
     request.push(SUBTREE);
-    snapshot.send(request);
+    snapshot.send(request)?;
     let mut sequence = loop {
-        let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()) else {
+        let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()?) else {
             continue;
         };
         if kvmsg.key() == Some("KTHXBAI") {
@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut alarm = Instant::now() + Duration::from_secs(1);
     loop {
         let tickless = alarm.saturating_duration_since(Instant::now());
-        if let Some(message) = subscriber.recv_timeout(tickless)
+        if let Some(message) = subscriber.recv_timeout(tickless)?
             && let Some(kvmsg) = KvMsg::from_message(&message)
         {
             // Discard out-of-sequence kvmsgs, incl. heartbeats
@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut kvmsg = KvMsg::new(0);
             kvmsg.set_key(format!("{SUBTREE}{}", randof(10_000)));
             kvmsg.set_body(randof(1_000_000).to_string());
-            publisher.send(kvmsg.to_message());
+            publisher.send(kvmsg.to_message())?;
             alarm = Instant::now() + Duration::from_secs(1);
         }
     }

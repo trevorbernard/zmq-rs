@@ -114,15 +114,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // workers, wait indefinitely
         let backends = [localbe.readable(), cloudbe.readable()];
         let ready = if workers.is_empty() {
-            Some(zmq::poll(backends))
+            Some(zmq::poll(backends)?)
         } else {
-            zmq::poll_timeout(backends, Duration::from_secs(1))
+            zmq::poll_timeout(backends, Duration::from_secs(1))?
         };
         let mut reply = None;
         if let Some([from_worker, from_peer]) = ready {
             // Handle reply from local worker
             if from_worker {
-                let (worker, message) = localbe.recv();
+                let (worker, message) = localbe.recv()?;
                 workers.push_back(worker);
                 // Its envelope delimiter is of no further use. If it's
                 // READY, don't route the message any further
@@ -134,7 +134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Or handle reply from peer broker; we don't use the peer
             // broker identity for anything
             else if from_peer {
-                reply = Some(cloudbe.recv().1);
+                reply = Some(cloudbe.recv()?.1);
             }
         }
         // Route reply to cloud if it's addressed to a broker, and to the
@@ -156,13 +156,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         while !workers.is_empty() {
             // We'll do peer brokers first, to prevent starvation
             let frontends = [cloudfe.readable(), localfe.readable()];
-            let Some([from_peer, _]) = zmq::poll_timeout(frontends, Duration::ZERO) else {
+            let Some([from_peer, _]) = zmq::poll_timeout(frontends, Duration::ZERO)? else {
                 break; // No work, go back to backends
             };
             let (request, reroutable) = if from_peer {
-                (with_sender(cloudfe.recv()), false)
+                (with_sender(cloudfe.recv()?), false)
             } else {
-                (with_sender(localfe.recv()), true)
+                (with_sender(localfe.recv()?), true)
             };
 
             // If reroutable, send to cloud 20% of the time. Here we'd

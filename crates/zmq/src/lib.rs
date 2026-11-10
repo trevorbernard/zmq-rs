@@ -12,8 +12,8 @@
 //! let bound = pull.bind("tcp://127.0.0.1:*")?;
 //! let mut push = context.socket::<Push>();
 //! push.connect(&bound.to_string())?;
-//! push.send("hello");
-//! assert_eq!(pull.recv(), "hello".into());
+//! push.send("hello")?;
+//! assert_eq!(pull.recv()?, "hello".into());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
@@ -31,8 +31,8 @@
 //! ```compile_fail,E0499
 //! let context = zmq::Context::new().unwrap();
 //! let mut rep = context.socket::<zmq::Rep>();
-//! let first = rep.recv();
-//! let second = rep.recv();
+//! let first = rep.recv().unwrap();
+//! let second = rep.recv().unwrap();
 //! first.reply("a");
 //! ```
 //!
@@ -41,7 +41,7 @@
 //! ```compile_fail,E0382
 //! let context = zmq::Context::new().unwrap();
 //! let mut rep = context.socket::<zmq::Rep>();
-//! let request = rep.recv();
+//! let request = rep.recv().unwrap();
 //! request.reply("a");
 //! request.reply("b");
 //! ```
@@ -111,6 +111,7 @@ mod wait;
 
 use std::io;
 use std::num::NonZeroUsize;
+use std::time::Duration;
 
 #[cfg(feature = "draft")]
 pub use draft::{Channel, Client, ClientId, Dish, Gather, Peer, PeerId, Radio, Scatter, Server};
@@ -122,13 +123,13 @@ pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, 
 pub use socket::Routing;
 pub use socket::{
     Conflatable, Dealer, ManualXPub, Pair, Pub, Publishes, Pull, Push, Receives, Rep, Req, Request,
-    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, UnknownPeer, WaitsForRoom,
-    XPub, XSub,
+    RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, Terminated, TrySendError,
+    WaitsForRoom, XPub, XSub,
 };
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
-    Monitor, PeerGone, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security,
-    SendError, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
+    Monitor, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError,
+    ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
@@ -171,6 +172,42 @@ impl Context {
         Ok(Self {
             core: zmq_core::Context::with_io_threads(threads)?,
         })
+    }
+
+    /// Shuts the context down, as libzmq's `zmq_ctx_shutdown` followed by
+    /// `zmq_ctx_term` with a deadline. Affects every clone.
+    ///
+    /// At once, every send and receive on its sockets fails with
+    /// [`Terminated`], and those waiting are woken to fail, so that threads
+    /// blocked on a socket can stop. Then every listener and connection is
+    /// closed, each connection delivering what it had queued for up to
+    /// `timeout` (or less, by its [`linger`](SocketOptions::linger)), and
+    /// the I/O threads stop. Fails if connections were cut off with
+    /// messages undelivered.
+    ///
+    /// ```
+    /// use std::time::Duration;
+    /// use zmq::{Context, Pull, Terminated};
+    ///
+    /// let context = Context::new()?;
+    /// let mut jobs = context.socket::<Pull>();
+    /// jobs.bind("inproc://jobs")?;
+    /// let worker = std::thread::spawn(move || {
+    ///     while let Ok(job) = jobs.recv() {
+    ///         drop(job);
+    ///     }
+    /// });
+    /// context.shutdown(Duration::from_secs(1))?;
+    /// worker.join().unwrap();
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn shutdown(&self, timeout: Duration) -> Result<(), ShutdownTimedOut> {
+        self.core.shutdown(timeout)
+    }
+
+    /// Whether [`shutdown`](Self::shutdown) has been called on any clone.
+    pub fn is_terminated(&self) -> bool {
+        self.core.is_terminated()
     }
 
     /// A new socket of type `T` with libzmq's default options.
