@@ -35,9 +35,15 @@ use crate::{
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Stop taking messages from the socket while this much output is unsent.
-/// Room for two 64 KiB messages, so a drive of a large-message stream
-/// writes more than one per event-loop pass.
-const MAX_PENDING_OUTPUT: usize = 128 * 1024;
+/// A drive that starts below it takes [`MIN_MESSAGES_PER_DRIVE`] all the
+/// same.
+const MAX_PENDING_OUTPUT: usize = 64 * 1024;
+
+/// So a stream of large messages writes more than one per event-loop pass:
+/// one 64 KiB message a drive ran tcp at 36k msg/s where two reach 42k.
+/// Raising the limit to fit two instead cost a quarter of the throughput
+/// of sixteen connections of small messages on one I/O thread.
+const MIN_MESSAGES_PER_DRIVE: usize = 2;
 
 /// Aligned to a cache line (128 octets, as `zmq-pipe` pads): where its
 /// fields fell across lines moved `multipart/2` by 15% on the M1 as
@@ -418,7 +424,11 @@ impl Engine {
         };
         let encoder = *encoder;
         let mut progressed = false;
-        while self.out.len() < MAX_PENDING_OUTPUT {
+        let mut taken = 0;
+        // Only a drive with room to start with: output the stream is not
+        // taking must not grow by two messages a drive.
+        let room = self.out.len() < MAX_PENDING_OUTPUT;
+        while self.out.len() < MAX_PENDING_OUTPUT || (room && taken < MIN_MESSAGES_PER_DRIVE) {
             match pipes.outbound.poll_recv(cx) {
                 Poll::Ready(Some(message)) => {
                     if let Some(subscription) = self.outgoing_subscription(&message) {
@@ -432,6 +442,7 @@ impl Engine {
                     }
                     self.outbound_empty = false;
                     progressed = true;
+                    taken += 1;
                 }
                 // Empty, or closed and drained: the session decides when a
                 // closed connection is finished.

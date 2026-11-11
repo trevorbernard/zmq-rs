@@ -416,30 +416,38 @@ cargo bench -p zmq-interop --bench scenarios -- fanin  # cases whose name contai
 Each case runs in a fresh process, once to warm up and then five
 rounds; the table gives medians.
 
-### Results: Linux, Intel Xeon (`a452c2f`)
+### Results: Linux, Intel Xeon
 
-On the Xeon above, 2026-11-11, one codegen unit:
+On the Xeon above, 2026-11-11, one codegen unit, `2eb6922` with two
+messages a drive (below):
 
 | Case | ours msg/s | libzmq msg/s | ours/libzmq |
 |---|---|---|---|
-| multipart/2 | 2.76M | 2.02M | 1.37 |
-| multipart/8 | 561.2k | 536.4k | 1.05 |
-| fanout/1 | 4.25M | 3.70M | 1.15 |
-| fanout/4 | 1.95M | 1.38M | 1.42 |
-| fanout/16 | 614.9k | 370.7k | 1.66 |
-| fanin/16 | 2.78M | 2.66M | 1.05 |
-| fanin/64 | 2.04M | 2.52M | 0.81 |
-| router/1 | 2.01M | 1.66M | 1.21 |
-| router/16 | 2.74M | 2.60M | 1.06 |
-| curve/256 | 632.2k | 705.1k | 0.90 |
-| curve/64k | 13.9k | 11.5k | 1.21 |
+| multipart/2 | 2.69M | 2.04M | 1.32 |
+| multipart/8 | 596.5k | 534.1k | 1.12 |
+| fanout/1 | 4.36M | 3.79M | 1.15 |
+| fanout/4 | 1.91M | 1.50M | 1.27 |
+| fanout/16 | 591.7k | 376.9k | 1.57 |
+| fanin/16 | 3.65M | 2.60M | 1.40 |
+| fanin/64 | 2.77M | 2.49M | 1.11 |
+| router/1 | 2.09M | 1.73M | 1.21 |
+| router/16 | 3.69M | 2.64M | 1.40 |
+| curve/256 | 672.0k | 720.8k | 0.93 |
+| curve/64k | 14.0k | 11.5k | 1.22 |
 
-`fanin/16`, `fanin/64` and `router/16` are about 30% below `b523aec`'s
-(3.85M, 3.04M and 3.91M msg/s), and `fanin/64` is now behind libzmq.
-They read the same at `8af3d19`, before `Terminated`, with one codegen
-unit or sixteen (2.65–2.72M, 2.00M, 2.61–2.66M), so the fall lies
-between `b523aec` and `8af3d19` and is not yet traced. `curve/256` is 8%
-lower and behind libzmq's, which read 8% higher than then.
+`curve/256` is behind libzmq's, which read 10% higher than at `b523aec`
+(655.5k); ours is 2% lower than then.
+
+- **An engine takes at least two messages a drive,** within 64 KiB of
+  pending output otherwise. `bb3c52c` raised that limit to 128 KiB, so
+  that a drive wrote two 64 KiB messages rather than one, and
+  `fanin/16`, `fanin/64` and `router/16` fell by about 30%, to 2.78M,
+  2.04M and 2.74M msg/s, `fanin/64` behind libzmq (0.81); bisected on
+  `fanin/16`, 3.5–3.6M before it and 2.6–2.7M from it on. Back at
+  64 KiB they read 3.73M, 2.93M and 3.67M, but 64 KiB throughput fell
+  from 42.5k to 35.6k msg/s over tcp and from 60.4k to 56.2k over ipc.
+  With the limit at 64 KiB and two messages a drive regardless, both
+  hold: the table above, and 42.5k over tcp and 61.1k over ipc.
 
 ### Results: Apple M1 Pro (`414ee4f`)
 
