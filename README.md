@@ -222,7 +222,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 On the two machines in [docs/benchmarks.md](docs/benchmarks.md), measured
 as libzmq's own `perf/` tools measure, throughput is ahead of libzmq's or
-level everywhere but ipc at 64 KiB on an M1 (0.82), and latency is lower
+level everywhere but ipc at 64 KiB on an M1 (0.80), and latency is lower
 everywhere but tcp at 256 B on a Xeon (0.90). Small messages gain most:
 [why](docs/benchmarks.md#why-we-are-ahead-at-8-b-over-tcp), profiled.
 
