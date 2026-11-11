@@ -27,7 +27,6 @@ Of 139 tests, these are left out.
 | GSSAPI, SOCKS | `security_gssapi`, `socks` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
-| `ROUTER_NOTIFY` | `router_notify` |
 | PEER's hello, disconnect and hiccup messages | `hello_msg`, `disconnect_msg`, `hiccup_msg` |
 | `TOPICS_COUNT` | `pubsub_topics_count` |
 | `XSUB_VERBOSE_UNSUBSCRIBE` | `xsub_verbose` |

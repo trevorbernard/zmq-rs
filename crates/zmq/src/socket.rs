@@ -1853,6 +1853,19 @@ impl Socket<Router> {
         self.routing.table.set_handover(on);
     }
 
+    /// Which changes to connections bound or connected from now on this
+    /// socket is told of, as libzmq's `ZMQ_ROUTER_NOTIFY`, a draft option:
+    /// an empty message from the peer's routing id once its handshake has
+    /// completed, when it disconnects, or both. None by default. Over TCP
+    /// and IPC only: an `inproc` peer is never announced.
+    ///
+    /// A disconnection is told only of a peer whose handshake completed,
+    /// after everything it sent.
+    #[cfg(feature = "draft")]
+    pub fn set_notify(&mut self, notify: crate::RouterNotify) {
+        self.peers.config_mut().router_notify = notify;
+    }
+
     /// Whether each peer connected or accepted from now on is first sent an
     /// empty message, as libzmq's `ZMQ_PROBE_ROUTER`, so a ROUTER peer
     /// learns our routing id at once. Off by default.

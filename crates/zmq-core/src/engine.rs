@@ -698,7 +698,7 @@ impl Engine {
             }
             Step::Established(established, codec) => {
                 let version = established.version;
-                let metadata = (self.config.message_properties == MessageProperties::Attach)
+                let mut metadata = (self.config.message_properties == MessageProperties::Attach)
                     .then(|| connection_metadata(&self.stream, &established));
                 self.curve = codec.map(|mut codec| {
                     codec.set_max_message_size(self.config.max_message_size);
@@ -719,6 +719,20 @@ impl Engine {
                 let implicit = established
                     .implicit_subscription
                     .then(|| Subscription::Subscribe(zmtp::Frame::new()).to_message());
+                // A ROUTER told of connections hears of this one first, as
+                // libzmq's engine pushes an empty message after the
+                // handshake.
+                let first = if implicit.is_none() && self.config.router_notify.connect {
+                    let mut notification = Message::new(zmtp::Frame::new());
+                    announce(
+                        &mut notification,
+                        &mut metadata,
+                        self.config.conflate_inbound,
+                    );
+                    Some(notification)
+                } else {
+                    implicit
+                };
                 // Published before any message from this peer can be
                 // delivered, so a ROUTER always knows who sent it.
                 pipes.peer.set(established);
@@ -737,7 +751,7 @@ impl Engine {
                 self.state = State::Active {
                     decoder,
                     encoder,
-                    pending: implicit,
+                    pending: first,
                     metadata,
                 };
             }

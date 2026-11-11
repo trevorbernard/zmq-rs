@@ -80,4 +80,6 @@ mod peer;
 #[cfg(feature = "draft")]
 mod radio_dish;
 #[cfg(feature = "draft")]
+mod router_notify;
+#[cfg(feature = "draft")]
 mod scatter_gather;

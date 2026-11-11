@@ -315,6 +315,7 @@ Rules shared by every pattern:
   - A duplicate identity is ignored, unless `handover` is set.
   - Here, sending to an unknown routing id always fails, handing the message back (`ZMQ_ROUTER_MANDATORY`). `try_send` also fails when the peer is full; `send` waits for room. Ignoring `try_send`'s error is libzmq's default.
   - `connect_with_routing_id` is libzmq's `CONNECT_ROUTING_ID` set before a `zmq_connect`: the peer connected to has the routing id given, at once, whatever identity it announces. A routing id already in use fails with `Error::RoutingIdInUse`, where libzmq aborts.
+  - `set_notify`, with the `draft` feature, is libzmq's draft `ROUTER_NOTIFY`: an empty message from a peer's routing id once its handshake completes, when it disconnects, or both, over TCP and IPC. A connection that never completed its handshake is not announced, and a disconnection follows everything the peer sent.
   - `set_handover` and `set_probe` (also on DEALER) are libzmq's `ROUTER_HANDOVER` and `PROBE_ROUTER`. A probe goes to every new peer, connected or accepted; on reconnection it is not re-sent, as in libzmq, whose pipe also survives.
 - libzmq extensions: `REQ_RELAXED`, `REQ_CORRELATE` (a 4-octet request id before the delimiter), `PROBE_ROUTER`, `CONNECT_ROUTING_ID`.
 

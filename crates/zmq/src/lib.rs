@@ -126,6 +126,8 @@ pub use socket::{
     RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, Terminated, TrySendError,
     WaitsForRoom, XPub, XSub,
 };
+#[cfg(feature = "draft")]
+pub use zmq_core::RouterNotify;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
     Monitor, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError,

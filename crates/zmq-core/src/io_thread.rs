@@ -896,6 +896,12 @@ impl Session {
             );
         }
         monitor.emit(&self.endpoint, EventKind::Disconnected);
+        // A ROUTER told of disconnections hears of this one after
+        // everything the peer sent, as libzmq's engine pushes an empty
+        // message on an error past the handshake.
+        if progress.established && self.config.router_notify.disconnect {
+            let _ = self.inbound.force_send(Message::new(zmtp::Frame::new()));
+        }
     }
 
     /// One round of the engine's work. Returns whether there may be more.

@@ -193,11 +193,25 @@ pub struct ConnectionConfig {
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s). `None` or
     /// zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
+    /// Whether a ROUTER is told of peers connecting and disconnecting
+    /// (`ZMQ_ROUTER_NOTIFY`), off by default.
+    pub router_notify: RouterNotify,
     /// Where listeners and connections report [`Event`]s. Shared by every
     /// connection made with a clone of this config.
     ///
     /// [`Event`]: crate::Event
     pub monitor: MonitorSink,
+}
+
+/// Which changes to a TCP or IPC connection a ROUTER is told of, by an
+/// empty message from that peer: libzmq's `ZMQ_ROUTER_NOTIFY`, with
+/// `ZMQ_NOTIFY_CONNECT` and `ZMQ_NOTIFY_DISCONNECT`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RouterNotify {
+    /// The handshake with the peer has completed.
+    pub connect: bool,
+    /// The connection has ended, having completed its handshake.
+    pub disconnect: bool,
 }
 
 /// TCP keepalive probes on each TCP connection, which find a peer that
@@ -710,6 +724,7 @@ impl ConnectionConfig {
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            router_notify: RouterNotify::default(),
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
         }
