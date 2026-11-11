@@ -78,6 +78,8 @@ mod client_server;
 #[cfg(feature = "draft")]
 mod peer;
 #[cfg(feature = "draft")]
+mod pubsub_topics_count;
+#[cfg(feature = "draft")]
 mod radio_dish;
 #[cfg(feature = "draft")]
 mod router_notify;

@@ -1100,9 +1100,28 @@ impl<T: Publishes> Socket<T> {
     pub fn set_invert_matching(&mut self, on: bool) {
         self.routing.set_invert_matching(on);
     }
+
+    /// How many distinct topics its subscribers hold between them, as
+    /// libzmq's `ZMQ_TOPICS_COUNT`, a draft option. Subscriptions take a
+    /// moment to arrive; those that have are counted.
+    #[cfg(feature = "draft")]
+    pub fn topics_count(&mut self) -> usize {
+        self.peers.accept(&mut noop());
+        self.routing.sync(self.peers.list_mut());
+        self.routing.topics_count()
+    }
 }
 
 impl Socket<Sub> {
+    /// How many distinct topics it is subscribed to, as libzmq's
+    /// `ZMQ_TOPICS_COUNT`, a draft option. A topic subscribed twice counts
+    /// once.
+    #[cfg(feature = "draft")]
+    #[must_use]
+    pub fn topics_count(&self) -> usize {
+        self.routing.topics_count()
+    }
+
     /// Whether messages starting with none of the topics are received
     /// instead, as libzmq's `ZMQ_INVERT_MATCHING`. Its PUB peers must invert
     /// too, or they send only what is then dropped. Off by default.
@@ -1321,6 +1340,15 @@ impl Socket<XSub> {
     #[cfg(feature = "draft")]
     pub fn set_verbose_unsubscribe(&mut self, on: bool) {
         self.routing.set_verbose_unsubscribe(on);
+    }
+
+    /// How many distinct topics it is subscribed to, as libzmq's
+    /// `ZMQ_TOPICS_COUNT`, a draft option. A topic subscribed twice counts
+    /// once.
+    #[cfg(feature = "draft")]
+    #[must_use]
+    pub fn topics_count(&self) -> usize {
+        self.routing.topics_count()
     }
 
     /// Asks its publishers for messages whose first frame starts with

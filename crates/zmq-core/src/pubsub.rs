@@ -62,6 +62,12 @@ impl Topics {
         self.0.iter().map(|(topic, _)| topic)
     }
 
+    /// How many distinct topics are subscribed.
+    #[must_use]
+    pub(crate) fn len(&self) -> usize {
+        self.0.len()
+    }
+
     /// Whether nothing is subscribed.
     #[cfg(test)]
     pub(crate) fn is_empty(&self) -> bool {
@@ -180,6 +186,10 @@ impl<V> PrefixMap<V> {
             .values()
             .flatten()
             .map(|(topic, value)| (&**topic, value))
+    }
+
+    fn len(&self) -> usize {
+        self.lengths.values().sum()
     }
 
     #[cfg(test)]
@@ -356,6 +366,13 @@ impl Publisher {
     /// are gone.
     pub fn sync(&mut self, peers: &mut PeerList) {
         self.drain(peers, None);
+    }
+
+    /// How many distinct topics peers are subscribed to (libzmq's
+    /// `ZMQ_TOPICS_COUNT`), as of the last [`sync`](Self::sync).
+    #[must_use]
+    pub fn topics_count(&self) -> usize {
+        self.index.len()
     }
 
     /// Reads what peers have sent, registering `cx`, if given, to be woken
@@ -759,6 +776,13 @@ impl Subscriber {
         self.invert = on;
     }
 
+    /// How many distinct topics are subscribed (libzmq's
+    /// `ZMQ_TOPICS_COUNT`).
+    #[must_use]
+    pub fn topics_count(&self) -> usize {
+        self.topics.len()
+    }
+
     /// The subscribed topics.
     #[cfg(test)]
     pub(crate) fn topics(&self) -> &Topics {
@@ -809,6 +833,22 @@ mod tests {
         assert!(!topics.matches(b"a"));
         assert!(!topics.remove(b"a"), "nothing to remove");
         assert!(topics.is_empty());
+    }
+
+    #[test]
+    fn topics_have_a_length_in_distinct_topics() {
+        let mut topics = Topics::default();
+        assert_eq!(topics.len(), 0);
+        topics.add(b"a");
+        topics.add(b"a");
+        topics.add(b"ab");
+        topics.add(b"xy");
+        assert_eq!(topics.len(), 3);
+        topics.remove(b"a");
+        assert_eq!(topics.len(), 3, "one subscription to it left");
+        topics.remove(b"a");
+        topics.remove(b"xy");
+        assert_eq!(topics.len(), 1);
     }
 
     #[test]
