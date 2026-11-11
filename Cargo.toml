@@ -42,6 +42,12 @@ unexpected_cfgs = { level = "warn", check-cfg = ['cfg(loom)'] }
 all = { level = "warn", priority = -1 }
 undocumented_unsafe_blocks = "warn"
 
+# One codegen unit, so that what is inlined does not follow how a crate
+# happens to be split: at 8 B, throughput moved 8% with code that never
+# ran (docs/benchmarks.md).
+[profile.bench]
+codegen-units = 1
+
 # For `just mutants`: unoptimized for quick rebuilds, without debug info
 # for quick links, but optimizing what the property tests spend their time
 # in, which runs them forty times faster.
