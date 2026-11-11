@@ -1314,6 +1314,15 @@ impl Socket<XSub> {
         let _ = on;
     }
 
+    /// Whether every unsubscription goes to the publishers, as libzmq's
+    /// `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE`, a draft option: even one of a topic
+    /// subscribed more than once, or not at all. Off by default: only the
+    /// unsubscription that ends a topic does.
+    #[cfg(feature = "draft")]
+    pub fn set_verbose_unsubscribe(&mut self, on: bool) {
+        self.routing.set_verbose_unsubscribe(on);
+    }
+
     /// Asks its publishers for messages whose first frame starts with
     /// `topic`, as [`Socket<Sub>::subscribe`] does. Unlike SUB, it does not
     /// filter what arrives: as libzmq's XSUB, it delivers every message.

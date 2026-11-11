@@ -83,3 +83,5 @@ mod radio_dish;
 mod router_notify;
 #[cfg(feature = "draft")]
 mod scatter_gather;
+#[cfg(feature = "draft")]
+mod xsub_verbose;

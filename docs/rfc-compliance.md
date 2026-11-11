@@ -366,6 +366,7 @@ Rules shared by every pattern:
 **Done (PUB and SUB):**
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.
 - A SUB counts its subscriptions: every `subscribe` goes upstream, as in libzmq, while `unsubscribe` sends CANCEL only for the last one. A publisher keeps one subscription per topic and peer, as libzmq's XPUB does.
+- `Socket<XSub>::set_verbose_unsubscribe`, with the `draft` feature, is libzmq's draft `XSUB_VERBOSE_UNSUBSCRIBE`: every unsubscription goes upstream, even of a topic subscribed more than once or not at all. Our XPUB ignores the ones for topics the peer does not hold, as above, where libzmq's reports them.
 - A SUB filters what arrives too. That covers publishers that send everything, and messages queued before an `unsubscribe`.
 - A SUB's subscriptions go to a peer as soon as `connect` returns. A subscription is never dropped at the HWM: it goes to peers past it. An XSUB's other messages are dropped for a peer at the HWM, as libzmq's are.
 - A session replays the topics it has carried to each new connection after a reconnect, which is the effect of libzmq's hiccup. Cancelled topics are not replayed.

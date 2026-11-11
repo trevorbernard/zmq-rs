@@ -665,6 +665,9 @@ pub struct Subscriber {
     /// Whether every message is delivered, matching or not, as libzmq's
     /// XSUB does: only SUB filters.
     deliver_all: bool,
+    /// Whether every unsubscription is sent upstream, not only a topic's
+    /// last.
+    verbose_unsubscribe: bool,
     recv: FairQueue,
     /// The peers that have been sent the topics.
     greeted: PeerCursor,
@@ -683,13 +686,19 @@ impl Subscriber {
     /// Removes one subscription to `topic`. Returns whether there was one.
     pub fn unsubscribe(&mut self, peers: &mut PeerList, topic: &[u8]) -> bool {
         self.greet(peers);
-        if !self.topics.contains(topic) {
-            return false;
-        }
-        if self.topics.remove(topic) {
+        let subscribed = self.topics.contains(topic);
+        let last = subscribed && self.topics.remove(topic);
+        if last || self.verbose_unsubscribe {
             peers.broadcast(&Subscription::Cancel(Frame::copy_from_slice(topic)).to_message());
         }
-        true
+        subscribed
+    }
+
+    /// Whether every unsubscription is sent to the publishers, even one of
+    /// a topic still subscribed or never subscribed, as libzmq's
+    /// `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE`. Otherwise only a topic's last is.
+    pub fn set_verbose_unsubscribe(&mut self, on: bool) {
+        self.verbose_unsubscribe = on;
     }
 
     /// Sends `message` to every peer, as XSUB does. A subscription in the
@@ -1135,6 +1144,31 @@ mod tests {
         let expected = [msg("hello"), subscribe("x"), subscribe("x")];
         assert_eq!(drain(&mut sa), expected);
         assert_eq!(drain(&mut sb), expected);
+    }
+
+    #[test]
+    fn a_verbose_subscriber_sends_every_unsubscription() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut subscriber = Subscriber::default();
+        subscriber.set_verbose_unsubscribe(true);
+        assert!(!subscriber.unsubscribe(&mut peers, b"never"));
+        subscriber.subscribe(&mut peers, b"x");
+        subscriber.subscribe(&mut peers, b"x");
+        assert!(subscriber.unsubscribe(&mut peers, b"x"));
+        assert!(subscriber.topics().contains(b"x"), "still subscribed once");
+        assert!(subscriber.unsubscribe(&mut peers, b"x"));
+        assert!(!subscriber.topics().contains(b"x"));
+        assert_eq!(
+            drain(&mut sa),
+            [
+                cancel("never"),
+                subscribe("x"),
+                subscribe("x"),
+                cancel("x"),
+                cancel("x")
+            ]
+        );
     }
 
     #[test]

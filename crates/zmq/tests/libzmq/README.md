@@ -29,7 +29,6 @@ Of 139 tests, these are left out.
 | Timers | `timers` |
 | PEER's hello, disconnect and hiccup messages | `hello_msg`, `disconnect_msg`, `hiccup_msg` |
 | `TOPICS_COUNT` | `pubsub_topics_count` |
-| `XSUB_VERBOSE_UNSUBSCRIBE` | `xsub_verbose` |
 | `RECONNECT_STOP` | `reconnect_options` |
 | TCP and IPC accept filters | `tcp_accept_filter`, `filter_ipc` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
