@@ -436,7 +436,11 @@ messages a drive (below):
 | curve/64k | 14.0k | 11.5k | 1.22 |
 
 `curve/256` is behind libzmq's, which read 10% higher than at `b523aec`
-(655.5k); ours is 2% lower than then.
+(655.5k); ours is 2% lower than then. Nine more runs put ours at
+639–669k msg/s and libzmq's at 656–734k, 0.90 to 1.02. Ours reads the
+same with sixteen codegen units and before `Terminated` (`8af3d19`,
+644–658k), so the ratio moved on libzmq's side; `flake.lock` moved
+between the two runs.
 
 - **An engine takes at least two messages a drive,** within 64 KiB of
   pending output otherwise. `bb3c52c` raised that limit to 128 KiB, so
