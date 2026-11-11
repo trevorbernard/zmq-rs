@@ -432,16 +432,25 @@ messages a drive (below):
 | fanin/64 | 2.77M | 2.49M | 1.11 |
 | router/1 | 2.09M | 1.73M | 1.21 |
 | router/16 | 3.69M | 2.64M | 1.40 |
-| curve/256 | 672.0k | 720.8k | 0.93 |
+| curve/256 | 822.1k | 657.7k | 1.25 |
 | curve/64k | 14.0k | 11.5k | 1.22 |
 
-`curve/256` is behind libzmq's, which read 10% higher than at `b523aec`
-(655.5k); ours is 2% lower than then. Nine more runs put ours at
-639–669k msg/s and libzmq's at 656–734k, 0.90 to 1.02. Ours reads the
-same with sixteen codegen units and before `Terminated` (`8af3d19`,
-644–658k), so the ratio moved on libzmq's side; `flake.lock` moved
-between the two runs.
+`curve/256` is with one wake a read (below); the rest of the table is
+from before it, and read within 5% of this with it, as did every `perf`
+case.
 
+- **The socket is woken once for what one read held.** `curve/256` was
+  0.93, at 640–670k msg/s against libzmq's 656–734k, though our I/O
+  threads spent fewer cycles than libzmq's (3.5G against 4.5G in user
+  space for 500,000 messages). Under CURVE the I/O thread is the slow
+  side, so the receiving socket emptied its pipe, slept, and was woken
+  by the next message: `strace` counted 675k `futex` calls where libzmq
+  made 18k, as its `ypipe_t` shows the reader nothing until the engine
+  flushes, once per read. Ours now leaves a waiting reader asleep until
+  the engine has decoded what a read held
+  (`Writer::try_send_unflushed`, `flush`): 81k `futex` calls, and
+  780–825k msg/s in six runs against the 647–657k of the commit before.
+  A reader that is awake still takes each message as it is queued.
 - **An engine takes at least two messages a drive,** within 64 KiB of
   pending output otherwise. `bb3c52c` raised that limit to 128 KiB, so
   that a drive wrote two 64 KiB messages rather than one, and

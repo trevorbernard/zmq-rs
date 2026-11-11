@@ -385,8 +385,9 @@ impl Engine {
         if pulled {
             wrote |= self.flush()?;
         }
-        let received = self.receive(pipes, cx)?;
-        Ok(wrote || pulled || received)
+        let received = self.receive(pipes, cx);
+        pipes.inbound.flush();
+        Ok(received? || wrote || pulled)
     }
 
     /// Whether the non-blocking connect has completed.
@@ -913,6 +914,11 @@ impl Engine {
                     progressed = true;
                 }
                 None => {
+                    // The socket is woken once for what one read held, as
+                    // libzmq flushes its pipe after each: woken for every
+                    // message, a socket faster than this thread slept and
+                    // woke between any two.
+                    pipes.inbound.flush();
                     if !self.fill(decoder)? {
                         return Ok(progressed);
                     }
@@ -1067,7 +1073,7 @@ fn deliver(
     cx: &mut Context<'_>,
 ) -> Option<Message> {
     match inbound.poll_ready(cx) {
-        Poll::Ready(Ok(())) => match inbound.try_send(message) {
+        Poll::Ready(Ok(())) => match inbound.try_send_unflushed(message) {
             Ok(()) | Err(TrySendError::Closed(_)) => None,
             Err(TrySendError::Full(message)) => Some(message),
         },

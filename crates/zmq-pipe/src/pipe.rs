@@ -2,6 +2,7 @@
 
 use std::fmt;
 use std::future;
+use std::mem;
 use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::atomic::{self, AtomicBool, AtomicU64, Ordering};
@@ -37,6 +38,7 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
+        wake_owed: false,
         hwm,
     };
     let reader = Reader {
@@ -65,6 +67,7 @@ pub fn pipe_conflated<T>() -> (Writer<T>, Reader<T>) {
         shared: shared.clone(),
         written: 0,
         peer_read: 0,
+        wake_owed: false,
         hwm: None,
     };
     let reader = Reader {
@@ -182,6 +185,9 @@ pub struct Writer<T> {
     /// writer exceed the high-water mark.
     peer_read: u64,
     hwm: Option<u64>,
+    /// Whether a waiting reader has yet to be woken for an item sent by
+    /// [`try_send_unflushed`](Self::try_send_unflushed).
+    wake_owed: bool,
 }
 
 /// The receiving end of a pipe.
@@ -262,7 +268,37 @@ impl<T> Writer<T> {
         Ok(())
     }
 
+    /// As [`try_send`](Self::try_send), leaving a waiting reader asleep
+    /// until [`flush`](Self::flush), so that a batch of items wakes it
+    /// once, as libzmq's `ypipe_t` shows its reader nothing until flushed.
+    /// A reader that is not waiting takes the item at once.
+    pub fn try_send_unflushed(&mut self, item: T) -> Result<(), TrySendError<T>> {
+        if self.is_closed() {
+            return Err(TrySendError::Closed(item));
+        }
+        if self.is_full() {
+            return Err(TrySendError::Full(item));
+        }
+        self.wake_owed |= self.publish(item);
+        Ok(())
+    }
+
+    /// Wakes the reader if it waits for an item sent by
+    /// [`try_send_unflushed`](Self::try_send_unflushed).
+    pub fn flush(&mut self) {
+        if mem::take(&mut self.wake_owed) {
+            self.shared.reader.waker.wake();
+        }
+    }
+
     fn push(&mut self, item: T) {
+        if self.publish(item) || mem::take(&mut self.wake_owed) {
+            self.shared.reader.waker.wake();
+        }
+    }
+
+    /// Queues `item`. Returns whether the reader waits for it.
+    fn publish(&mut self, item: T) -> bool {
         let reader_waiting = match &mut self.sender {
             Sender::Queue(producer) => producer.push(item),
             Sender::Latest(latest) => {
@@ -278,9 +314,7 @@ impl<T> Writer<T> {
             }
         };
         self.written += 1;
-        if reader_waiting {
-            self.shared.reader.waker.wake();
-        }
+        reader_waiting
     }
 
     /// Ready once an item can be queued, or with `ReaderGone` once the
@@ -881,6 +915,47 @@ mod tests {
             assert_eq!(reader.try_recv(), Ok(1));
             assert!(reader.is_empty());
         }
+    }
+
+    #[test]
+    fn an_unflushed_send_wakes_a_waiting_reader_only_at_the_flush() {
+        for (mut writer, mut reader) in [pipe(Hwm::Unlimited), pipe_conflated()] {
+            let (count, waker) = counting_waker();
+            let mut cx = Context::from_waker(&waker);
+            assert!(reader.poll_recv(&mut cx).is_pending());
+            writer.try_send_unflushed(1).unwrap();
+            assert_eq!(wakes(&count), 0);
+            writer.flush();
+            assert_eq!(wakes(&count), 1);
+            writer.flush();
+            assert_eq!(wakes(&count), 1, "nothing is owed twice");
+            assert_eq!(reader.try_recv(), Ok(1));
+        }
+    }
+
+    #[test]
+    fn a_send_pays_the_wake_an_unflushed_one_owes() {
+        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
+        let (count, waker) = counting_waker();
+        assert!(
+            reader
+                .poll_recv(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        writer.try_send_unflushed(1).unwrap();
+        writer.try_send(2).unwrap();
+        assert_eq!(wakes(&count), 1);
+        writer.flush();
+        assert_eq!(wakes(&count), 1);
+    }
+
+    #[test]
+    fn an_unflushed_send_respects_the_high_water_mark_and_a_gone_reader() {
+        let (mut writer, reader) = pipe(Hwm::Messages(NonZeroUsize::new(1).unwrap()));
+        writer.try_send_unflushed(1).unwrap();
+        assert_eq!(writer.try_send_unflushed(2), Err(TrySendError::Full(2)));
+        drop(reader);
+        assert_eq!(writer.try_send_unflushed(3), Err(TrySendError::Closed(3)));
     }
 
     #[test]
