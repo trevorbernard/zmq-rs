@@ -1799,6 +1799,53 @@ impl Socket<Router> {
         table.poll_send(peers, to.as_bytes(), slot, cx)
     }
 
+    /// Connects to `endpoint` as [`connect`](Self::connect) does, giving
+    /// the peer there the routing id `peer`, as libzmq's
+    /// `ZMQ_CONNECT_ROUTING_ID` set before a `zmq_connect`. Messages can be
+    /// sent to `peer` at once, queuing until the connection is up, which
+    /// lets a ROUTER talk first to a ROUTER it connects to. What the peer
+    /// announces as its identity is not looked at.
+    ///
+    /// Fails with [`Error::RoutingIdInUse`] if a peer of this socket has
+    /// that routing id already; libzmq does not allow it and aborts.
+    ///
+    /// ```
+    /// use zmq::{Context, Router, RoutingId};
+    ///
+    /// let context = Context::new()?;
+    /// let mut bound = context.socket::<Router>();
+    /// bound.bind("inproc://routers")?;
+    /// let mut connecting = context.socket::<Router>();
+    /// let peer = RoutingId::new("bound")?;
+    /// connecting.connect_with_routing_id("inproc://routers", peer.clone())?;
+    /// connecting.send(&peer, "hello")?;
+    /// let (_from, message) = bound.recv()?;
+    /// assert_eq!(message, "hello".into());
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn connect_with_routing_id(
+        &mut self,
+        endpoint: &str,
+        peer: RoutingId,
+    ) -> Result<(), Error> {
+        self.alive()?;
+        self.peers.accept(&mut noop());
+        self.routing.table.sync(self.peers.list_mut());
+        let connected = &self.connected;
+        let taken = self.routing.table.is_taken(peer.as_bytes(), |endpoint| {
+            connected.iter().any(|&(_, _, id)| id == endpoint)
+        });
+        if taken {
+            return Err(Error::RoutingIdInUse);
+        }
+        self.connect_key(endpoint)?;
+        let &(_, _, id) = self.connected.last().expect("just connected");
+        self.routing
+            .table
+            .assign(id, zmtp::Frame::copy_from_slice(peer.as_bytes()));
+        Ok(())
+    }
+
     /// Whether a peer announcing a routing id already in use takes it over,
     /// disconnecting the peer that had it, as libzmq's
     /// `ZMQ_ROUTER_HANDOVER`. Off by default: the newcomer is ignored.

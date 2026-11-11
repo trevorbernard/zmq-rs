@@ -71,6 +71,11 @@ impl Peer {
         self.key
     }
 
+    /// The bind or connect this peer came through, if any.
+    pub fn endpoint(&self) -> Option<EndpointId> {
+        self.endpoint
+    }
+
     /// Ready once the peer has room, or with `ReaderGone` once its session
     /// has ended. `Pending` registers `cx`, unless it is
     /// [`noop_context`]'s.
@@ -124,6 +129,12 @@ impl PeerList {
     /// Adds a peer and returns its key.
     pub fn push(&mut self, connection: Connection) -> PeerKey {
         self.push_from(connection, None)
+    }
+
+    /// Adds a peer as the connect numbered `endpoint` would.
+    #[cfg(test)]
+    pub(crate) fn push_connected(&mut self, connection: Connection, endpoint: u64) -> PeerKey {
+        self.push_from(connection, Some(EndpointId(endpoint)))
     }
 
     fn push_from(&mut self, connection: Connection, endpoint: Option<EndpointId>) -> PeerKey {

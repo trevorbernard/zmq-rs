@@ -23,6 +23,9 @@ pub enum Error {
     UnknownEndpoint(String),
     /// The context was shut down (libzmq's `ETERM`).
     Terminated,
+    /// Another peer of the socket has that routing id, for
+    /// [`Socket::connect_with_routing_id`](crate::Socket::connect_with_routing_id).
+    RoutingIdInUse,
 }
 
 impl From<crate::Terminated> for Error {
@@ -316,6 +319,7 @@ impl fmt::Display for Error {
                 write!(f, "not bound or connected at \"{endpoint}\"")
             }
             Self::Terminated => crate::Terminated.fmt(f),
+            Self::RoutingIdInUse => f.write_str("another peer has that routing id"),
         }
     }
 }

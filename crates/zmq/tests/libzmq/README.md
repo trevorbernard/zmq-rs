@@ -28,7 +28,6 @@ Of 139 tests, these are left out.
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | `ROUTER_NOTIFY` | `router_notify` |
-| `CONNECT_ROUTING_ID` | `connect_rid` |
 | PEER's hello, disconnect and hiccup messages | `hello_msg`, `disconnect_msg`, `hiccup_msg` |
 | `TOPICS_COUNT` | `pubsub_topics_count` |
 | `XSUB_VERBOSE_UNSUBSCRIBE` | `xsub_verbose` |

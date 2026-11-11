@@ -13,6 +13,7 @@ mod base85;
 mod bind_after_connect_tcp;
 mod conflate;
 mod connect_resolve;
+mod connect_rid;
 mod disconnect_inproc;
 mod heartbeats;
 mod hwm;

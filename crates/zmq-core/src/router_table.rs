@@ -8,7 +8,7 @@ use std::task::{Context as TaskContext, Poll};
 use zmq_pipe::TrySendError;
 use zmtp::{Frame, Message};
 
-use crate::peers::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, random_u32};
+use crate::peers::{EndpointId, Peer, PeerCursor, PeerKey, PeerList, PeerMap, random_u32};
 
 /// ROUTER's map between peers and their routing ids, as in libzmq's
 /// `router_t`.
@@ -19,6 +19,10 @@ use crate::peers::{Peer, PeerCursor, PeerKey, PeerList, PeerMap, random_u32};
 /// already in use is ignored: its messages are dropped and nothing can be
 /// sent to it. With [`handover`](Self::set_handover) it takes the identity
 /// over instead, and the peer that had it is disconnected.
+///
+/// A connect can [assign](Self::assign) its peer a routing id instead, as
+/// libzmq's `ZMQ_CONNECT_ROUTING_ID`: that peer is routable before its
+/// handshake, and what it announces is not looked at.
 #[derive(Debug)]
 pub struct RouterTable {
     by_identity: HashMap<Box<[u8]>, PeerKey>,
@@ -28,6 +32,8 @@ pub struct RouterTable {
     cursor: PeerCursor,
     next_generated: u32,
     handover: bool,
+    /// Routing ids assigned to the peers of connects.
+    assigned: HashMap<EndpointId, Frame>,
 }
 
 /// What became of a peer's announced identity.
@@ -73,6 +79,7 @@ impl Default for RouterTable {
             // libzmq starts the generated ids at a random value.
             next_generated: random_u32(),
             handover: false,
+            assigned: HashMap::new(),
         }
     }
 }
@@ -83,6 +90,23 @@ impl RouterTable {
     /// Otherwise the newcomer is ignored.
     pub fn set_handover(&mut self, on: bool) {
         self.handover = on;
+    }
+
+    /// Gives every peer of the connect `endpoint` the routing id
+    /// `routing_id`, from when it is next [synced](Self::sync).
+    pub fn assign(&mut self, endpoint: EndpointId, routing_id: Frame) {
+        self.assigned.insert(endpoint, routing_id);
+    }
+
+    /// Whether a peer has `routing_id` or a connect that `connected` still
+    /// holds was assigned it. Forgets the assignments of other connects.
+    pub fn is_taken(&mut self, routing_id: &[u8], connected: impl Fn(EndpointId) -> bool) -> bool {
+        self.assigned.retain(|&endpoint, _| connected(endpoint));
+        self.by_identity.contains_key(routing_id)
+            || self
+                .assigned
+                .values()
+                .any(|assigned| assigned.as_slice() == routing_id)
     }
 
     /// Identifies peers whose handshake has completed and forgets peers that
@@ -100,6 +124,14 @@ impl RouterTable {
             let Some(peer) = peers.get(key) else {
                 continue;
             };
+            let assigned = peer
+                .endpoint()
+                .and_then(|endpoint| self.assigned.get(&endpoint))
+                .cloned();
+            if let Some(assigned) = assigned {
+                self.identify(peers, key, assigned);
+                continue;
+            }
             match peer.connection.peer() {
                 Some(established) => self.identify(peers, key, established.peer_identity),
                 None => self.waiting.push(key),
@@ -278,6 +310,39 @@ mod tests {
         sa.establish("late");
         table.sync(&mut peers);
         assert_eq!(table.routing_id(key), Some(&Frame::from("late")));
+    }
+
+    #[test]
+    fn an_assigned_routing_id_routes_before_the_handshake_and_outlasts_it() {
+        let (a, mut sa) = connection(10);
+        let mut peers = PeerList::default();
+        let key = peers.push_connected(a, 7);
+        let endpoint = peers.iter().next().unwrap().endpoint().unwrap();
+        let mut table = RouterTable::default();
+        assert!(!table.is_taken(b"given", |_| true));
+        table.assign(endpoint, Frame::from("given"));
+        assert!(table.is_taken(b"given", |_| true));
+        table.sync(&mut peers);
+        assert_eq!(table.routing_id(key), Some(&Frame::from("given")));
+        table.try_send(&mut peers, b"given", msg("early")).unwrap();
+        assert_eq!(drain(&mut sa), vec![msg("early")]);
+
+        sa.establish("announced");
+        table.sync(&mut peers);
+        assert_eq!(table.routing_id(key), Some(&Frame::from("given")));
+        assert!(!table.is_taken(b"announced", |_| true));
+    }
+
+    #[test]
+    fn an_assignment_is_forgotten_with_its_connect() {
+        let mut table = RouterTable::default();
+        let mut peers = PeerList::default();
+        let (a, _sa) = connection(10);
+        peers.push_connected(a, 7);
+        let endpoint = peers.iter().next().unwrap().endpoint().unwrap();
+        table.assign(endpoint, Frame::from("given"));
+        assert!(!table.is_taken(b"given", |_| false));
+        assert!(!table.is_taken(b"given", |_| true));
     }
 
     #[test]

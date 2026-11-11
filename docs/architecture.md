@@ -140,9 +140,11 @@ strategies work over that set, as in libzmq:
   is the identity from its handshake; anonymous peers get `0x00` and a
   32-bit counter that starts at a random value; a peer reusing an identity
   already in use is ignored, or with handover takes it over and the holder
-  is disconnected. Sending hands the message back for an unknown routing id
-  (`ZMQ_ROUTER_MANDATORY` is the only behaviour): `try_send` also hands it
-  back when the peer is full, and `send` waits for room.
+  is disconnected. A connect can give its peer a routing id instead
+  (`ZMQ_CONNECT_ROUTING_ID`), routable before the handshake. Sending hands
+  the message back for an unknown routing id (`ZMQ_ROUTER_MANDATORY` is
+  the only behaviour): `try_send` also hands it back when the peer is
+  full, and `send` waits for room.
 
 - `Requester` (`req_t`) sends each request, behind an empty delimiter, to
   the next peer with room and accepts a reply only from that peer,
