@@ -20,8 +20,8 @@ use crate::handshake::{
 };
 use crate::{
     Authenticated, Command, Credential, ErrorReason, Established, HandshakeError, Identity,
-    Incoming, PeerGreeting, PlainCredentials, SocketType, Version, ZapCredentials, ZapReply,
-    ZapRequest,
+    Incoming, Metadata, PeerGreeting, PlainCredentials, SocketType, Version, ZapCredentials,
+    ZapReply, ZapRequest,
 };
 
 /// The client side of a PLAIN handshake.
@@ -30,6 +30,7 @@ use crate::{
 pub struct PlainClient {
     socket_type: SocketType,
     identity: Identity,
+    metadata: Metadata,
     version: Version,
     state: ClientState,
 }
@@ -86,6 +87,7 @@ impl PlainClient {
     pub fn start(
         socket_type: SocketType,
         identity: Identity,
+        metadata: Metadata,
         credentials: &PlainCredentials,
         peer: &PeerGreeting,
         out: &mut Vec<u8>,
@@ -102,6 +104,7 @@ impl PlainClient {
         Ok(Self {
             socket_type,
             identity,
+            metadata,
             version,
             state: ClientState::WaitingForWelcome,
         })
@@ -123,7 +126,7 @@ impl PlainClient {
                 }
                 let mut initiate = Vec::new();
                 encode_metadata(
-                    &local_metadata(self.socket_type, &self.identity),
+                    &local_metadata(self.socket_type, &self.identity, &self.metadata),
                     &mut initiate,
                 );
                 write_raw_command(self.version, INITIATE, &initiate, out);
@@ -191,7 +194,11 @@ impl PlainServer {
                     Rejection::SendError,
                     out,
                 )?;
-                let ready = Command::Ready(local_metadata(socket_type, &self.config.identity));
+                let ready = Command::Ready(local_metadata(
+                    socket_type,
+                    &self.config.identity,
+                    &self.config.metadata,
+                ));
                 write_command(self.version, &ready, out);
                 established.authenticated = Some(authenticated);
                 Ok(PlainServerStep::Established(established))
@@ -336,6 +343,7 @@ mod tests {
         let client = PlainClient::start(
             SocketType::Dealer,
             identity("me"),
+            Metadata::new(),
             &credentials(),
             &V3_1,
             &mut out,
@@ -498,6 +506,7 @@ mod tests {
             PlainClient::start(
                 SocketType::Dealer,
                 identity("me"),
+                Metadata::new(),
                 &credentials(),
                 &legacy,
                 &mut out
@@ -519,6 +528,7 @@ mod tests {
         ServerConfig {
             socket_type: SocketType::Router,
             identity: identity("srv"),
+            metadata: Metadata::new(),
             domain: Frame::from("global"),
             peer_address: "127.0.0.1".to_owned(),
         }

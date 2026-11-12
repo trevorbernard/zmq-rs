@@ -777,6 +777,21 @@ impl<T: SocketType> Socket<T> {
         self.peers.config_mut().reconnect_stop = stop;
     }
 
+    /// Adds a property announced to the peers of binds and connects made
+    /// from now on, as libzmq's `ZMQ_METADATA`, a draft option. A peer reads
+    /// it from the messages it receives, with [`Message::property`].
+    ///
+    /// The name must start with `X-` and the value must not be empty. A
+    /// name already added keeps its first value, as in libzmq.
+    #[cfg(feature = "draft")]
+    pub fn add_metadata(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<(), crate::InvalidMetadata> {
+        self.peers.config_mut().add_metadata(name, value)
+    }
+
     /// A new monitor of this socket's events, as libzmq's
     /// `zmq_socket_monitor`: its listeners binding, accepting and closing,
     /// and its connections connecting, completing or failing handshakes,

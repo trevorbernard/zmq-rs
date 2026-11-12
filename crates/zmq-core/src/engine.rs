@@ -569,6 +569,7 @@ impl Engine {
                 let started = NullHandshake::start_authenticated(
                     config.socket_type,
                     &config.identity,
+                    &config.metadata,
                     zap,
                     peer,
                 );
@@ -580,6 +581,7 @@ impl Engine {
             Security::Null => NullHandshake::start(
                 config.socket_type,
                 &config.identity,
+                &config.metadata,
                 peer,
                 &mut self.out.buf,
             )
@@ -587,6 +589,7 @@ impl Engine {
             Security::PlainClient(credentials) => PlainClient::start(
                 config.socket_type,
                 config.identity.clone(),
+                config.metadata.clone(),
                 credentials,
                 peer,
                 &mut self.out.buf,
@@ -601,6 +604,7 @@ impl Engine {
                     ServerConfig {
                         socket_type: config.socket_type,
                         identity: config.identity.clone(),
+                        metadata: config.metadata.clone(),
                         domain: domain.clone(),
                         peer_address,
                     },
@@ -617,6 +621,7 @@ impl Engine {
             } => CurveClient::start(
                 config.socket_type,
                 config.identity.clone(),
+                config.metadata.clone(),
                 keypair,
                 *server_key,
                 peer,
@@ -629,6 +634,7 @@ impl Engine {
                 ServerConfig {
                     socket_type: config.socket_type,
                     identity: config.identity.clone(),
+                    metadata: config.metadata.clone(),
                     domain: domain.clone(),
                     peer_address: self.stream.zap_address(),
                 },

@@ -9,8 +9,8 @@ use zmtp::{
     Command, CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,
     DecodeError, Decoder, DecoderConfig, Encoder, Established, Frame, Greeting, GreetingConfig,
     GreetingError, HandshakeError, Identity, Incoming, Keypair, LegacyPeers, Mechanism, Message,
-    NullHandshake, PeerGreeting, PlainClient, PlainClientStep, PlainCredentials, PlainServer,
-    PlainServerStep, PublicKey, Role, ServerConfig, SocketType, ZapReply, ZapRequest,
+    Metadata, NullHandshake, PeerGreeting, PlainClient, PlainClientStep, PlainCredentials,
+    PlainServer, PlainServerStep, PublicKey, Role, ServerConfig, SocketType, ZapReply, ZapRequest,
 };
 
 /// Which security mechanism a [`Peer`] uses, and its side of it.
@@ -122,15 +122,27 @@ impl Peer {
         let mut curve = None;
         let established = match security {
             Security::Null => {
-                let handshake = NullHandshake::start(socket_type, &identity, &peer, &mut io.out);
+                let handshake = NullHandshake::start(
+                    socket_type,
+                    &identity,
+                    &Metadata::new(),
+                    &peer,
+                    &mut io.out,
+                );
                 let handshake = io.flush(handshake)?;
                 let first = io.next()?;
                 let result = handshake.receive(first, &mut io.out);
                 io.flush(result)?
             }
             Security::PlainClient(credentials) => {
-                let start =
-                    PlainClient::start(socket_type, identity, &credentials, &peer, &mut io.out);
+                let start = PlainClient::start(
+                    socket_type,
+                    identity,
+                    Metadata::new(),
+                    &credentials,
+                    &peer,
+                    &mut io.out,
+                );
                 let mut client = io.flush(start)?;
                 loop {
                     let item = io.next()?;
@@ -154,6 +166,7 @@ impl Peer {
                 let config = ServerConfig {
                     socket_type,
                     identity,
+                    metadata: Metadata::new(),
                     domain,
                     peer_address,
                 };
@@ -179,6 +192,7 @@ impl Peer {
                 let start = CurveClient::start(
                     socket_type,
                     identity,
+                    Metadata::new(),
                     &keypair,
                     server_key,
                     &peer,
@@ -204,6 +218,7 @@ impl Peer {
                 let config = ServerConfig {
                     socket_type,
                     identity,
+                    metadata: Metadata::new(),
                     domain: Frame::new(),
                     peer_address: String::new(),
                 };

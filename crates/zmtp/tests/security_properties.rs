@@ -339,6 +339,7 @@ fn start(
             let start = PlainClient::start(
                 sides.client_type,
                 sides.client_id.clone(),
+                Metadata::new(),
                 credentials,
                 &greeting(true),
                 &mut client.outbox,
@@ -347,6 +348,7 @@ fn start(
             let config = ServerConfig {
                 socket_type: sides.server_type,
                 identity: sides.server_id.clone(),
+                metadata: Metadata::new(),
                 domain: Frame::from("domain"),
                 peer_address: "127.0.0.1".to_owned(),
             };
@@ -366,6 +368,7 @@ fn start(
             let start = CurveClient::start(
                 sides.client_type,
                 sides.client_id.clone(),
+                Metadata::new(),
                 client_keys,
                 server_key,
                 &greeting(true),
@@ -375,6 +378,7 @@ fn start(
             let config = ServerConfig {
                 socket_type: sides.server_type,
                 identity: sides.server_id.clone(),
+                metadata: Metadata::new(),
                 domain: Frame::from("domain"),
                 peer_address: "127.0.0.1".to_owned(),
             };

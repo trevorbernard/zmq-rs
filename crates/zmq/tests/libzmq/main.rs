@@ -73,6 +73,8 @@ mod xpub_verbose;
 mod xpub_welcome_msg;
 
 #[cfg(feature = "draft")]
+mod app_meta;
+#[cfg(feature = "draft")]
 mod channel;
 #[cfg(feature = "draft")]
 mod client_server;

@@ -243,6 +243,12 @@ A failed authentication is a protocol error: the session ends without
 reconnecting, as in libzmq. The authenticated user id and metadata reach
 the socket through `Connection::peer().authenticated`.
 
+`ConnectionConfig::metadata` holds the application's `X-` properties
+(`Socket::add_metadata`, with the `draft` feature; libzmq's draft
+`ZMQ_METADATA`). The engine hands them to whichever mechanism it starts,
+and `zmtp`'s `local_metadata` announces them after `Socket-Type` and
+`Identity`, in READY or INITIATE.
+
 Once a CURVE handshake completes, the engine keeps its `CurveCodec`, and
 every frame in or out goes through it: messages, and the PING, PONG,
 SUBSCRIBE and CANCEL commands too. A frame that fails to open, or whose

@@ -326,6 +326,7 @@ fn hello(fixture: &Fixture) -> (CurveClient, Vec<u8>) {
     let client = CurveClient::start(
         zmtp::SocketType::Dealer,
         Identity::default(),
+        Metadata::new(),
         &fixture.client,
         fixture.server_public,
         &PeerGreeting::Zmtp3 {

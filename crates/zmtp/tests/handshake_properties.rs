@@ -6,7 +6,7 @@
 use proptest::prelude::*;
 use zmtp::{
     Decoder, DecoderConfig, Encoder, Established, Frame, Greeting, GreetingConfig, GreetingError,
-    HandshakeError, Identity, Incoming, LegacyPeers, Mechanism, Message, NullHandshake,
+    HandshakeError, Identity, Incoming, LegacyPeers, Mechanism, Message, Metadata, NullHandshake,
     PeerGreeting, Role, SocketType, Version,
 };
 
@@ -151,6 +151,7 @@ impl End {
                     let start = NullHandshake::start(
                         self.socket_type,
                         &self.identity,
+                        &Metadata::new(),
                         &peer,
                         &mut self.outbox,
                     );

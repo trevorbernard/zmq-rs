@@ -88,3 +88,25 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     assert_eq!(message, zmq::Message::from("two"));
     assert_eq!(message.property("X-Run"), Some(b"2".as_slice()));
 }
+
+/// `ZMQ_METADATA` on our side: libzmq reads the application's properties we
+/// announce after our own.
+#[cfg(feature = "draft")]
+#[test]
+fn libzmq_reads_the_application_properties_we_announce() {
+    let theirs = Socket::new(Kind::Dealer);
+    let addr = theirs.bind_loopback();
+    let context = Context::new().unwrap();
+    let mut ours = context.socket::<Dealer>();
+    ours.add_metadata("X-Hello", "World").unwrap();
+    ours.add_metadata("X-bin", "009c6").unwrap();
+    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.send_timeout("hi", FIVE).expect("sent");
+
+    let mut msg = Msg::new();
+    theirs.recv_msg(&mut msg).expect("our message");
+    assert_eq!(msg.gets("X-Hello").as_deref(), Some("World"));
+    assert_eq!(msg.gets("X-bin").as_deref(), Some("009c6"));
+    assert_eq!(msg.gets("Socket-Type").as_deref(), Some("DEALER"));
+    assert_eq!(msg.gets("X-foobar"), None);
+}

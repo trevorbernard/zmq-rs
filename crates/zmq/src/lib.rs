@@ -132,14 +132,14 @@ pub use zmq_core::{
     ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 #[cfg(feature = "draft")]
-pub use zmq_core::{ReconnectStop, RouterNotify};
+pub use zmq_core::{InvalidMetadata, ReconnectStop, RouterNotify};
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
     Credential, Frame, Identity, InvalidIdentity, KeyError, Keypair, Message, MessageMetadata,
     Metadata, PlainCredentials, PublicKey, SecretKey, ZapCredentials, ZapReply, ZapRequest,
 };
 #[cfg(feature = "draft")]
-pub use zmtp::{Group, InvalidGroup};
+pub use zmtp::{Group, InvalidGroup, InvalidName};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
 ///

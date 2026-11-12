@@ -12,7 +12,7 @@ use std::fmt;
 use std::task::{Context as TaskContext, Poll};
 
 use zmq_pipe::TrySendError;
-use zmtp::{Frame, Message};
+use zmtp::{Frame, Message, MessageMetadata};
 
 use crate::peers::{PeerKey, PeerList, random_u32};
 use crate::{FairQueue, LoadBalancer};
@@ -212,6 +212,7 @@ impl Replier {
 /// Strips a reply's request id (when correlating) and delimiter. `None` if
 /// the reply is malformed or answers a different request.
 fn unwrap_reply(reply: Message, id: Option<[u8; 4]>) -> Option<Message> {
+    let metadata = reply.metadata().cloned();
     let mut frames = reply.into_iter();
     if let Some(id) = id
         && frames.next()?.as_slice() != id
@@ -221,16 +222,17 @@ fn unwrap_reply(reply: Message, id: Option<[u8; 4]>) -> Option<Message> {
     if !frames.next()?.is_empty() {
         return None;
     }
-    collect(frames)
+    collect(frames, metadata)
 }
 
 /// Splits a request at its first empty frame. `None` if there is no
 /// delimiter or nothing follows it.
 fn split_envelope(request: Message) -> Option<(Envelope, Message)> {
+    let metadata = request.metadata().cloned();
     let mut frames = request.into_iter();
     let first = frames.next()?;
     if first.is_empty() {
-        let body = collect(frames)?;
+        let body = collect(frames, metadata)?;
         return Some((Envelope { frames: Vec::new() }, body));
     }
     let mut envelope = vec![first];
@@ -238,18 +240,22 @@ fn split_envelope(request: Message) -> Option<(Envelope, Message)> {
         let delimiter = frame.is_empty();
         envelope.push(frame);
         if delimiter {
-            let body = collect(frames)?;
+            let body = collect(frames, metadata)?;
             return Some((Envelope { frames: envelope }, body));
         }
     }
     None
 }
 
-/// The frames as a message, without collecting them first. `None` if
-/// there are none.
-fn collect(mut frames: impl Iterator<Item = Frame>) -> Option<Message> {
+/// The frames as a message, without collecting them first, carrying the
+/// `metadata` of the message they came in. `None` if there are none.
+fn collect(
+    mut frames: impl Iterator<Item = Frame>,
+    metadata: Option<MessageMetadata>,
+) -> Option<Message> {
     let mut message = Message::new(frames.next()?);
     message.extend(frames);
+    message.set_metadata(metadata);
     Some(message)
 }
 

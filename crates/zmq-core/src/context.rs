@@ -14,7 +14,10 @@ use std::time::{Duration, Instant};
 
 use atomic_waker::AtomicWaker;
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
-use zmtp::{Established, Frame, Identity, Message, MessageMetadata, Metadata, SocketType, Version};
+use zmtp::{
+    Established, Frame, Identity, InvalidName, Message, MessageMetadata, Metadata, PropertyName,
+    SocketType, Version,
+};
 
 use mio::net::TcpListener;
 #[cfg(unix)]
@@ -196,6 +199,10 @@ pub struct ConnectionConfig {
     /// When a connecting session gives up instead of retrying
     /// (`ZMQ_RECONNECT_STOP`), never by default.
     pub reconnect_stop: ReconnectStop,
+    /// The application's properties, announced to each peer in the
+    /// handshake after ours (`ZMQ_METADATA`). Added with
+    /// [`add_metadata`](Self::add_metadata).
+    pub metadata: Metadata,
     /// Whether a ROUTER is told of peers connecting and disconnecting
     /// (`ZMQ_ROUTER_NOTIFY`), off by default.
     pub router_notify: RouterNotify,
@@ -728,6 +735,7 @@ impl ConnectionConfig {
             heartbeat: None,
             tcp_keepalive: None,
             reconnect_stop: ReconnectStop::default(),
+            metadata: Metadata::new(),
             router_notify: RouterNotify::default(),
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
@@ -1098,6 +1106,58 @@ impl Drop for Inner {
         self.shutdown(None);
     }
 }
+
+impl ConnectionConfig {
+    /// Adds an application property, as libzmq's `ZMQ_METADATA` does: its
+    /// name must start with `X-` and its value must not be empty. A name
+    /// already added keeps its first value, as in libzmq.
+    pub fn add_metadata(
+        &mut self,
+        name: impl AsRef<[u8]>,
+        value: impl AsRef<[u8]>,
+    ) -> Result<(), InvalidMetadata> {
+        let (name, value) = (name.as_ref(), value.as_ref());
+        if !name.starts_with(b"X-") {
+            return Err(InvalidMetadata::NotApplication);
+        }
+        if value.is_empty() {
+            return Err(InvalidMetadata::EmptyValue);
+        }
+        let name =
+            PropertyName::new(Frame::copy_from_slice(name)).map_err(InvalidMetadata::Name)?;
+        if self.metadata.get(name.as_slice()).is_some() {
+            return Ok(());
+        }
+        self.metadata
+            .insert(name, Frame::copy_from_slice(value))
+            .map_err(|_| InvalidMetadata::ValueTooLong)
+    }
+}
+
+/// Why an application property was rejected.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InvalidMetadata {
+    /// The name does not start with `X-`, the prefix RFC 37 reserves for
+    /// applications.
+    NotApplication,
+    Name(InvalidName),
+    EmptyValue,
+    /// The value is longer than RFC 37's 2^31 - 1 octets.
+    ValueTooLong,
+}
+
+impl fmt::Display for InvalidMetadata {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NotApplication => f.write_str("name does not start with X-"),
+            Self::Name(name) => name.fmt(f),
+            Self::EmptyValue => f.write_str("value is empty"),
+            Self::ValueTooLong => f.write_str("value is longer than 2^31 - 1 octets"),
+        }
+    }
+}
+
+impl std::error::Error for InvalidMetadata {}
 
 impl fmt::Display for ShutdownTimedOut {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

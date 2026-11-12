@@ -33,8 +33,8 @@ pub use context::IpcAbstractListener;
 #[cfg(unix)]
 pub use context::IpcListener;
 pub use context::{
-    Connection, ConnectionConfig, Context, Heartbeat, Inbound, InprocListener, Linger, Listener,
-    MessageProperties, RouterNotify, ShutdownTimedOut, TcpKeepalive,
+    Connection, ConnectionConfig, Context, Heartbeat, Inbound, InprocListener, InvalidMetadata,
+    Linger, Listener, MessageProperties, RouterNotify, ShutdownTimedOut, TcpKeepalive,
 };
 pub use fair_queue::FairQueue;
 pub use load_balancer::LoadBalancer;

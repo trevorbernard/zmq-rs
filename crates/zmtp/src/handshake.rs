@@ -41,6 +41,8 @@ pub struct NullZapConfig {
 pub struct ServerConfig {
     pub socket_type: SocketType,
     pub identity: Identity,
+    /// The application's properties, announced after ours.
+    pub metadata: Metadata,
     /// The ZAP domain to authenticate in, possibly empty.
     pub domain: Frame,
     /// The peer's address, passed to ZAP.
@@ -65,6 +67,7 @@ impl ServerConfig {
 pub struct PendingNullAuthentication {
     socket_type: SocketType,
     identity: Identity,
+    metadata: Metadata,
     version: Version,
 }
 
@@ -129,13 +132,14 @@ impl NullHandshake {
     pub fn start(
         socket_type: SocketType,
         identity: &Identity,
+        metadata: &Metadata,
         peer: &PeerGreeting,
         out: &mut Vec<u8>,
     ) -> Result<Self, HandshakeError> {
         let version = peer.version();
         let legacy_peer_type = match *peer {
             PeerGreeting::Zmtp3 { .. } => {
-                let ready = Command::Ready(local_metadata(socket_type, identity));
+                let ready = Command::Ready(local_metadata(socket_type, identity, metadata));
                 write_command(version, &ready, out);
                 None
             }
@@ -171,6 +175,7 @@ impl NullHandshake {
     pub fn start_authenticated(
         socket_type: SocketType,
         identity: &Identity,
+        metadata: &Metadata,
         zap: NullZapConfig,
         peer: &PeerGreeting,
     ) -> Result<(PendingNullAuthentication, ZapRequest), HandshakeError> {
@@ -184,6 +189,7 @@ impl NullHandshake {
         let pending = PendingNullAuthentication {
             socket_type,
             identity: identity.clone(),
+            metadata: metadata.clone(),
             version,
         };
         Ok((pending, request))
@@ -249,7 +255,11 @@ impl PendingNullAuthentication {
         out: &mut Vec<u8>,
     ) -> Result<NullHandshake, HandshakeError> {
         let authenticated = zap_verdict(reply, self.version, out)?;
-        let ready = Command::Ready(local_metadata(self.socket_type, &self.identity));
+        let ready = Command::Ready(local_metadata(
+            self.socket_type,
+            &self.identity,
+            &self.metadata,
+        ));
         write_command(self.version, &ready, out);
         Ok(NullHandshake {
             socket_type: self.socket_type,
@@ -261,8 +271,13 @@ impl PendingNullAuthentication {
     }
 }
 
-/// The properties this socket announces in READY or INITIATE.
-pub(crate) fn local_metadata(socket_type: SocketType, identity: &Identity) -> Metadata {
+/// The properties this socket announces in READY or INITIATE: its own,
+/// then the application's, as libzmq orders them.
+pub(crate) fn local_metadata(
+    socket_type: SocketType,
+    identity: &Identity,
+    application: &Metadata,
+) -> Metadata {
     let mut metadata = Metadata::new();
     metadata.push(
         PropertyName::from_static("Socket-Type"),
@@ -273,6 +288,9 @@ pub(crate) fn local_metadata(socket_type: SocketType, identity: &Identity) -> Me
             PropertyName::from_static("Identity"),
             Frame::copy_from_slice(identity.as_bytes()),
         );
+    }
+    for (name, value) in application.iter() {
+        metadata.push(name.clone(), value.clone());
     }
     metadata
 }
@@ -458,7 +476,8 @@ mod tests {
 
     fn start(socket_type: SocketType, peer: &PeerGreeting) -> (NullHandshake, Vec<u8>) {
         let mut out = Vec::new();
-        let handshake = NullHandshake::start(socket_type, &me(), peer, &mut out).unwrap();
+        let handshake =
+            NullHandshake::start(socket_type, &me(), &Metadata::new(), peer, &mut out).unwrap();
         (handshake, out)
     }
 
@@ -515,8 +534,14 @@ mod tests {
 
     #[test]
     fn an_authenticated_start_asks_zap_before_ready() {
-        let (_, request) =
-            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1).unwrap();
+        let (_, request) = NullHandshake::start_authenticated(
+            SocketType::Router,
+            &me(),
+            &Metadata::new(),
+            zap(),
+            &V3_1,
+        )
+        .unwrap();
         assert_eq!(request.credentials, ZapCredentials::Null);
         assert_eq!(request.credentials.mechanism(), "NULL");
         assert_eq!(request.domain, Frame::from("global"));
@@ -526,8 +551,14 @@ mod tests {
 
     #[test]
     fn an_accepted_peer_gets_ready_and_is_recorded() {
-        let (pending, _) =
-            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1).unwrap();
+        let (pending, _) = NullHandshake::start_authenticated(
+            SocketType::Router,
+            &me(),
+            &Metadata::new(),
+            zap(),
+            &V3_1,
+        )
+        .unwrap();
         let mut out = Vec::new();
         let handshake = pending.reply(accepted(), &mut out).unwrap();
         let (_, plain_ready) = start(SocketType::Router, &V3_1);
@@ -548,9 +579,14 @@ mod tests {
             (ZapReply::InternalError, Some("500")),
             (ZapReply::TemporaryFailure, None),
         ] {
-            let (pending, _) =
-                NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &V3_1)
-                    .unwrap();
+            let (pending, _) = NullHandshake::start_authenticated(
+                SocketType::Router,
+                &me(),
+                &Metadata::new(),
+                zap(),
+                &V3_1,
+            )
+            .unwrap();
             let mut out = Vec::new();
             assert!(matches!(
                 pending.reply(reply, &mut out),
@@ -567,12 +603,35 @@ mod tests {
     fn an_authenticated_start_refuses_legacy_peers() {
         let legacy = PeerGreeting::Zmtp2 { socket_type: 5 };
         assert!(matches!(
-            NullHandshake::start_authenticated(SocketType::Router, &me(), zap(), &legacy),
+            NullHandshake::start_authenticated(
+                SocketType::Router,
+                &me(),
+                &Metadata::new(),
+                zap(),
+                &legacy
+            ),
             Err(HandshakeError::LegacyPeer)
         ));
     }
 
     // ---- ZMTP 3.x ----
+
+    #[test]
+    fn ready_announces_the_applications_properties_after_ours() {
+        let application = metadata(&[("X-Hello", "World"), ("X-Bin", "009c6")]);
+        let mut out = Vec::new();
+        let _ =
+            NullHandshake::start(SocketType::Dealer, &me(), &application, &V3_1, &mut out).unwrap();
+        let expected = metadata(&[
+            ("Socket-Type", "DEALER"),
+            ("Identity", "me"),
+            ("X-Hello", "World"),
+            ("X-Bin", "009c6"),
+        ]);
+        let mut ready = Vec::new();
+        write_command(Version::V3_1, &Command::Ready(expected), &mut ready);
+        assert_eq!(out, ready);
+    }
 
     #[test]
     fn sends_ready_with_socket_type_and_identity() {
@@ -749,7 +808,8 @@ mod tests {
         let mut out = Vec::new();
         let peer = PeerGreeting::Zmtp2 { socket_type: 1 };
         assert_eq!(
-            NullHandshake::start(SocketType::Dealer, &me(), &peer, &mut out).unwrap_err(),
+            NullHandshake::start(SocketType::Dealer, &me(), &Metadata::new(), &peer, &mut out)
+                .unwrap_err(),
             HandshakeError::IncompatiblePeer {
                 peer: SocketType::Pub
             }
@@ -761,7 +821,14 @@ mod tests {
     fn zmtp_2_unknown_socket_type_is_refused() {
         let peer = PeerGreeting::Zmtp2 { socket_type: 42 };
         assert_eq!(
-            NullHandshake::start(SocketType::Dealer, &me(), &peer, &mut Vec::new()).unwrap_err(),
+            NullHandshake::start(
+                SocketType::Dealer,
+                &me(),
+                &Metadata::new(),
+                &peer,
+                &mut Vec::new()
+            )
+            .unwrap_err(),
             HandshakeError::UnknownLegacySocketType(42)
         );
     }

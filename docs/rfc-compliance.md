@@ -115,6 +115,13 @@ off.
 - Sending a message takes its metadata off, as libzmq's `zmq_send` does, so a message passed on, as by a proxy, does not carry its first connection's.
 - libzmq's private `__fd` property is not provided; zmq-rs has no `ZMQ_SRCFD`.
 
+**Application metadata** (`ZMQ_METADATA`, a draft option): `Socket::add_metadata(name, value)`, with the `draft` feature, adds an `X-` property that every mechanism announces after `Socket-Type` and `Identity`, in its READY or INITIATE.
+- As libzmq: the name must start with `X-`, exactly so, and be at most 255 octets; the value must not be empty; a name added twice keeps its first value; a socket's binds and connects announce what it had when they were made.
+- libzmq takes one `name:value` string and splits it at the first colon; ours takes the two apart.
+- Unlike libzmq, which accepts any octets, the name must use RFC 37's characters, and two names differing only in case count as one, as the RFC has them.
+- They are announced in the order added, where libzmq sorts them by name.
+- REQ and REP sockets' messages keep their connection's properties once the envelope is taken off, as libzmq's do.
+
 ### Valid socket pairs (RFC 23/37, plus libzmq)
 
 | Socket type | Valid peers |

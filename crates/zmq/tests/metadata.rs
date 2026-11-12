@@ -153,3 +153,107 @@ fn a_conflated_message_carries_its_connections_metadata() {
     let message = pull.recv_timeout(FIVE).unwrap().expect("a message");
     assert_eq!(message.property("Socket-Type"), Some(b"PUSH".as_slice()));
 }
+
+/// `ZMQ_METADATA`: each mechanism announces the application's properties
+/// from both of its sides, in its READY or INITIATE.
+#[cfg(feature = "draft")]
+#[test]
+fn application_properties_are_announced_under_every_mechanism() {
+    use zmq::{Credential, Keypair, Metadata, PlainCredentials, Security, ZapReply, ZapRequest};
+
+    fn accept(_: &ZapRequest) -> ZapReply {
+        ZapReply::Ok {
+            user_id: zmq::Frame::from("user"),
+            metadata: Metadata::new(),
+        }
+    }
+    let keys = Keypair::generate();
+    let server_key = keys.public();
+    let mechanisms = [
+        ("NULL", Security::Null, Security::Null),
+        (
+            "NULL with ZAP",
+            Security::null_authenticated("domain", accept),
+            Security::Null,
+        ),
+        (
+            "PLAIN",
+            Security::plain_server("domain", accept),
+            Security::PlainClient(PlainCredentials {
+                username: Credential::new("who").unwrap(),
+                password: Credential::new("me").unwrap(),
+            }),
+        ),
+        (
+            "CURVE",
+            Security::curve_server(keys),
+            Security::curve_client(Keypair::generate(), server_key),
+        ),
+    ];
+    for (mechanism, server_security, client_security) in mechanisms {
+        let context = Context::new().unwrap();
+        let mut server = context.socket_with::<Dealer>(SocketOptions {
+            security: server_security,
+            ..SocketOptions::default()
+        });
+        server.add_metadata("X-Side", "server").unwrap();
+        let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+        let mut client = context.socket_with::<Dealer>(SocketOptions {
+            security: client_security,
+            ..SocketOptions::default()
+        });
+        client.add_metadata("X-Side", "client").unwrap();
+        client.connect(&endpoint).unwrap();
+
+        client.send("ping").unwrap();
+        let ping = server.recv_timeout(FIVE).unwrap().expect("the ping");
+        assert_eq!(
+            ping.property("X-Side"),
+            Some(b"client".as_slice()),
+            "{mechanism}"
+        );
+        server.send("pong").unwrap();
+        let pong = client.recv_timeout(FIVE).unwrap().expect("the pong");
+        assert_eq!(
+            pong.property("X-Side"),
+            Some(b"server".as_slice()),
+            "{mechanism}"
+        );
+    }
+}
+
+/// libzmq snapshots a socket's options when it binds or connects, so a
+/// property added afterwards reaches only what is bound or connected later.
+#[cfg(feature = "draft")]
+#[test]
+fn a_property_added_after_connecting_is_not_announced_on_that_connection() {
+    let context = Context::new().unwrap();
+    let mut server = context.socket::<Dealer>();
+    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let mut client = context.socket::<Dealer>();
+    client.connect(&endpoint).unwrap();
+    client.add_metadata("X-Late", "yes").unwrap();
+    client.send("hi").unwrap();
+    let message = server.recv_timeout(FIVE).unwrap().expect("the message");
+    assert_eq!(message.property("X-Late"), None);
+}
+
+/// REQ and REP take the envelope off what they receive; the body keeps the
+/// connection's properties, as each frame does in libzmq.
+#[test]
+fn a_request_and_its_reply_carry_their_connections_properties() {
+    let context = Context::new().unwrap();
+    let mut rep = context.socket::<zmq::Rep>();
+    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+    let mut req = context.socket::<zmq::Req>();
+    req.connect(&endpoint).unwrap();
+    let asking = std::thread::spawn(move || req.request("ping"));
+    let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
+    assert_eq!(
+        request.body().property("Socket-Type"),
+        Some(b"REQ".as_slice())
+    );
+    let _ = request.reply("pong");
+    let reply = asking.join().unwrap().unwrap();
+    assert_eq!(reply.property("Socket-Type"), Some(b"REP".as_slice()));
+}

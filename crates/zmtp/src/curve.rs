@@ -77,6 +77,7 @@ const MESSAGE: &[u8] = b"\x07MESSAGE";
 pub struct CurveClient {
     socket_type: SocketType,
     identity: Identity,
+    metadata: Metadata,
     version: Version,
     server_key: PublicKey,
     public: PublicKey,
@@ -231,6 +232,7 @@ impl CurveClient {
     pub fn start(
         socket_type: SocketType,
         identity: Identity,
+        metadata: Metadata,
         keypair: &Keypair,
         server_key: PublicKey,
         peer: &PeerGreeting,
@@ -251,6 +253,7 @@ impl CurveClient {
         Ok(Self {
             socket_type,
             identity,
+            metadata,
             version,
             server_key,
             public: keypair.public(),
@@ -312,7 +315,7 @@ impl CurveClient {
         plaintext.extend_from_slice(&vouch_nonce);
         plaintext.extend_from_slice(&vouch);
         encode_metadata(
-            &local_metadata(self.socket_type, &self.identity),
+            &local_metadata(self.socket_type, &self.identity, &self.metadata),
             &mut plaintext,
         );
         let sealed = seal(&key, &short_nonce(INITIATE_PREFIX, 2), &plaintext);
@@ -526,7 +529,7 @@ impl PendingCurveAuthentication {
         )?;
         let mut metadata = Zeroizing::new(Vec::new());
         encode_metadata(
-            &local_metadata(socket_type, &self.config.identity),
+            &local_metadata(socket_type, &self.config.identity, &self.config.metadata),
             &mut metadata,
         );
         let sealed = seal(&self.key, &short_nonce(READY_PREFIX, 1), &metadata);
@@ -851,6 +854,7 @@ mod tests {
         ServerConfig {
             socket_type,
             identity: Identity::default(),
+            metadata: Metadata::new(),
             domain: Frame::from("global"),
             peer_address: "127.0.0.1".into(),
         }
@@ -881,6 +885,7 @@ mod tests {
         let client = CurveClient::start(
             client_type,
             Identity::new("me").unwrap(),
+            Metadata::new(),
             &client_keys,
             server_keys.public(),
             &V3_1,
@@ -1118,6 +1123,7 @@ mod tests {
         let _client = CurveClient::start(
             SocketType::Dealer,
             Identity::default(),
+            Metadata::new(),
             &Keypair::generate(),
             server_keys.public(),
             &V3_1,
@@ -1229,6 +1235,7 @@ mod tests {
         let _client = CurveClient::start(
             SocketType::Dealer,
             Identity::default(),
+            Metadata::new(),
             &Keypair::generate(),
             Keypair::generate().public(),
             &V3_1,
@@ -1254,6 +1261,7 @@ mod tests {
         let _client = CurveClient::start(
             SocketType::Dealer,
             Identity::default(),
+            Metadata::new(),
             &Keypair::generate(),
             server_keys.public(),
             &V3_1,
@@ -1300,6 +1308,7 @@ mod tests {
         let client = CurveClient::start(
             SocketType::Dealer,
             Identity::default(),
+            Metadata::new(),
             &Keypair::generate(),
             server_keys.public(),
             &V3_1,
@@ -1379,6 +1388,7 @@ mod tests {
             let client = CurveClient::start(
                 SocketType::Dealer,
                 Identity::default(),
+                Metadata::new(),
                 &Keypair::generate(),
                 server_keys.public(),
                 &V3_1,
@@ -1418,6 +1428,7 @@ mod tests {
         let client = CurveClient::start(
             SocketType::Dealer,
             Identity::default(),
+            Metadata::new(),
             &Keypair::generate(),
             server_keys.public(),
             &V3_1,
