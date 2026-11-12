@@ -51,5 +51,5 @@ pub use router_table::{RouterTable, SendError};
 pub use security::{Authenticator, Security, ZapResponder};
 #[cfg(feature = "draft")]
 pub use server_table::ServerTable;
-pub use transport::{interface_addr, resolve_tcp};
+pub use transport::{TcpTuning, interface_addr, resolve_tcp};
 pub use zmq_pipe::{RecvTimeoutError, TryRecvError};

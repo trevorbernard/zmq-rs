@@ -50,6 +50,15 @@ pub struct SocketOptions {
     /// peer that vanished without closing, as when a NAT or load balancer
     /// drops an idle connection.
     pub tcp_keepalive: Option<TcpKeepalive>,
+    /// The IP type of service, or IPv6 traffic class, of what TCP
+    /// connections send (`ZMQ_TOS`), set before they connect or listen.
+    /// Zero, the default, leaves the system's.
+    pub type_of_service: u8,
+    /// The network interface TCP connections and listeners are bound to
+    /// (`ZMQ_BINDTODEVICE`, Linux's `SO_BINDTODEVICE`), none by default. A
+    /// bind fails, and a connect keeps retrying, where the system does not
+    /// support or permit it.
+    pub bind_to_device: Option<String>,
     /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
     /// `None` or zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
@@ -71,6 +80,8 @@ impl Default for SocketOptions {
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            type_of_service: 0,
+            bind_to_device: None,
             handshake_timeout: Some(Duration::from_secs(30)),
         }
     }

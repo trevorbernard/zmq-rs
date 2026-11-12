@@ -10,6 +10,7 @@
 use std::fmt;
 use std::io::{self, Read, Write};
 use std::net::{IpAddr, SocketAddr, SocketAddrV6, ToSocketAddrs};
+use std::time::Duration;
 
 use mio::event::Source;
 use mio::net::TcpListener;
@@ -76,18 +77,105 @@ pub fn interface_addr(name: &str, port: u16) -> Option<SocketAddr> {
     })
 }
 
-/// Starts a non-blocking connection to `addr` from `source`, as libzmq
-/// does for `tcp://source;host:port`: reusing the address, so that one
-/// source port can reach several servers.
-fn connect_from(source: SocketAddr, addr: SocketAddr) -> io::Result<TcpStream> {
+/// What a TCP socket is given before it connects or listens, as libzmq's
+/// `tcp_open_socket` sets it. The default sets nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TcpTuning {
+    /// The IP type of service, or IPv6 traffic class, of what the socket
+    /// sends (`ZMQ_TOS`). Zero leaves the system's.
+    pub type_of_service: u8,
+    /// The network interface the socket is bound to (`ZMQ_BINDTODEVICE`,
+    /// Linux's `SO_BINDTODEVICE`). A connect or bind fails where that is
+    /// not supported or not permitted.
+    pub bind_to_device: Option<String>,
+    /// How long a blocking receive busy-polls the device before sleeping
+    /// (`ZMQ_BUSY_POLL`, Linux's `SO_BUSY_POLL`). Ignored where that is
+    /// not supported or not permitted.
+    pub busy_poll: Option<Duration>,
+}
+
+impl TcpTuning {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Sets the type of service, on a socket of either family: one of the
+    /// two options fails on each, as libzmq expects of the IPv6 one.
+    fn set_type_of_service(&self, socket: &socket2::Socket) {
+        if self.type_of_service == 0 {
+            return;
+        }
+        let tos = u32::from(self.type_of_service);
+        let _ = socket.set_tos_v4(tos);
+        #[cfg(unix)]
+        let _ = socket.set_tclass_v6(tos);
+    }
+
+    /// Applies everything to a socket yet to connect or listen. Only
+    /// binding to the device can fail, as in libzmq.
+    fn apply(&self, socket: &socket2::Socket) -> io::Result<()> {
+        self.set_type_of_service(socket);
+        if let Some(device) = &self.bind_to_device {
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            socket.bind_device(Some(device.as_bytes()))?;
+            #[cfg(not(any(target_os = "linux", target_os = "android")))]
+            {
+                let _ = device;
+                return Err(io::ErrorKind::Unsupported.into());
+            }
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(busy_poll) = self.busy_poll {
+            let micros = u32::try_from(busy_poll.as_micros()).unwrap_or(u32::MAX);
+            if micros > 0 {
+                let _ = socket.set_busy_poll(micros);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// A non-blocking TCP socket for `addr`'s family, tuned.
+fn tcp_socket(addr: SocketAddr, tuning: &TcpTuning) -> io::Result<socket2::Socket> {
     let socket = socket2::Socket::new(
         socket2::Domain::for_address(addr),
         socket2::Type::STREAM,
         Some(socket2::Protocol::TCP),
     )?;
     socket.set_nonblocking(true)?;
+    tuning.apply(&socket)?;
+    Ok(socket)
+}
+
+/// Listens on `addr`, as mio's listener does, tuned first.
+pub(crate) fn listen_tcp(addr: SocketAddr, tuning: &TcpTuning) -> io::Result<TcpListener> {
+    if tuning.is_default() {
+        return TcpListener::bind(addr);
+    }
+    let socket = tcp_socket(addr, tuning)?;
+    #[cfg(unix)]
     socket.set_reuse_address(true)?;
-    socket.bind(&source.into())?;
+    socket.bind(&addr.into())?;
+    socket.listen(1024)?;
+    Ok(TcpListener::from_std(socket.into()))
+}
+
+/// Starts a non-blocking connection to `addr`, tuned first, from `source`
+/// if given, as libzmq does for `tcp://source;host:port`: reusing the
+/// address, so that one source port can reach several servers.
+fn connect_tcp(
+    source: Option<SocketAddr>,
+    addr: SocketAddr,
+    tuning: &TcpTuning,
+) -> io::Result<TcpStream> {
+    if source.is_none() && tuning.is_default() {
+        return mio::net::TcpStream::connect(addr).map(Into::into);
+    }
+    let socket = tcp_socket(addr, tuning)?;
+    if let Some(source) = source {
+        socket.set_reuse_address(true)?;
+        socket.bind(&source.into())?;
+    }
     match socket.connect(&addr.into()) {
         Ok(()) => {}
         Err(err) if in_progress(&err) => {}
@@ -184,16 +272,14 @@ macro_rules! delegate {
 }
 
 impl Stream {
-    /// Starts a non-blocking connection to `address`.
-    pub(crate) fn connect(address: &Address) -> io::Result<Self> {
+    /// Starts a non-blocking connection to `address`, a TCP one tuned
+    /// first.
+    pub(crate) fn connect(address: &Address, tuning: &TcpTuning) -> io::Result<Self> {
         match address {
-            Address::Tcp(addr) => mio::net::TcpStream::connect(*addr).map(|s| Self::Tcp(s.into())),
+            Address::Tcp(addr) => connect_tcp(None, *addr, tuning).map(Self::Tcp),
             Address::TcpHost { host, port, source } => {
                 let addr = resolve_tcp(host, *port)?;
-                match source {
-                    Some(source) => connect_from(*source, addr).map(Self::Tcp),
-                    None => mio::net::TcpStream::connect(addr).map(|s| Self::Tcp(s.into())),
-                }
+                connect_tcp(*source, addr, tuning).map(Self::Tcp)
             }
             #[cfg(unix)]
             Address::Ipc(path) => mio::net::UnixStream::connect(path).map(|s| Self::Unix(s.into())),
@@ -248,13 +334,15 @@ impl Stream {
 
     /// Sets a TCP stream's options, connecting or accepted, as libzmq's
     /// `tune_tcp_socket` and `tune_tcp_keepalives`: Nagle off, as batching
-    /// happens in the encoder, and keepalive probes if asked for. Failures
-    /// leave the system's defaults.
-    pub(crate) fn tune(&self, keepalive: Option<&TcpKeepalive>) {
+    /// happens in the encoder, and keepalive probes if asked for. An
+    /// accepted stream is given the type of service here, as libzmq's
+    /// listener gives it. Failures leave the system's defaults.
+    pub(crate) fn tune(&self, keepalive: Option<&TcpKeepalive>, tuning: &TcpTuning) {
         let Self::Tcp(stream) = self else {
             return;
         };
         let _ = stream.set_nodelay(true);
+        tuning.set_type_of_service(&socket2::SockRef::from(stream));
         let Some(keepalive) = keepalive else {
             return;
         };
@@ -566,11 +654,14 @@ mod tests {
         let Stream::Tcp(tcp) = &stream else {
             unreachable!("made as TCP");
         };
-        stream.tune(Some(&TcpKeepalive {
-            idle: Some(Duration::from_secs(30)),
-            interval: Some(Duration::from_secs(5)),
-            count: Some(4),
-        }));
+        stream.tune(
+            Some(&TcpKeepalive {
+                idle: Some(Duration::from_secs(30)),
+                interval: Some(Duration::from_secs(5)),
+                count: Some(4),
+            }),
+            &TcpTuning::default(),
+        );
         let socket = socket2::SockRef::from(tcp);
         assert!(socket.tcp_nodelay().unwrap());
         assert!(socket.keepalive().unwrap());
@@ -585,6 +676,107 @@ mod tests {
         assert_eq!(socket.tcp_keepalive_retries().unwrap(), 4);
     }
 
+    fn serviced(type_of_service: u8) -> TcpTuning {
+        TcpTuning {
+            type_of_service,
+            ..TcpTuning::default()
+        }
+    }
+
+    #[test]
+    fn a_connection_and_its_listener_carry_the_type_of_service() {
+        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &serviced(0x28)).unwrap();
+        assert_eq!(socket2::SockRef::from(&listener).tos_v4().unwrap(), 0x28);
+
+        let address = Address::Tcp(listener.local_addr().unwrap());
+        let Stream::Tcp(tcp) = Stream::connect(&address, &serviced(0x58)).unwrap() else {
+            unreachable!("made as TCP");
+        };
+        assert_eq!(socket2::SockRef::from(&tcp).tos_v4().unwrap(), 0x58);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_accepted_stream_is_given_the_type_of_service() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let _client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (accepted, _) = listener.accept().unwrap();
+        let stream = Stream::Tcp(accepted);
+        stream.tune(None, &serviced(0x28));
+        let Stream::Tcp(tcp) = &stream else {
+            unreachable!("made as TCP");
+        };
+        assert_eq!(socket2::SockRef::from(tcp).tos_v4().unwrap(), 0x28);
+    }
+
+    #[test]
+    fn an_ipv6_connection_carries_the_traffic_class() {
+        let Ok(listener) = listen_tcp("[::1]:0".parse().unwrap(), &serviced(0x28)) else {
+            return; // no IPv6 here
+        };
+        assert_eq!(socket2::SockRef::from(&listener).tclass_v6().unwrap(), 0x28);
+    }
+
+    #[test]
+    fn untuned_sockets_keep_the_systems_type_of_service() {
+        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &TcpTuning::default()).unwrap();
+        assert_eq!(socket2::SockRef::from(&listener).tos_v4().unwrap(), 0);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn a_socket_is_bound_to_its_device() {
+        let tuning = TcpTuning {
+            bind_to_device: Some("lo".to_owned()),
+            ..TcpTuning::default()
+        };
+        let listener = match listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning) {
+            Ok(listener) => listener,
+            // Before Linux 5.7 this takes CAP_NET_RAW.
+            Err(err) if err.kind() == io::ErrorKind::PermissionDenied => return,
+            Err(err) => panic!("{err}"),
+        };
+        assert_eq!(
+            socket2::SockRef::from(&listener).device().unwrap(),
+            Some(b"lo".to_vec())
+        );
+
+        let address = Address::Tcp(listener.local_addr().unwrap());
+        let Stream::Tcp(tcp) = Stream::connect(&address, &tuning).unwrap() else {
+            unreachable!("made as TCP");
+        };
+        assert_eq!(
+            socket2::SockRef::from(&tcp).device().unwrap(),
+            Some(b"lo".to_vec())
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn a_device_that_does_not_exist_fails_the_bind_and_the_connect() {
+        let tuning = TcpTuning {
+            bind_to_device: Some("no-such-device".to_owned()),
+            ..TcpTuning::default()
+        };
+        let addr = "127.0.0.1:0".parse().unwrap();
+        assert!(listen_tcp(addr, &tuning).is_err());
+        assert!(Stream::connect(&Address::Tcp(addr), &tuning).is_err());
+    }
+
+    /// Raising it takes CAP_NET_ADMIN, so only that it is harmless is
+    /// checked, and that it took if it was permitted.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn busy_polling_is_set_where_permitted() {
+        let tuning = TcpTuning {
+            busy_poll: Some(Duration::from_micros(50)),
+            ..TcpTuning::default()
+        };
+        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning).unwrap();
+        let set = socket2::SockRef::from(&listener).busy_poll().unwrap();
+        assert!(set == 50 || set == 0, "{set}");
+    }
+
     #[test]
     fn keepalive_stays_off_unless_asked_for() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
@@ -592,7 +784,7 @@ mod tests {
         let Stream::Tcp(tcp) = &stream else {
             unreachable!("made as TCP");
         };
-        stream.tune(None);
+        stream.tune(None, &TcpTuning::default());
         let socket = socket2::SockRef::from(tcp);
         assert!(socket.tcp_nodelay().unwrap());
         assert!(!socket.keepalive().unwrap());

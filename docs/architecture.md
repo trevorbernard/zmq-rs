@@ -37,6 +37,7 @@ Files are under `crates/zmq-core/src/`.
 | `Listener` | `context.rs` | A bound port; accepted connections arrive through a pipe of `Connection`s | `tcp_listener_t` |
 | `IpcListener` | `context.rs` | A bound `ipc://` path (Unix domain socket), served like a TCP listener; removes its socket file when it closes | `ipc_listener_t` |
 | `Stream` | `transport.rs` | A connection's byte stream, TCP or Unix domain socket; engines and sessions are the same for both | `tcp_connecter_t`, `ipc_connecter_t` |
+| `TcpTuning` | `transport.rs` | What a TCP socket is given before it connects or listens: type of service, device, busy polling (`ConnectionConfig::tcp`) | `tcp_open_socket` |
 | `InprocListener` | `context.rs` | A bound `inproc` name in the context's registry; paired connections arrive the same way | `ctx_t::endpoints`, `pend_connection` |
 | `Session` | `io_thread.rs` | One per peer: owns both pipe ends and outlives individual connections, reconnecting on its `Reconnect` schedule and lingering after close | `session_base_t` |
 | `Reconnect` | `reconnect.rs` | When to try connecting again after a connection fails or ends | `get_new_reconnect_ivl` |

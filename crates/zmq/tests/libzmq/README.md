@@ -28,7 +28,6 @@ Of 139 tests, these are left out.
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
-| `BUSY_POLL`, `TOS`, `BINDTODEVICE` | `busy_poll`, `diffserv`, `pair_tcp_cap_net_admin` |
 
 **Not planned** unless someone asks for them:
 

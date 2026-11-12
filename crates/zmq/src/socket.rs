@@ -741,6 +741,11 @@ impl<T: SocketType> Socket<T> {
             security: options.security,
             heartbeat: options.heartbeat,
             tcp_keepalive: options.tcp_keepalive,
+            tcp: zmq_core::TcpTuning {
+                type_of_service: options.type_of_service,
+                bind_to_device: options.bind_to_device,
+                busy_poll: None,
+            },
             handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
         };
@@ -775,6 +780,16 @@ impl<T: SocketType> Socket<T> {
     #[cfg(feature = "draft")]
     pub fn set_reconnect_stop(&mut self, stop: crate::ReconnectStop) {
         self.peers.config_mut().reconnect_stop = stop;
+    }
+
+    /// How long a blocking receive on a TCP socket busy-polls its device
+    /// before sleeping, as libzmq's `ZMQ_BUSY_POLL`, a draft option
+    /// (Linux's `SO_BUSY_POLL`), for binds and connects made from now on.
+    /// `None`, the default, leaves the system's. Ignored where the system
+    /// does not support or permit it.
+    #[cfg(feature = "draft")]
+    pub fn set_busy_poll(&mut self, busy_poll: Option<Duration>) {
+        self.peers.config_mut().tcp.busy_poll = busy_poll;
     }
 
     /// Adds a property announced to the peers of binds and connects made

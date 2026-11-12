@@ -443,7 +443,7 @@ impl EventLoop {
         mut stream: Stream,
         config: &ConnectionConfig,
     ) -> Option<Engine> {
-        stream.tune(config.tcp_keepalive.as_ref());
+        stream.tune(config.tcp_keepalive.as_ref(), &config.tcp);
         self.poll
             .registry()
             .register(
@@ -563,7 +563,7 @@ impl EventLoop {
         };
         let address = address.clone();
         let config = session.config.clone();
-        let engine = Stream::connect(&address)
+        let engine = Stream::connect(&address, &config.tcp)
             .ok()
             .and_then(|stream| self.start_engine(id, stream, &config));
         let Some(engine) = engine else {

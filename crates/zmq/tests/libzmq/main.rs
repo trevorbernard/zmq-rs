@@ -15,6 +15,7 @@ mod bind_src_address;
 mod conflate;
 mod connect_resolve;
 mod connect_rid;
+mod diffserv;
 mod disconnect_inproc;
 mod heartbeats;
 mod hwm;
@@ -30,6 +31,7 @@ mod monitor;
 mod pair_inproc;
 mod pair_ipc;
 mod pair_tcp;
+mod pair_tcp_cap_net_admin;
 mod poller;
 mod probe_router;
 mod proxy;
@@ -75,6 +77,8 @@ mod xpub_welcome_msg;
 
 #[cfg(feature = "draft")]
 mod app_meta;
+#[cfg(feature = "draft")]
+mod busy_poll;
 #[cfg(feature = "draft")]
 mod channel;
 #[cfg(feature = "draft")]

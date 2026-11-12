@@ -19,14 +19,13 @@ use zmtp::{
     SocketType, Version,
 };
 
-use mio::net::TcpListener;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 
 use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
-use crate::transport::{Address, IpcCleanup, StreamListener};
+use crate::transport::{Address, IpcCleanup, StreamListener, TcpTuning, listen_tcp};
 use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
@@ -196,6 +195,9 @@ pub struct ConnectionConfig {
     pub heartbeat: Option<Heartbeat>,
     /// TCP keepalive probes, off by default.
     pub tcp_keepalive: Option<TcpKeepalive>,
+    /// What TCP sockets are given before they connect or listen, nothing
+    /// by default.
+    pub tcp: TcpTuning,
     /// How long the greeting and security handshake may take before the
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s). `None` or
     /// zero means no limit, as libzmq's 0 does.
@@ -780,6 +782,7 @@ impl ConnectionConfig {
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            tcp: TcpTuning::default(),
             reconnect_stop: ReconnectStop::default(),
             metadata: Metadata::new(),
             hello_message: Frame::new(),
@@ -817,7 +820,7 @@ impl Context {
     /// reported here, and accepts peers on an I/O thread. Accepted
     /// connections use `config`.
     pub fn bind(&self, addr: SocketAddr, config: ConnectionConfig) -> io::Result<Listener> {
-        let bound = TcpListener::bind(addr).and_then(|listener| {
+        let bound = listen_tcp(addr, &config.tcp).and_then(|listener| {
             let local_addr = listener.local_addr()?;
             Ok((listener, local_addr))
         });
