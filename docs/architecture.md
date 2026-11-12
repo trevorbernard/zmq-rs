@@ -97,6 +97,14 @@ signal again for data it has already reported.
   `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
   connection is made, before its handshake; both follow libzmq's
   `get_new_reconnect_ivl`.
+- `ReconnectStop` (`Socket::set_reconnect_stop`, with the `draft` feature)
+  is libzmq's draft `ZMQ_RECONNECT_STOP`: a session gives up, as one that
+  failed on a protocol error does, when a TCP connection attempt is
+  refused, or when a connection breaks or times out before its handshake
+  completes. `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` has no flag, as
+  `disconnect` always ends the session. The monitor reports no event for
+  giving up, where libzmq's reports the attempt's `CLOSED`: the last
+  `ConnectRetried` or `Disconnected` is followed by nothing.
 - Dropping a connection's sender starts its linger: queued messages keep
   being delivered, across reconnects, until the queue is written or the
   `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at

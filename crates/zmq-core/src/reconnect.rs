@@ -27,6 +27,24 @@ impl Default for Reconnect {
     }
 }
 
+/// When a connecting session gives up instead of retrying, whatever its
+/// [`Reconnect`]: libzmq's `ZMQ_RECONNECT_STOP`. A session that gives up
+/// ends as one disconnected does, its pipes closing.
+///
+/// libzmq's third condition, `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, needs
+/// no flag: a disconnected endpoint is never retried.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ReconnectStop {
+    /// A TCP connection attempt is refused: nothing is bound there
+    /// (`ZMQ_RECONNECT_STOP_CONN_REFUSED`).
+    pub connection_refused: bool,
+    /// A connection breaks, or times out, before its handshake completes,
+    /// as with a peer that does not speak ZMTP
+    /// (`ZMQ_RECONNECT_STOP_HANDSHAKE_FAILED`). A handshake the peer fails
+    /// by breaking the protocol never retries, with or without this.
+    pub handshake_failed: bool,
+}
+
 /// The retry schedule of one session.
 #[derive(Debug)]
 pub(crate) struct Retry {

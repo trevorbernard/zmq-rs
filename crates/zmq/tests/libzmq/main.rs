@@ -40,6 +40,7 @@ mod pub_invert_matching;
 mod pubsub;
 mod rebind_ipc;
 mod reconnect_ivl;
+mod reconnect_options;
 mod req_correlate;
 mod req_relaxed;
 mod reqrep_device;

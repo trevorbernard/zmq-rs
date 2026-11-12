@@ -126,13 +126,13 @@ pub use socket::{
     RequestError, Router, Socket, SocketType, Sub, SubscriptionRequest, Terminated, TrySendError,
     WaitsForRoom, XPub, XSub,
 };
-#[cfg(feature = "draft")]
-pub use zmq_core::RouterNotify;
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
     Monitor, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError,
     ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
+#[cfg(feature = "draft")]
+pub use zmq_core::{ReconnectStop, RouterNotify};
 pub use zmq_pipe::Hwm;
 pub use zmtp::{
     Credential, Frame, Identity, InvalidIdentity, KeyError, Keypair, Message, MessageMetadata,

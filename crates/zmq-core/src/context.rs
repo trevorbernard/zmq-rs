@@ -24,7 +24,7 @@ use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
 use crate::transport::{Address, IpcCleanup, StreamListener};
-use crate::{EventKind, MonitorSink, Reconnect, Security};
+use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -193,6 +193,9 @@ pub struct ConnectionConfig {
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s). `None` or
     /// zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
+    /// When a connecting session gives up instead of retrying
+    /// (`ZMQ_RECONNECT_STOP`), never by default.
+    pub reconnect_stop: ReconnectStop,
     /// Whether a ROUTER is told of peers connecting and disconnecting
     /// (`ZMQ_ROUTER_NOTIFY`), off by default.
     pub router_notify: RouterNotify,
@@ -724,6 +727,7 @@ impl ConnectionConfig {
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            reconnect_stop: ReconnectStop::default(),
             router_notify: RouterNotify::default(),
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),

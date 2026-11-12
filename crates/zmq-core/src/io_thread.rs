@@ -584,11 +584,13 @@ impl EventLoop {
         let Some(session) = self.sessions.get_mut(&id) else {
             return;
         };
+        let stops = session.stops_reconnecting(err);
         session.report_failure(err);
         if let Some(mut engine) = session.engine.take() {
             let _ = self.poll.registry().deregister(engine.stream());
         }
-        let reconnects = matches!(session.origin, Origin::Connect(_)) && err.is_connection_error();
+        let reconnects =
+            matches!(session.origin, Origin::Connect(_)) && err.is_connection_error() && !stops;
         if !reconnects {
             self.close_session(id);
             return;
@@ -878,6 +880,23 @@ impl Session {
             self.progress.established = true;
             monitor.emit(&self.endpoint, EventKind::HandshakeSucceeded);
         }
+    }
+
+    /// Whether `err`, a connection error, is one the socket asked not to
+    /// retry after (`ZMQ_RECONNECT_STOP`). As in libzmq, a refusal counts
+    /// over TCP only, and a handshake has failed if the connection was up
+    /// and broke or timed out before completing it.
+    fn stops_reconnecting(&self, err: &EngineError) -> bool {
+        let stop = self.config.reconnect_stop;
+        if !self.progress.connected {
+            return stop.connection_refused
+                && matches!(
+                    self.origin,
+                    Origin::Connect(Address::Tcp(_) | Address::TcpHost { .. })
+                )
+                && err.is_refusal();
+        }
+        stop.handshake_failed && !self.progress.established
     }
 
     /// Tells monitors the engine has failed: a connection that was up is

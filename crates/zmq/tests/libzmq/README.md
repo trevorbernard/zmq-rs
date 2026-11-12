@@ -28,7 +28,6 @@ Of 139 tests, these are left out.
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | PEER's hello, disconnect and hiccup messages | `hello_msg`, `disconnect_msg`, `hiccup_msg` |
-| `RECONNECT_STOP` | `reconnect_options` |
 | TCP and IPC accept filters | `tcp_accept_filter`, `filter_ipc` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 | `BUSY_POLL`, `TOS`, `BINDTODEVICE` | `busy_poll`, `diffserv`, `pair_tcp_cap_net_admin` |

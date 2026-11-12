@@ -765,6 +765,18 @@ impl<T: SocketType> Socket<T> {
         (self.peers.list_mut(), &mut self.routing)
     }
 
+    /// When connections made from now on give up instead of reconnecting,
+    /// as libzmq's `ZMQ_RECONNECT_STOP`, a draft option. Never by default:
+    /// they retry as [`SocketOptions::reconnect`] says.
+    ///
+    /// A connection that gives up ends as one disconnected does. libzmq's
+    /// `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` needs no flag here:
+    /// [`disconnect`](Self::disconnect) always ends the retrying.
+    #[cfg(feature = "draft")]
+    pub fn set_reconnect_stop(&mut self, stop: crate::ReconnectStop) {
+        self.peers.config_mut().reconnect_stop = stop;
+    }
+
     /// A new monitor of this socket's events, as libzmq's
     /// `zmq_socket_monitor`: its listeners binding, accepting and closing,
     /// and its connections connecting, completing or failing handshakes,

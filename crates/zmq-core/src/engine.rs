@@ -160,10 +160,6 @@ enum Step {
 /// Why an engine stopped. The connection is closed.
 #[derive(Debug)]
 pub(crate) enum EngineError {
-    #[expect(
-        dead_code,
-        reason = "monitors learn of a broken connection, as libzmq's, without the cause"
-    )]
     Io(io::Error),
     PeerClosed,
     Greeting(GreetingError),
@@ -206,6 +202,12 @@ impl EngineError {
             Self::Curve(err) => HandshakeFailure::Protocol(ProtocolError::Curve(*err)),
             Self::Io(_) | Self::PeerClosed | Self::Timeout => HandshakeFailure::NoDetail,
         }
+    }
+
+    /// Whether the peer's host refused the connection: nothing listens
+    /// there.
+    pub(crate) fn is_refusal(&self) -> bool {
+        matches!(self, Self::Io(err) if err.kind() == io::ErrorKind::ConnectionRefused)
     }
 
     /// Whether the connection broke, rather than the peer misbehaving.
