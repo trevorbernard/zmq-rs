@@ -362,7 +362,7 @@ Rules shared by every pattern:
 - An XSUB to XPUB `Proxy` drops for a full subscriber, as libzmq's does by default; `Proxy::no_drop` is libzmq's proxy with `XPUB_NODROP` on its XPUB, holding back the publishers instead.
 - Over tcp and ipc an XPUB rarely refuses at its HWM: the I/O thread frees room in the pipe as soon as it writes, and the kernel's buffers take the rest. libzmq's writer learns of reads only in batches, so its queue reaches the HWM sooner.
 - `topics_count` on PUB, XPUB, SUB and XSUB, with the `draft` feature, is libzmq's draft `TOPICS_COUNT`: distinct topics, however many times or by however many peers each is subscribed. A publisher's applies what its subscribers have sent first, where libzmq needs another call on the socket to do so. Under `ManualXPub` it counts the topics accepted or set, as libzmq's does.
-- Not yet: `ONLY_FIRST_SUBSCRIBE`.
+- `ONLY_FIRST_SUBSCRIBE` has no setter, as there is nothing for it to turn off: libzmq's default reads a subscription from any frame of a message an XSUB sends or an XPUB receives, and the option stops it at the frames after a first that is none. Ours reads one only from a single-frame message, so a later frame starting with `00` or `01` is always the user's. The one case left apart is the one above, a multi-frame message whose first frame starts so: libzmq reads its frames as subscriptions with or without the option.
 
 **Done (PUB and SUB):**
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.

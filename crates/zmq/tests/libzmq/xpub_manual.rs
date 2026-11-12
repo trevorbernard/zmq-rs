@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, ManualXPub, Message, Pub, Socket, Sub, XPub, XPubEvent, XSub};
+use zmq::{Context, Frame, ManualXPub, Message, Pub, Socket, Sub, XPub, XPubEvent, XSub};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle};
@@ -334,5 +334,39 @@ fn user_message() {
     );
 }
 
-// test_user_message_multi is not ported: it needs ZMQ_ONLY_FIRST_SUBSCRIBE,
-// which zmq-rs does not have.
+/// libzmq's `test_user_message_multi`, which sets `ZMQ_ONLY_FIRST_SUBSCRIBE`
+/// so that a later frame starting with `00` or `01` stays part of a user
+/// message. Ours needs no option for that: a message of several frames is
+/// never a subscription (`docs/rfc-compliance.md`, PUBSUB).
+///
+/// Where the first frame starts with `00` or `01`, libzmq reads every
+/// frame as a subscription even with the option, and its test receives
+/// them as XPUB reports. Ours delivers the message.
+#[test]
+fn user_message_multi() {
+    let context = Context::new().unwrap();
+    let mut publisher = context.socket::<XPub>();
+    publisher
+        .bind("inproc://libzmq-xpub-user-message-multi")
+        .unwrap();
+    let mut subscriber = context.socket::<XSub>();
+    subscriber
+        .connect("inproc://libzmq-xpub-user-message-multi")
+        .unwrap();
+
+    let common: &[u8] = b"ABC";
+    for frames in [
+        [common, b"\x00BC"],
+        [common, b"\x01BC"],
+        [b"\x01BC", b"\x01CD"],
+        [b"\x00BC", b"\x00CD"],
+    ] {
+        let frames: Vec<Frame> = frames.into_iter().map(Frame::from).collect();
+        let message = Message::try_from(frames).unwrap();
+        subscriber.send(message.clone()).unwrap();
+        assert_eq!(
+            publisher.recv_timeout(FIVE).unwrap(),
+            Some(XPubEvent::Message(message))
+        );
+    }
+}
