@@ -27,7 +27,6 @@ Of 139 tests, these are left out.
 | SOCKS | `socks` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
-| TCP and IPC accept filters | `tcp_accept_filter`, `filter_ipc` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 | `BUSY_POLL`, `TOS`, `BINDTODEVICE` | `busy_poll`, `diffserv`, `pair_tcp_cap_net_admin` |
 | Binding a source address (`tcp://src;dst`) | `bind_src_address` |
@@ -39,6 +38,7 @@ Of 139 tests, these are left out.
 | TIPC | `address_tipc`, `connect_delay_tipc`, `pair_tipc`, `reqrep_tipc`, `reqrep_device_tipc`, `router_mandatory_tipc`, `shutdown_stress_tipc`, `sub_forward_tipc`, `term_endpoint_tipc` |
 | VMCI | `pair_vmci`, `reqrep_vmci` |
 | GSSAPI | `security_gssapi` |
+| TCP and IPC accept filters, which libzmq deprecated for ZAP | `tcp_accept_filter`, `filter_ipc` |
 
 **libzmq's C API rather than behavior:** `msg_ffn`, `msg_flags`,
 `msg_init`, `ctx_options`, `ctx_destroy`, `setsockopt`,
