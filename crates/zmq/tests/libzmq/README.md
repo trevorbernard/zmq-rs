@@ -21,18 +21,18 @@ Of 139 tests, these are left out.
 
 | Feature | Tests |
 |---|---|
-| STREAM sockets | `stream`, `stream_disconnect`, `stream_empty`, `stream_exceeds_buffer`, `stream_timeout`, `bind_stream_fuzzer`, `connect_stream_fuzzer` |
-| WebSockets | `ws_transport`, `wss_transport`, `bind_ws_fuzzer`, `connect_ws_fuzzer` |
 | UDP | `dgram` |
 | SOCKS | `socks` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 
-**Not planned** unless someone asks for them:
+**Not planned** unless someone asks for them, as there is too little call for them:
 
 | Feature | Tests |
 |---|---|
+| STREAM sockets | `stream`, `stream_disconnect`, `stream_empty`, `stream_exceeds_buffer`, `stream_timeout`, `bind_stream_fuzzer`, `connect_stream_fuzzer` |
+| WebSockets | `ws_transport`, `wss_transport`, `bind_ws_fuzzer`, `connect_ws_fuzzer` |
 | TIPC | `address_tipc`, `connect_delay_tipc`, `pair_tipc`, `reqrep_tipc`, `reqrep_device_tipc`, `router_mandatory_tipc`, `shutdown_stress_tipc`, `sub_forward_tipc`, `term_endpoint_tipc` |
 | VMCI | `pair_vmci`, `reqrep_vmci` |
 | GSSAPI | `security_gssapi` |

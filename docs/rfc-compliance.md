@@ -31,7 +31,7 @@ libzmq repository.
 | 49 | SCATTERGATHER | draft | yes |
 | 51 | P2P | draft | yes |
 | 52 | CHANNEL | draft | yes |
-| 45 | ZWS 2.0 | draft | later |
+| 45 | ZWS 2.0 | draft | not planned |
 | 39 | ZWS 1.0 | stable | no (libzmq never implemented it) |
 
 Protocols built on top of ZeroMQ (MDP, ZRE, FILEMQ, ...) are out of scope.
@@ -475,7 +475,9 @@ failure.
 - A UDP RADIO send over 8192 octets returns `TooLarge` instead of being silently dropped.
 - A sealed `CompatiblePeer` trait encodes the pairing table.
 
-## ZWS (RFC 45), later
+## ZWS (RFC 45), not planned
+
+WebSockets are not planned unless someone asks for them: there is too little call for them. Nor are STREAM sockets, libzmq's raw TCP socket type, which no RFC covers. What follows is what an implementation would have to do.
 
 - libzmq implements only 2.0.
 - Subprotocols: `ZWS2.0/NULL`, `ZWS2.0`, `ZWS2.0/PLAIN`, and `ZWS2.0/CURVE` (a libzmq extension).
