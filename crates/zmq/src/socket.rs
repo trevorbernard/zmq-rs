@@ -746,6 +746,7 @@ impl<T: SocketType> Socket<T> {
                 bind_to_device: options.bind_to_device,
                 busy_poll: None,
             },
+            socks_proxy: options.socks_proxy.map(|proxy| proxy.0),
             handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
         };

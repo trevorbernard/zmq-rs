@@ -16,7 +16,7 @@ use mio::event::Source;
 use mio::net::TcpListener;
 use mio::{Interest, Registry, Token};
 
-use crate::TcpKeepalive;
+use crate::{SocksProxy, TcpKeepalive};
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 pub(crate) use ipc::bind_ipc_abstract;
@@ -218,6 +218,29 @@ pub(crate) enum Address {
     /// A name in Linux's abstract socket namespace, for `ipc://@name`.
     #[cfg(any(target_os = "linux", target_os = "android"))]
     IpcAbstract(String),
+}
+
+impl Address {
+    /// What a SOCKS5 proxy is asked to connect to for this address, and
+    /// how the proxy itself is reached; `None` unless it is a TCP one. A
+    /// host name is left for the proxy to resolve, and a connect's source
+    /// address is dropped, as libzmq drops it: the proxy's own is used.
+    pub(crate) fn through(&self, proxy: &SocksProxy) -> Option<(Self, String, u16)> {
+        let (host, port) = match self {
+            Self::Tcp(addr) => (addr.ip().to_string(), addr.port()),
+            Self::TcpHost { host, port, .. } => (host.clone(), *port),
+            #[cfg(unix)]
+            Self::Ipc(_) => return None,
+            #[cfg(any(target_os = "linux", target_os = "android"))]
+            Self::IpcAbstract(_) => return None,
+        };
+        let proxy = Self::TcpHost {
+            host: proxy.host.clone(),
+            port: proxy.port,
+            source: proxy.source,
+        };
+        Some((proxy, host, port))
+    }
 }
 
 impl fmt::Display for Address {

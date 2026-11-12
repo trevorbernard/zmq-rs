@@ -273,8 +273,8 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
 
 Not planned unless someone asks, as there is too little call for them:
 STREAM sockets, WebSockets, TIPC, VMCI, GSSAPI and the TCP and IPC accept
-filters. Not yet: polling plain file descriptors beside sockets, SOCKS
-proxies, UDP, timers and `USE_FD`. The full list is in
+filters. Not yet: polling plain file descriptors beside sockets, UDP,
+timers and `USE_FD`. The full list is in
 [the libzmq test port](crates/zmq/tests/libzmq/README.md#not-ported).
 
 ## Testing
@@ -283,7 +283,7 @@ proxies, UDP, timers and `USE_FD`. The full list is in
   tcp and ipc, with zmq-rs on either side (`tests/interop`).
 - **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
   separate processes the Nix dev shell builds (`just test-legacy`).
-- **libzmq's own regression tests,** 79 of its 139 ported, the rest listed
+- **libzmq's own regression tests,** 80 of its 139 ported, the rest listed
   with why (`crates/zmq/tests/libzmq`).
 - **Property tests against models:** subscription matching, XPUB events,
   ROUTER routing, pipes, the codec and handshakes.

@@ -1239,6 +1239,7 @@ dependencies = [
  "mio",
  "proptest",
  "socket2",
+ "zeroize",
  "zmq-pipe",
  "zmtp",
 ]

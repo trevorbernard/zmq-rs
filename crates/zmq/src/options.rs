@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use zmq_core::{Heartbeat, Linger, MessageProperties, Reconnect, Security, TcpKeepalive};
 use zmq_pipe::Hwm;
-use zmtp::{Frame, Identity};
+use zmtp::{Credential, Frame, Identity};
+
+use crate::Error;
+use crate::endpoint::{Target, connect_target};
 
 /// How a socket presents itself and buffers messages. Given when the socket
 /// is created, so it applies to every connection the socket makes.
@@ -59,6 +62,9 @@ pub struct SocketOptions {
     /// bind fails, and a connect keeps retrying, where the system does not
     /// support or permit it.
     pub bind_to_device: Option<String>,
+    /// The SOCKS5 proxy TCP connections are made through
+    /// (`ZMQ_SOCKS_PROXY`), none by default.
+    pub socks_proxy: Option<SocksProxy>,
     /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
     /// `None` or zero means no limit, as libzmq's 0 does.
     pub handshake_timeout: Option<Duration>,
@@ -82,8 +88,62 @@ impl Default for SocketOptions {
             tcp_keepalive: None,
             type_of_service: 0,
             bind_to_device: None,
+            socks_proxy: None,
             handshake_timeout: Some(Duration::from_secs(30)),
         }
+    }
+}
+
+/// A SOCKS5 proxy (RFC 1928) for a socket's TCP connections, as libzmq's
+/// `ZMQ_SOCKS_PROXY`. The proxy is asked to connect to each endpoint, a host
+/// name being left for it to resolve; `ipc` and `inproc` connects, and
+/// binds, do not go through it.
+///
+/// ```
+/// let proxy = zmq::SocksProxy::new("proxy.example:1080")?;
+/// let options = zmq::SocketOptions {
+///     socks_proxy: Some(proxy),
+///     ..zmq::SocketOptions::default()
+/// };
+/// # Ok::<(), zmq::Error>(())
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SocksProxy(pub(crate) zmq_core::SocksProxy);
+
+impl SocksProxy {
+    /// The proxy at `address`: `host:port`, as libzmq takes it, without
+    /// `tcp://`. The host is resolved for each connection attempt, as an
+    /// endpoint's is. `source;host:port` reaches the proxy from `source`,
+    /// as an endpoint's source does.
+    pub fn new(address: &str) -> Result<Self, Error> {
+        let invalid = || Error::InvalidEndpoint(address.to_owned());
+        let (host, port, source) = match connect_target(&format!("tcp://{address}")) {
+            Ok(Target::Tcp(addr)) => (addr.ip().to_string(), addr.port(), None),
+            Ok(Target::TcpHost { host, port, source }) => (host, port, source),
+            _ => return Err(invalid()),
+        };
+        if port == 0 {
+            return Err(invalid());
+        }
+        Ok(Self(zmq_core::SocksProxy {
+            host,
+            port,
+            source,
+            username: Credential::default(),
+            password: Credential::default(),
+        }))
+    }
+
+    /// Authenticates to the proxy with a user name and password (RFC
+    /// 1929), as libzmq's draft `ZMQ_SOCKS_USERNAME` and
+    /// `ZMQ_SOCKS_PASSWORD`. As in libzmq, an empty user name means no
+    /// authentication, whatever the password.
+    #[cfg(feature = "draft")]
+    #[must_use]
+    pub fn with_credentials(mut self, username: Credential, password: Credential) -> Self {
+        self.0.username = username;
+        self.0.password = password;
+        self
     }
 }
 

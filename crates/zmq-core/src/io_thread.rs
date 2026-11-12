@@ -17,6 +17,7 @@ use zmtp::Message;
 use crate::context::{PeerSlot, message_pipe};
 use crate::engine::{Engine, EngineError, Pipes};
 use crate::reconnect::Retry;
+use crate::socks::SocksClient;
 use crate::transport::{Address, IpcCleanup, Stream, StreamListener};
 use crate::{Connection, ConnectionConfig, EventKind, Inbound, Linger, Topics};
 
@@ -431,10 +432,27 @@ impl EventLoop {
             waker,
         };
         if let Some(stream) = stream {
-            session.engine = Some(self.start_engine(id, stream, &session.config)?);
+            session.engine = Some(self.start_engine(id, stream, &session.config, None)?);
         }
         self.sessions.insert(id, session);
         Some(id)
+    }
+
+    /// Starts connecting to `address`, or to the socket's SOCKS5 proxy
+    /// for it if it has one and the address is a TCP one. `None` if the
+    /// attempt failed already.
+    fn open(&self, id: usize, address: &Address, config: &ConnectionConfig) -> Option<Engine> {
+        let proxied = config
+            .socks_proxy
+            .as_ref()
+            .and_then(|proxy| Some((proxy, address.through(proxy)?)));
+        let Some((proxy, (proxy_address, host, port))) = proxied else {
+            let stream = Stream::connect(address, &config.tcp).ok()?;
+            return self.start_engine(id, stream, config, None);
+        };
+        let socks = SocksClient::new(proxy, &host, port).ok()?;
+        let stream = Stream::connect(&proxy_address, &config.tcp).ok()?;
+        self.start_engine(id, stream, config, Some(socks))
     }
 
     fn start_engine(
@@ -442,6 +460,7 @@ impl EventLoop {
         id: usize,
         mut stream: Stream,
         config: &ConnectionConfig,
+        socks: Option<SocksClient>,
     ) -> Option<Engine> {
         stream.tune(config.tcp_keepalive.as_ref(), &config.tcp);
         self.poll
@@ -452,7 +471,7 @@ impl EventLoop {
                 Interest::READABLE | Interest::WRITABLE,
             )
             .ok()?;
-        Some(Engine::new(stream, config.clone()))
+        Some(Engine::new(stream, config.clone(), socks))
     }
 
     fn drive_session(&mut self, id: usize) {
@@ -563,9 +582,7 @@ impl EventLoop {
         };
         let address = address.clone();
         let config = session.config.clone();
-        let engine = Stream::connect(&address, &config.tcp)
-            .ok()
-            .and_then(|stream| self.start_engine(id, stream, &config));
+        let engine = self.open(id, &address, &config);
         let Some(engine) = engine else {
             self.retry_later(id);
             return false;

@@ -59,6 +59,7 @@ mod security_null;
 mod security_plain;
 mod security_zap;
 mod shutdown_stress;
+mod socks;
 mod spec_dealer;
 mod spec_pushpull;
 mod spec_rep;

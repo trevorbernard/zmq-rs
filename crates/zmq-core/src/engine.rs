@@ -25,6 +25,7 @@ use zmtp::{
 
 use crate::context::PeerSlot;
 use crate::output::Output;
+use crate::socks::{SocksClient, SocksError};
 use crate::transport::Stream;
 use crate::{
     Authenticator, ConnectionConfig, HandshakeFailure, MessageProperties, ProtocolError, Security,
@@ -99,6 +100,11 @@ impl Deadlines {
 }
 
 enum State {
+    /// Asking a SOCKS5 proxy for the connection, our greeting unsent.
+    Proxy {
+        socks: SocksClient,
+        greeting: Greeting,
+    },
     Greeting(Greeting),
     Handshake {
         mechanism: Mechanism,
@@ -170,6 +176,8 @@ pub(crate) enum EngineError {
     Timeout,
     /// A CURVE frame did not open, or arrived out of order.
     Curve(CurveError),
+    /// A SOCKS5 proxy did not connect us.
+    Proxy(#[expect(dead_code, reason = "shown when the error is debugged")] SocksError),
 }
 
 impl EngineError {
@@ -200,7 +208,9 @@ impl EngineError {
             Self::Greeting(err) => HandshakeFailure::Protocol(ProtocolError::Greeting(err.clone())),
             Self::Decode(err) => HandshakeFailure::Protocol(ProtocolError::Decode(err.clone())),
             Self::Curve(err) => HandshakeFailure::Protocol(ProtocolError::Curve(*err)),
-            Self::Io(_) | Self::PeerClosed | Self::Timeout => HandshakeFailure::NoDetail,
+            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) => {
+                HandshakeFailure::NoDetail
+            }
         }
     }
 
@@ -211,9 +221,13 @@ impl EngineError {
     }
 
     /// Whether the connection broke, rather than the peer misbehaving.
-    /// libzmq reconnects after the former but not the latter.
+    /// libzmq reconnects after the former but not the latter. A proxy that
+    /// did not connect us counts as the former, as libzmq tries it again.
     pub(crate) fn is_connection_error(&self) -> bool {
-        matches!(self, Self::Io(_) | Self::PeerClosed | Self::Timeout)
+        matches!(
+            self,
+            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_)
+        )
     }
 }
 
@@ -241,7 +255,13 @@ pub(crate) struct Pipes<'a> {
 }
 
 impl Engine {
-    pub(crate) fn new(stream: Stream, config: ConnectionConfig) -> Self {
+    /// An engine for `stream`, which `socks`, if given, first asks a
+    /// SOCKS5 proxy to connect to the peer.
+    pub(crate) fn new(
+        stream: Stream,
+        config: ConnectionConfig,
+        socks: Option<SocksClient>,
+    ) -> Self {
         let mechanism = match &config.security {
             Security::Null => zmtp::Mechanism::Null {
                 legacy_peers: LegacyPeers::Allow,
@@ -261,12 +281,21 @@ impl Engine {
             mechanism,
         });
         let mut out = Output::default();
-        greeting.write_output(&mut out.buf);
+        let state = match socks {
+            Some(socks) => {
+                socks.greet(&mut out.buf);
+                State::Proxy { socks, greeting }
+            }
+            None => {
+                greeting.write_output(&mut out.buf);
+                State::Greeting(greeting)
+            }
+        };
         Self {
             stream,
             config,
             connected: false,
-            state: State::Greeting(greeting),
+            state,
             out,
             outbound_empty: false,
             deadlines: Deadlines::default(),
@@ -275,9 +304,10 @@ impl Engine {
     }
 
     /// Whether the stream has connected, for connections we make; accepted
-    /// streams count once the engine first runs.
+    /// streams count once the engine first runs. Through a proxy, only
+    /// once the proxy has connected us, as libzmq reports it.
     pub(crate) fn is_connected(&self) -> bool {
-        self.connected
+        self.connected && !matches!(self.state, State::Proxy { .. })
     }
 
     pub(crate) fn stream(&mut self) -> &mut Stream {
@@ -465,6 +495,7 @@ impl Engine {
         cx: &mut Context<'_>,
     ) -> Result<bool, EngineError> {
         match mem::replace(&mut self.state, State::Failed) {
+            State::Proxy { socks, greeting } => self.receive_proxy(socks, greeting),
             State::Greeting(greeting) => self.receive_greeting(greeting, cx),
             State::Handshake { mechanism, decoder } => {
                 self.receive_handshake(mechanism, decoder, pipes, cx)
@@ -493,6 +524,42 @@ impl Engine {
             }
             State::Failed => Ok(false),
         }
+    }
+
+    /// Reads the proxy's next reply, and no further: once it has connected
+    /// us, what follows is the peer's. Our greeting goes out then.
+    fn receive_proxy(
+        &mut self,
+        mut socks: SocksClient,
+        mut greeting: Greeting,
+    ) -> Result<bool, EngineError> {
+        let mut buf = [0u8; 64];
+        let wanted = socks.wanted().min(buf.len());
+        let n = match self.stream.read(&mut buf[..wanted]) {
+            Ok(0) => return Err(EngineError::PeerClosed),
+            Ok(n) => n,
+            Err(err)
+                if matches!(
+                    err.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::Interrupted
+                ) =>
+            {
+                let progressed = err.kind() == io::ErrorKind::Interrupted;
+                self.state = State::Proxy { socks, greeting };
+                return Ok(progressed);
+            }
+            Err(err) => return Err(EngineError::Io(err)),
+        };
+        let connected = socks
+            .feed(&buf[..n], &mut self.out.buf)
+            .map_err(EngineError::Proxy)?;
+        self.state = if connected {
+            greeting.write_output(&mut self.out.buf);
+            State::Greeting(greeting)
+        } else {
+            State::Proxy { socks, greeting }
+        };
+        Ok(true)
     }
 
     fn receive_greeting(

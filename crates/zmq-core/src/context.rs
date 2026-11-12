@@ -26,7 +26,7 @@ use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
 use crate::transport::{Address, IpcCleanup, StreamListener, TcpTuning, listen_tcp};
-use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security};
+use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security, SocksProxy};
 
 /// libzmq's default ZMQ_HANDSHAKE_IVL.
 const DEFAULT_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(30);
@@ -198,6 +198,9 @@ pub struct ConnectionConfig {
     /// What TCP sockets are given before they connect or listen, nothing
     /// by default.
     pub tcp: TcpTuning,
+    /// The SOCKS5 proxy TCP connections are made through
+    /// (`ZMQ_SOCKS_PROXY`), none by default.
+    pub socks_proxy: Option<SocksProxy>,
     /// How long the greeting and security handshake may take before the
     /// connection is dropped (`ZMQ_HANDSHAKE_IVL`, default 30 s). `None` or
     /// zero means no limit, as libzmq's 0 does.
@@ -783,6 +786,7 @@ impl ConnectionConfig {
             heartbeat: None,
             tcp_keepalive: None,
             tcp: TcpTuning::default(),
+            socks_proxy: None,
             reconnect_stop: ReconnectStop::default(),
             metadata: Metadata::new(),
             hello_message: Frame::new(),

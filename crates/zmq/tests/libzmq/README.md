@@ -22,7 +22,6 @@ Of 139 tests, these are left out.
 | Feature | Tests |
 |---|---|
 | UDP | `dgram` |
-| SOCKS | `socks` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
