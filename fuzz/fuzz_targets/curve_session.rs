@@ -99,6 +99,7 @@ fn handshake(
     let client = CurveClient::start(
         client_type,
         identity.clone(),
+        Metadata::new(),
         &curve::client_keys(),
         curve::server_public(),
         &greeting(true),
@@ -108,6 +109,7 @@ fn handshake(
     let config = ServerConfig {
         socket_type: server_type,
         identity: Identity::default(),
+        metadata: Metadata::new(),
         domain: Frame::new(),
         peer_address: String::new(),
     };

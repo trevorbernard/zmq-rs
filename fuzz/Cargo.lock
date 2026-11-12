@@ -806,6 +806,7 @@ dependencies = [
  "libc",
  "mio",
  "socket2",
+ "zeroize",
  "zmq-pipe",
  "zmtp",
 ]
@@ -834,5 +835,6 @@ dependencies = [
  "libc",
  "libfuzzer-sys",
  "zmq",
+ "zmq-core",
  "zmtp",
 ]

@@ -1,7 +1,9 @@
 #![no_main]
 
 use libfuzzer_sys::fuzz_target;
-use zmtp::{CurveClient, CurveClientStep, GreetingConfig, Identity, Mechanism, Role, SocketType};
+use zmtp::{
+    CurveClient, CurveClientStep, GreetingConfig, Identity, Mechanism, Metadata, Role, SocketType,
+};
 use zmtp_fuzz::curve;
 
 // A CURVE DEALER client with libzmq's fixed keys, as in its
@@ -19,6 +21,7 @@ fuzz_target!(|data: &[u8]| {
     let Ok(mut client) = CurveClient::start(
         SocketType::Dealer,
         Identity::default(),
+        Metadata::new(),
         &curve::client_keys(),
         curve::server_public(),
         &peer,

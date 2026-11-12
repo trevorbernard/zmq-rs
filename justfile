@@ -6,7 +6,7 @@ default:
     @just --list
 
 # CI's main job; its nightly ones are `just miri`, `just tsan` and `just fuzz-all`.
-ci: fmt-check clippy test loom
+ci: fmt-check clippy fuzz-check test loom
 
 # Tests; arguments filter, as for nextest. Doctests run only unfiltered.
 test *args:
@@ -65,6 +65,13 @@ fmt-check:
 
 clippy:
     cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+# Whether the fuzz targets still build: they are outside the workspace,
+# so nothing else notices an API they use changing. Stable is enough to
+# check them; running them takes `just fuzz`.
+[doc("Whether the fuzz targets still build.")]
+fuzz-check:
+    cargo check --manifest-path fuzz/Cargo.toml
 
 audit:
     cargo audit

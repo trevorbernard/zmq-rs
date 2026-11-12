@@ -36,7 +36,7 @@ pub struct SocksProxy {
 /// Why a proxy did not connect us. The connection is closed and, as in
 /// libzmq, tried again later.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SocksError {
+pub enum SocksError {
     /// The destination cannot be asked for: a host name over 255 octets,
     /// or port 0.
     Unaskable,
@@ -61,7 +61,7 @@ enum Stage {
 /// CONNECT. Reads exactly the proxy's octets, so that the peer's ZMTP
 /// greeting, which may follow at once, is left in the stream.
 #[derive(Debug)]
-pub(crate) struct SocksClient {
+pub struct SocksClient {
     stage: Stage,
     method: u8,
     auth: Zeroizing<Vec<u8>>,
@@ -73,7 +73,7 @@ pub(crate) struct SocksClient {
 impl SocksClient {
     /// A negotiation asking `proxy` to connect to `host`, a host name the
     /// proxy resolves or an address, and `port`.
-    pub(crate) fn new(proxy: &SocksProxy, host: &str, port: u16) -> Result<Self, SocksError> {
+    pub fn new(proxy: &SocksProxy, host: &str, port: u16) -> Result<Self, SocksError> {
         let (username, password) = (proxy.username.expose(), proxy.password.expose());
         let Ok(host_len) = u8::try_from(host.len()) else {
             return Err(SocksError::Unaskable);
@@ -119,13 +119,13 @@ impl SocksClient {
     }
 
     /// Writes our greeting, the first thing sent to the proxy.
-    pub(crate) fn greet(&self, out: &mut Vec<u8>) {
+    pub fn greet(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&[VERSION, 1, self.method]);
     }
 
     /// How many octets to read next: never more than the proxy's reply
     /// still has, and never none.
-    pub(crate) fn wanted(&self) -> usize {
+    pub fn wanted(&self) -> usize {
         let have = self.input.len();
         match self.stage {
             Stage::Choice | Stage::AuthResponse => 2 - have,
@@ -137,7 +137,7 @@ impl SocksClient {
     /// Takes `octets` from the proxy, at most [`wanted`](Self::wanted),
     /// writing what we answer to `out`. Returns whether the proxy has
     /// connected us, after which the stream is the peer's.
-    pub(crate) fn feed(&mut self, octets: &[u8], out: &mut Vec<u8>) -> Result<bool, SocksError> {
+    pub fn feed(&mut self, octets: &[u8], out: &mut Vec<u8>) -> Result<bool, SocksError> {
         debug_assert!(octets.len() <= self.wanted());
         self.input.extend_from_slice(octets);
         self.check()?;

@@ -2,8 +2,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    PlainClientStep, Credential, GreetingConfig, Identity, Mechanism, PlainClient, PlainCredentials,
-    Role, SocketType,
+    Credential, GreetingConfig, Identity, Mechanism, Metadata, PlainClient, PlainClientStep,
+    PlainCredentials, Role, SocketType,
 };
 
 // A PLAIN DEALER client: the input is what the server sends.
@@ -24,6 +24,7 @@ fuzz_target!(|data: &[u8]| {
     let Ok(mut client) = PlainClient::start(
         SocketType::Dealer,
         Identity::default(),
+        Metadata::new(),
         &credentials,
         &peer,
         &mut out,

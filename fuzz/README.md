@@ -1,7 +1,7 @@
 # Fuzzing
 
-libFuzzer targets for the `zmtp` crate and, through `engine`, the
-sockets above it, run with
+libFuzzer targets for the `zmtp` crate, `zmq-core`'s SOCKS5 client and,
+through `engine`, the sockets above them, run with
 [cargo-fuzz](https://github.com/rust-fuzz/cargo-fuzz) on nightly:
 
 ```sh
@@ -23,6 +23,7 @@ just fuzz-coverage         # line coverage over the corpora
 | `command_parse` | A command body; checks that parse, encode, parse is stable |
 | `roundtrip` | Messages, commands, subscriptions and memberships; checks they decode as encoded |
 | `z85_decode` | Z85 text; checks that accepted text re-encodes to itself |
+| `socks_client` | First octet picks whether we have a user name and what we ask for; the rest is what a SOCKS5 proxy sends. Checks that the negotiation ends the same way however the stream splits it, and never takes octets past the proxy's reply |
 | `engine` | First octet picks a socket type, binding or connecting, a mechanism and heartbeats; the rest is raw traffic from a peer to a real socket over ipc, through the engine, I/O thread and routing. Fails on a panic on any thread, or if the engine never notices the peer close |
 
 Wire targets take the same input shape as libzmq's harnesses, and the

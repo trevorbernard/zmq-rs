@@ -2,8 +2,8 @@
 
 use libfuzzer_sys::fuzz_target;
 use zmtp::{
-    Frame, GreetingConfig, Identity, Mechanism, Metadata, PlainServer, Role, ServerConfig,
-    PlainServerStep, SocketType, ZapReply,
+    Frame, GreetingConfig, Identity, Mechanism, Metadata, PlainServer, PlainServerStep, Role,
+    ServerConfig, SocketType, ZapReply,
 };
 
 // A PLAIN server whose authenticator accepts everyone, so the fuzzer can
@@ -21,6 +21,7 @@ fuzz_target!(|data: &[u8]| {
     let config = ServerConfig {
         socket_type: SocketType::Router,
         identity,
+        metadata: Metadata::new(),
         domain: Frame::new(),
         peer_address: String::new(),
     };

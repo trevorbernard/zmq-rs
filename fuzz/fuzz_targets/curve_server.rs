@@ -23,6 +23,7 @@ fuzz_target!(|data: &[u8]| {
     let config = ServerConfig {
         socket_type: SocketType::Router,
         identity: Identity::default(),
+        metadata: Metadata::new(),
         domain: Frame::new(),
         peer_address: String::new(),
     };

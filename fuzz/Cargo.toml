@@ -15,6 +15,7 @@ cargo-fuzz = true
 libfuzzer-sys = { version = "0.4", features = ["arbitrary-derive"] }
 libc = "0.2"
 zmq = { path = "../crates/zmq" }
+zmq-core = { path = "../crates/zmq-core" }
 zmtp = { path = "../crates/zmtp" }
 
 [[bin]]
@@ -90,6 +91,13 @@ bench = false
 [[bin]]
 name = "engine"
 path = "fuzz_targets/engine.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "socks_client"
+path = "fuzz_targets/socks_client.rs"
 test = false
 doc = false
 bench = false

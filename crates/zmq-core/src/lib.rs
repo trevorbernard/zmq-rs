@@ -53,5 +53,8 @@ pub use security::{Authenticator, Security, ZapResponder};
 #[cfg(feature = "draft")]
 pub use server_table::ServerTable;
 pub use socks::SocksProxy;
+/// For the fuzz target, which plays the proxy.
+#[doc(hidden)]
+pub use socks::{SocksClient, SocksError};
 pub use transport::{TcpTuning, interface_addr, resolve_tcp};
 pub use zmq_pipe::{RecvTimeoutError, TryRecvError};

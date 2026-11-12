@@ -47,6 +47,17 @@ seed plain_client welcome_ready "$(greeting $PLAIN 01)" \
   041c 055245414459 ${SOCKET_TYPE} 00000006 524f55544552 \
   000568656c6c6f
 
+# The proxy's side of a SOCKS5 negotiation: its choice of method, its
+# answer to our credentials if it asked for them, and its reply to CONNECT
+# with an IPv4, a domain name or an IPv6 bound address.
+seed socks_client no_auth_ipv4 00 0500 05000001 7f000001 1f90
+seed socks_client basic_auth_ipv4 01 0502 0100 05000001 7f000001 1f90
+seed socks_client domain_reply 04 0500 05000003 09 6c6f63616c686f7374 1f90
+seed socks_client ipv6_reply 02 0500 05000004 "$(zeros 15)" 01 1f90
+seed socks_client refused 00 0500 05050001 00000000 0000
+seed socks_client auth_failed 01 0502 0101
+seed socks_client no_method 00 05ff
+
 seed command_parse ready $READY_SUB
 seed command_parse error 054552524f5203343030
 seed command_parse ping 0450494e47000a6869
