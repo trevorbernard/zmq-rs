@@ -29,7 +29,6 @@ Of 139 tests, these are left out.
 | Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 | `BUSY_POLL`, `TOS`, `BINDTODEVICE` | `busy_poll`, `diffserv`, `pair_tcp_cap_net_admin` |
-| Binding a source address (`tcp://src;dst`) | `bind_src_address` |
 
 **Not planned** unless someone asks for them:
 

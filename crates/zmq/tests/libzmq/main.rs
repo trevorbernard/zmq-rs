@@ -11,6 +11,7 @@ mod support;
 mod abstract_ipc;
 mod base85;
 mod bind_after_connect_tcp;
+mod bind_src_address;
 mod conflate;
 mod connect_resolve;
 mod connect_rid;
