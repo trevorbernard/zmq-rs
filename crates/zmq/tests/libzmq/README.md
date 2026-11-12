@@ -23,8 +23,8 @@ Of 139 tests, these are left out.
 |---|---|
 | STREAM sockets | `stream`, `stream_disconnect`, `stream_empty`, `stream_exceeds_buffer`, `stream_timeout`, `bind_stream_fuzzer`, `connect_stream_fuzzer` |
 | WebSockets | `ws_transport`, `wss_transport`, `bind_ws_fuzzer`, `connect_ws_fuzzer` |
-| TIPC, VMCI, UDP | `address_tipc`, `connect_delay_tipc`, `pair_tipc`, `reqrep_tipc`, `reqrep_device_tipc`, `router_mandatory_tipc`, `shutdown_stress_tipc`, `sub_forward_tipc`, `term_endpoint_tipc`, `pair_vmci`, `reqrep_vmci`, `dgram` |
-| GSSAPI, SOCKS | `security_gssapi`, `socks` |
+| UDP | `dgram` |
+| SOCKS | `socks` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | PEER's hello, disconnect and hiccup messages | `hello_msg`, `disconnect_msg`, `hiccup_msg` |
@@ -33,6 +33,14 @@ Of 139 tests, these are left out.
 | `BUSY_POLL`, `TOS`, `BINDTODEVICE` | `busy_poll`, `diffserv`, `pair_tcp_cap_net_admin` |
 | Binding a source address (`tcp://src;dst`) | `bind_src_address` |
 | Application metadata (`ZMQ_METADATA`) | `app_meta` |
+
+**Not planned** unless someone asks for them:
+
+| Feature | Tests |
+|---|---|
+| TIPC | `address_tipc`, `connect_delay_tipc`, `pair_tipc`, `reqrep_tipc`, `reqrep_device_tipc`, `router_mandatory_tipc`, `shutdown_stress_tipc`, `sub_forward_tipc`, `term_endpoint_tipc` |
+| VMCI | `pair_vmci`, `reqrep_vmci` |
+| GSSAPI | `security_gssapi` |
 
 **libzmq's C API rather than behavior:** `msg_ffn`, `msg_flags`,
 `msg_init`, `ctx_options`, `ctx_destroy`, `setsockopt`,
