@@ -757,6 +757,12 @@ impl Engine {
                         self.encode_subscription(encoder, &Subscription::Subscribe(topic))?;
                     }
                 }
+                // Ahead of anything the socket queued, on each connection,
+                // as libzmq's hello session pulls it first.
+                if !self.config.hello_message.is_empty() {
+                    let hello = Message::new(self.config.hello_message.clone());
+                    self.write_message(encoder, hello)?;
+                }
                 self.state = State::Active {
                     decoder,
                     encoder,

@@ -122,6 +122,12 @@ off.
 - They are announced in the order added, where libzmq sorts them by name.
 - REQ and REP sockets' messages keep their connection's properties once the envelope is taken off, as libzmq's do.
 
+**Hello, disconnect and hiccup messages** (`ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG`, `ZMQ_HICCUP_MSG`, draft options), with the `draft` feature, on the socket types libzmq honours them on. Each is one frame; empty, the default, turns it off.
+- `set_hello_message` (DEALER, ROUTER, CLIENT, SERVER, PEER): sent to each peer first, ahead of anything queued, on every connection and so again after a reconnection. Over `inproc` each side's is written when it connects or is paired, a connector's even before the name is bound.
+- `set_disconnect_message` (ROUTER, SERVER, PEER): received from a peer the socket accepted, after everything that peer sent, once its connection ends, if its handshake had completed. Over `inproc` the binder receives it when a connector disconnects or closes; the connector never does.
+- `set_hiccup_message` (DEALER, CLIENT, PEER): received from a peer the socket connected to each time that connection breaks after a completed handshake. Never over `inproc`.
+- The typed API has the setters only on those socket types, where libzmq accepts and ignores the options on the others.
+
 ### Valid socket pairs (RFC 23/37, plus libzmq)
 
 | Socket type | Valid peers |

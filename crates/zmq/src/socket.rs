@@ -1042,6 +1042,83 @@ impl Socket<Pair> {
     }
 }
 
+/// A socket type that can greet each peer, as libzmq's `ZMQ_HELLO_MSG`
+/// lets these do: DEALER, ROUTER, CLIENT, SERVER and PEER.
+#[cfg(feature = "draft")]
+pub trait SendsHello: SocketType {}
+
+/// A socket type that can hear of a peer it accepted leaving, as libzmq's
+/// `ZMQ_DISCONNECT_MSG` lets these do: ROUTER, SERVER and PEER.
+#[cfg(feature = "draft")]
+pub trait HearsDisconnects: SocketType {}
+
+/// A socket type that can hear of a connection it made breaking, as
+/// libzmq's `ZMQ_HICCUP_MSG` lets these do: DEALER, CLIENT and PEER.
+#[cfg(feature = "draft")]
+pub trait HearsHiccups: SocketType {}
+
+#[cfg(feature = "draft")]
+mod farewells {
+    use super::{Dealer, HearsDisconnects, HearsHiccups, Router, SendsHello};
+    use crate::draft::{Client, Peer, Server};
+
+    impl SendsHello for Dealer {}
+    impl SendsHello for Router {}
+    impl SendsHello for Client {}
+    impl SendsHello for Server {}
+    impl SendsHello for Peer {}
+
+    impl HearsDisconnects for Router {}
+    impl HearsDisconnects for Server {}
+    impl HearsDisconnects for Peer {}
+
+    impl HearsHiccups for Dealer {}
+    impl HearsHiccups for Client {}
+    impl HearsHiccups for Peer {}
+}
+
+#[cfg(feature = "draft")]
+impl<T: SendsHello> Socket<T> {
+    /// What each peer of the binds and connects made from now on is sent
+    /// first, on every connection and so again after each reconnection, as
+    /// libzmq's `ZMQ_HELLO_MSG`, a draft option. One frame; empty, the
+    /// default, sends nothing.
+    pub fn set_hello_message(&mut self, hello: impl AsRef<[u8]>) {
+        self.peers.config_mut().hello_message = Frame::copy_from_slice(hello.as_ref());
+    }
+}
+
+#[cfg(feature = "draft")]
+impl<T: HearsDisconnects> Socket<T> {
+    /// What this socket receives from a peer when that peer's connection
+    /// ends, after everything the peer sent, as libzmq's
+    /// `ZMQ_DISCONNECT_MSG`, a draft option. One frame; empty, the default,
+    /// delivers nothing.
+    ///
+    /// As in libzmq, only peers this socket accepted leave it, and only
+    /// those whose handshake had completed: over `inproc`, those that
+    /// connected to a name this socket bound. It applies to binds made
+    /// from now on.
+    pub fn set_disconnect_message(&mut self, disconnect: impl AsRef<[u8]>) {
+        self.peers.config_mut().disconnect_message = Frame::copy_from_slice(disconnect.as_ref());
+    }
+}
+
+#[cfg(feature = "draft")]
+impl<T: HearsHiccups> Socket<T> {
+    /// What this socket receives from a peer it connected to each time that
+    /// connection breaks, before it reconnects, as libzmq's
+    /// `ZMQ_HICCUP_MSG`, a draft option. One frame; empty, the default,
+    /// delivers nothing.
+    ///
+    /// As in libzmq, only a connection whose handshake had completed leaves
+    /// it, and `inproc` connections, which never break, never do. It
+    /// applies to connects made from now on.
+    pub fn set_hiccup_message(&mut self, hiccup: impl AsRef<[u8]>) {
+        self.peers.config_mut().hiccup_message = Frame::copy_from_slice(hiccup.as_ref());
+    }
+}
+
 /// A socket type that publishes to subscribers: PUB, XPUB and
 /// [`ManualXPub`].
 pub trait Publishes: SocketType<Routing = Publisher> {}

@@ -249,6 +249,15 @@ the socket through `Connection::peer().authenticated`.
 and `zmtp`'s `local_metadata` announces them after `Socket-Type` and
 `Identity`, in READY or INITIATE.
 
+`ConnectionConfig`'s `hello_message`, `disconnect_message` and
+`hiccup_message` are libzmq's draft `ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG`
+and `ZMQ_HICCUP_MSG`. The engine writes the hello first once a handshake
+completes; when an established connection fails, the session queues the
+disconnect message to the socket if it was accepted, the hiccup message
+if it was connected. `inproc` has no session: `connect_inproc` and `pair`
+write the hellos, and the binder's `Inbound` yields the disconnect message
+last, once the connector's end is gone.
+
 Once a CURVE handshake completes, the engine keeps its `CurveCodec`, and
 every frame in or out goes through it: messages, and the PING, PONG,
 SUBSCRIBE and CANCEL commands too. A frame that fails to open, or whose

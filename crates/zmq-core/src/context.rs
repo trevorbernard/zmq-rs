@@ -140,6 +140,8 @@ struct InprocEnd {
     recv_hwm: Hwm,
     conflate_inbound: bool,
     conflate_outbound: bool,
+    hello_message: Frame,
+    disconnect_message: Frame,
 }
 
 impl From<&ConnectionConfig> for InprocEnd {
@@ -151,6 +153,8 @@ impl From<&ConnectionConfig> for InprocEnd {
             recv_hwm: config.recv_hwm,
             conflate_inbound: config.conflate_inbound,
             conflate_outbound: config.conflate_outbound,
+            hello_message: config.hello_message.clone(),
+            disconnect_message: config.disconnect_message.clone(),
         }
     }
 }
@@ -203,6 +207,15 @@ pub struct ConnectionConfig {
     /// handshake after ours (`ZMQ_METADATA`). Added with
     /// [`add_metadata`](Self::add_metadata).
     pub metadata: Metadata,
+    /// What each peer is sent first on every connection, reconnections
+    /// included (`ZMQ_HELLO_MSG`). Empty for nothing.
+    pub hello_message: Frame,
+    /// What the socket receives from a peer it accepted once that peer's
+    /// connection ends (`ZMQ_DISCONNECT_MSG`). Empty for nothing.
+    pub disconnect_message: Frame,
+    /// What the socket receives from a peer it connected to each time that
+    /// connection breaks (`ZMQ_HICCUP_MSG`). Empty for nothing.
+    pub hiccup_message: Frame,
     /// Whether a ROUTER is told of peers connecting and disconnecting
     /// (`ZMQ_ROUTER_NOTIFY`), off by default.
     pub router_notify: RouterNotify,
@@ -334,6 +347,10 @@ pub struct Inbound {
     reader: Reader<Message>,
     /// The metadata of the connection the latest message came from.
     metadata: Option<MessageMetadata>,
+    /// Read last, once the peer is gone and everything it sent has been
+    /// read: what an `inproc` binder hears of a connector leaving
+    /// (`ZMQ_DISCONNECT_MSG`), as libzmq's pipe writes it when it ends.
+    farewell: Option<Message>,
 }
 
 impl Inbound {
@@ -341,13 +358,18 @@ impl Inbound {
         Self {
             reader,
             metadata: None,
+            farewell: None,
         }
     }
 
     /// The next message, if one is waiting.
     #[inline(always)]
     pub fn try_recv(&mut self) -> Result<Message, TryRecvError> {
-        let mut message = self.reader.try_recv()?;
+        let mut message = match self.reader.try_recv() {
+            Ok(message) => message,
+            Err(TryRecvError::Closed) => return self.farewell.take().ok_or(TryRecvError::Closed),
+            Err(TryRecvError::Empty) => return Err(TryRecvError::Empty),
+        };
         self.attach(&mut message);
         Ok(message)
     }
@@ -361,7 +383,8 @@ impl Inbound {
                 self.attach(&mut message);
                 Poll::Ready(Some(message))
             }
-            other => other,
+            Poll::Ready(None) => Poll::Ready(self.farewell.take()),
+            Poll::Pending => Poll::Pending,
         }
     }
 
@@ -369,7 +392,9 @@ impl Inbound {
     /// once the session is gone and drained.
     #[inline]
     pub fn recv_blocking(&mut self) -> Option<Message> {
-        let mut message = self.reader.recv_blocking()?;
+        let Some(mut message) = self.reader.recv_blocking() else {
+            return self.farewell.take();
+        };
         self.attach(&mut message);
         Some(message)
     }
@@ -379,7 +404,16 @@ impl Inbound {
         &mut self,
         timeout: Duration,
     ) -> Result<Message, zmq_pipe::RecvTimeoutError> {
-        let mut message = self.reader.recv_timeout(timeout)?;
+        let mut message = match self.reader.recv_timeout(timeout) {
+            Ok(message) => message,
+            Err(zmq_pipe::RecvTimeoutError::Closed) => {
+                return self
+                    .farewell
+                    .take()
+                    .ok_or(zmq_pipe::RecvTimeoutError::Closed);
+            }
+            Err(timeout) => return Err(timeout),
+        };
         self.attach(&mut message);
         Ok(message)
     }
@@ -392,7 +426,7 @@ impl Inbound {
     /// Whether the session is gone and every message it delivered has been
     /// read.
     pub fn is_drained(&self) -> bool {
-        self.reader.is_drained()
+        self.reader.is_drained() && self.farewell.is_none()
     }
 
     pub(crate) fn raise_hwm(&mut self, hwm: Hwm) {
@@ -666,10 +700,14 @@ pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader
 /// Introduces the two ends of an `inproc` connection to each other, as a
 /// handshake would, and returns the server's end. Incompatible socket types
 /// are never paired: dropping the server's end closes the connection.
+///
+/// The server's hello goes to the client here, and its disconnect message
+/// waits for the client to leave, as libzmq sets both when it connects the
+/// two pipes.
 fn pair(
     server_end: &InprocEnd,
     client_end: &InprocEnd,
-    server: Connection,
+    mut server: Connection,
     client: &PeerSlot,
 ) -> Option<Connection> {
     if !server_end.socket_type.accepts(client_end.socket_type)
@@ -679,6 +717,14 @@ fn pair(
     }
     server.peer.set(introduce(client_end));
     client.set(introduce(server_end));
+    if !server_end.hello_message.is_empty() {
+        let _ = server
+            .tx
+            .force_send(Message::new(server_end.hello_message.clone()));
+    }
+    if !server_end.disconnect_message.is_empty() {
+        server.rx.farewell = Some(Message::new(server_end.disconnect_message.clone()));
+    }
     Some(server)
 }
 
@@ -736,6 +782,9 @@ impl ConnectionConfig {
             tcp_keepalive: None,
             reconnect_stop: ReconnectStop::default(),
             metadata: Metadata::new(),
+            hello_message: Frame::new(),
+            disconnect_message: Frame::new(),
+            hiccup_message: Frame::new(),
             router_notify: RouterNotify::default(),
             handshake_timeout: Some(DEFAULT_HANDSHAKE_TIMEOUT),
             monitor: MonitorSink::default(),
@@ -949,11 +998,17 @@ impl Context {
         };
         let (tx, server_rx) = message_pipe(send_hwm, conflate_out);
         let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
-        let client = Connection {
+        let mut client = Connection {
             tx,
             rx: Inbound::new(rx),
             peer: PeerSlot::default(),
         };
+        // Sent whether or not the name is bound yet, as libzmq does.
+        if !end.hello_message.is_empty() {
+            let _ = client
+                .tx
+                .force_send(Message::new(end.hello_message.clone()));
+        }
         let server = Connection {
             tx: server_tx,
             rx: Inbound::new(server_rx),

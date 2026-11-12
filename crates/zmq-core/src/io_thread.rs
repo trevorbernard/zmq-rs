@@ -921,6 +921,18 @@ impl Session {
         if progress.established && self.config.router_notify.disconnect {
             let _ = self.inbound.force_send(Message::new(zmtp::Frame::new()));
         }
+        // Then, as libzmq's session does once a handshake had completed, a
+        // peer we accepted leaves its disconnect message, and one we
+        // connected to its hiccup message.
+        if progress.established {
+            let farewell = match self.origin {
+                Origin::Accepted(_) => &self.config.disconnect_message,
+                Origin::Connect(_) => &self.config.hiccup_message,
+            };
+            if !farewell.is_empty() {
+                let _ = self.inbound.force_send(Message::new(farewell.clone()));
+            }
+        }
     }
 
     /// One round of the engine's work. Returns whether there may be more.

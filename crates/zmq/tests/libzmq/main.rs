@@ -79,6 +79,12 @@ mod channel;
 #[cfg(feature = "draft")]
 mod client_server;
 #[cfg(feature = "draft")]
+mod disconnect_msg;
+#[cfg(feature = "draft")]
+mod hello_msg;
+#[cfg(feature = "draft")]
+mod hiccup_msg;
+#[cfg(feature = "draft")]
 mod peer;
 #[cfg(feature = "draft")]
 mod pubsub_topics_count;
