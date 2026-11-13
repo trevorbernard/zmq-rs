@@ -13,6 +13,15 @@ test *args:
     cargo nextest run --workspace --all-features {{args}}
     {{ if args == "" { "cargo test --workspace --all-features --doc" } else { "" } }}
 
+# Line coverage of the crates under the tests, a row for each file, from
+# its own build in target/llvm-cov-target. Arguments are cargo-llvm-cov's,
+# then nextest's: `--html` or `--open` for the lines themselves, in
+# target/llvm-cov/html, `--show-missing-lines` to list them. Doctests are
+# left out, as measuring them needs nightly.
+[doc("Line coverage of the crates under the tests; `just coverage --html` shows the lines.")]
+coverage *args:
+    cargo llvm-cov nextest --workspace --all-features --ignore-filename-regex '^/nix/store/' {{args}}
+
 # zmq-pipe's queue on loom: every interleaving of its models. Its own
 # target directory, as `--cfg loom` rebuilds everything.
 [doc("zmq-pipe's queue on loom: every interleaving of its models.")]

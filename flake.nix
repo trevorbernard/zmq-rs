@@ -93,6 +93,7 @@
             [
               rust
               pkgs.cargo-audit
+              pkgs.cargo-llvm-cov
               pkgs.cargo-mutants
               pkgs.cargo-nextest
               pkgs.just

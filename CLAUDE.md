@@ -11,4 +11,4 @@
   - against real libzmq: `tests/interop/tests/`
 - Commands: `just --list`; `just ci` matches CI
 - Config: `.config/nextest.toml`, `.cargo/mutants.toml`, `.github/workflows/`
-- The dev shell (`flake.nix`, via direnv) has nextest, cargo-mutants, libzmq, gdb, python3
+- The dev shell (`flake.nix`, via direnv) has nextest, cargo-mutants, cargo-llvm-cov, libzmq, gdb, python3
