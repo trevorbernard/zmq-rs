@@ -479,9 +479,6 @@ impl CurveServer {
         let nonce = u64::from_be_bytes(nonce.try_into().expect("8 octets"));
         let key = BoxKey::between(&client_transient, &transient.secret)?;
         let opened = open(&key, &short_nonce(INITIATE_PREFIX, nonce), sealed)?;
-        if opened.len() < INITIATE_BOXED {
-            return Err(malformed("INITIATE"));
-        }
         let (client_key, rest) = opened.split_at(KEY);
         let (vouch_nonce, rest) = rest.split_at(LONG_NONCE);
         let (vouch, metadata) = rest.split_at(VOUCH);

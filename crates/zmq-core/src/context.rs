@@ -1411,6 +1411,37 @@ mod tests {
     }
 
     #[test]
+    fn a_disconnect_message_is_the_last_thing_a_timed_receive_returns() {
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind_inproc(
+                "farewell",
+                ConnectionConfig {
+                    disconnect_message: Frame::from("bye"),
+                    ..config(SocketType::Router)
+                },
+            )
+            .unwrap();
+        let client = context.connect_inproc("farewell", config(SocketType::Dealer));
+        let mut server = listener.try_accept().expect("paired at once");
+        assert_eq!(
+            server.rx.recv_timeout(Duration::from_millis(10)),
+            Err(zmq_pipe::RecvTimeoutError::Timeout),
+            "not while the peer is there"
+        );
+        drop(client);
+        let five = Duration::from_secs(5);
+        assert_eq!(
+            server.rx.recv_timeout(five),
+            Ok(Message::new(Frame::from("bye")))
+        );
+        assert_eq!(
+            server.rx.recv_timeout(five),
+            Err(zmq_pipe::RecvTimeoutError::Closed)
+        );
+    }
+
+    #[test]
     fn listeners_know_their_names() {
         let context = Context::new().unwrap();
         let inproc = context

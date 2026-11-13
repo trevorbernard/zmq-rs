@@ -199,3 +199,68 @@ impl fmt::Debug for ZapResponder {
         f.write_str("ZapResponder")
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use zmtp::SecretKey;
+
+    use super::*;
+
+    struct Silent;
+
+    impl Authenticator for Silent {
+        fn authenticate(&self, _request: ZapRequest, _respond: ZapResponder) {}
+    }
+
+    fn keypair() -> Keypair {
+        Keypair::from_secret(SecretKey::from_bytes([7; 32]))
+    }
+
+    #[test]
+    fn printing_a_mechanism_shows_no_secret() {
+        let public = keypair().public();
+        let domain = Frame::from("global");
+        assert_eq!(format!("{:?}", Security::Null), "Null");
+        assert_eq!(
+            format!("{:?}", Security::null_authenticated("global", Silent)),
+            format!("NullAuthenticated {{ domain: {domain:?}, .. }}")
+        );
+        let credentials = PlainCredentials {
+            username: zmtp::Credential::new("admin").unwrap(),
+            password: zmtp::Credential::new("hunter2").unwrap(),
+        };
+        assert_eq!(
+            format!("{:?}", Security::PlainClient(credentials)),
+            "PlainClient(PlainCredentials { username: Credential(..), password: Credential(..) })"
+        );
+        assert_eq!(
+            format!("{:?}", Security::plain_server("global", Silent)),
+            format!("PlainServer {{ domain: {domain:?}, .. }}")
+        );
+        assert_eq!(
+            format!("{:?}", Security::curve_client(keypair(), public)),
+            format!("CurveClient {{ public: {public:?}, server_key: {public:?} }}")
+        );
+        assert_eq!(
+            format!("{:?}", Security::curve_server(keypair())),
+            format!(
+                "CurveServer {{ public: {public:?}, domain: {:?}, authenticated: false }}",
+                Frame::new()
+            )
+        );
+        assert_eq!(
+            format!(
+                "{:?}",
+                Security::curve_server_authenticated(keypair(), "global", Silent)
+            ),
+            format!(
+                "CurveServer {{ public: {public:?}, domain: {domain:?}, authenticated: true }}"
+            )
+        );
+        let (reply, _answer) = mpsc::channel();
+        assert_eq!(
+            format!("{:?}", ZapResponder::new(reply, Waker::noop().clone())),
+            "ZapResponder"
+        );
+    }
+}
