@@ -179,10 +179,10 @@ with both. Messages flow only after READY has been both sent and received.
 
 - PING is `u16 BE TTL (deciseconds) | context (0..16 octets)`, and PONG echoes the context.
 - Any inbound traffic counts as a sign of life.
-- Do not copy these libzmq bugs:
-  - `uint16_t ttl *= 100` overflows.
-  - A short PING causes an out-of-bounds read.
-  - Malformed commands are silently ignored.
+- Do not copy these libzmq bugs, all still present on libzmq `master`:
+  - `uint16_t ttl *= 100` overflows: a TTL of 65.6 s or more wraps, so the connection is dropped after as little as 64 ms. Reported as [zeromq/libzmq#4226](https://github.com/zeromq/libzmq/issues/4226).
+  - A PING too short for its TTL causes an out-of-bounds read, and 16 octets from past the frame's end come back in the PONG. A fix is proposed in [zeromq/libzmq#4944](https://github.com/zeromq/libzmq/pull/4944).
+  - Malformed commands are silently ignored: `process_command_message`'s result is discarded. Not reported.
 
 **Design:** reject a PING body shorter than 2 octets. Hold the TTL as a
 `Duration`. Any decoded frame resets the liveness deadlines. `Heartbeat`
