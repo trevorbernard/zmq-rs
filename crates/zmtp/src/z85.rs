@@ -107,4 +107,16 @@ mod tests {
         assert_eq!(decode("%nSc1"), Err(Z85Error::Overflow));
         assert_eq!(decode("#####"), Err(Z85Error::Overflow));
     }
+    #[test]
+    fn error_messages() {
+        assert_eq!(
+            Z85Error::Length.to_string(),
+            "Z85 length must be a multiple of 4 octets or 5 characters"
+        );
+        assert_eq!(
+            Z85Error::Character('~').to_string(),
+            "'~' is not a Z85 character"
+        );
+        assert_eq!(Z85Error::Overflow.to_string(), "Z85 group exceeds 32 bits");
+    }
 }

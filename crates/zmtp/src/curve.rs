@@ -1658,4 +1658,65 @@ mod tests {
             Err(HandshakeError::LegacyPeer)
         ));
     }
+    #[test]
+    fn handshakes_and_codecs_print_no_secret() {
+        let server_keys = Keypair::generate();
+        let client_keys = Keypair::generate();
+        let client = CurveClient::start(
+            SocketType::Dealer,
+            Identity::default(),
+            Metadata::new(),
+            &client_keys,
+            server_keys.public(),
+            &V3_1,
+            &mut Vec::new(),
+        )
+        .unwrap();
+        assert_eq!(
+            format!("{client:?}"),
+            format!(
+                "CurveClient {{ server_key: {:?}, public: {:?}, .. }}",
+                server_keys.public(),
+                client_keys.public()
+            )
+        );
+        let config = server_config(SocketType::Router);
+        let server = CurveServer::start(config.clone(), &server_keys, &V3_1).unwrap();
+        assert_eq!(
+            format!("{server:?}"),
+            format!(
+                "CurveServer {{ config: {config:?}, public: {:?}, .. }}",
+                server_keys.public()
+            )
+        );
+        let run = run_to_zap(SocketType::Dealer, SocketType::Router);
+        assert_eq!(
+            format!("{:?}", run.pending),
+            format!("PendingCurveAuthentication {{ config: {config:?}, .. }}")
+        );
+        let (client, server) = established();
+        assert_eq!(
+            format!("{client:?}"),
+            "CurveCodec { next_nonce: 3, peer_nonce: 1, .. }"
+        );
+        assert_eq!(
+            format!("{server:?}"),
+            "CurveCodec { next_nonce: 2, peer_nonce: 2, .. }"
+        );
+    }
+
+    #[test]
+    fn error_messages() {
+        let messages = [
+            (CurveError::NotMessage, "expected a CURVE MESSAGE command"),
+            (CurveError::Malformed, "malformed CURVE MESSAGE"),
+            (CurveError::StaleNonce, "CURVE nonce did not increase"),
+            (CurveError::Cryptographic, "CURVE box did not open"),
+            (CurveError::NonceExhausted, "CURVE nonces exhausted"),
+            (CurveError::MessageTooLarge, "CURVE message too large"),
+        ];
+        for (error, message) in messages {
+            assert_eq!(error.to_string(), message);
+        }
+    }
 }

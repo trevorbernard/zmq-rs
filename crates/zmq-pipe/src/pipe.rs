@@ -1181,5 +1181,14 @@ mod tests {
     fn error_messages() {
         assert_eq!(TryRecvError::Empty.to_string(), "pipe is empty");
         assert_eq!(TryRecvError::Closed.to_string(), "pipe is closed");
+        assert_eq!(
+            RecvTimeoutError::Timeout.to_string(),
+            "timed out waiting on the pipe"
+        );
+        assert_eq!(RecvTimeoutError::Closed.to_string(), "pipe is closed");
+        assert_eq!(TrySendError::Full(1).to_string(), "pipe is full");
+        assert_eq!(TrySendError::Closed(1).to_string(), "pipe is closed");
+        assert_eq!(Closed(1).to_string(), "pipe is closed");
+        assert_eq!(ReaderGone.to_string(), "pipe is closed");
     }
 }

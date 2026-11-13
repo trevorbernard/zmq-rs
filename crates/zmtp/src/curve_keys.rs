@@ -216,4 +216,21 @@ mod tests {
         assert!(!format!("{pair:?}").contains(CLIENT_SECRET));
         assert!(format!("{pair:?}").contains(CLIENT_PUBLIC));
     }
+    #[test]
+    fn a_public_key_displays_as_its_z85() {
+        let key = PublicKey::from_z85(CLIENT_PUBLIC).unwrap();
+        assert_eq!(key.to_string(), CLIENT_PUBLIC);
+    }
+
+    #[test]
+    fn error_messages() {
+        assert_eq!(
+            KeyError::Length.to_string(),
+            "a CURVE key in Z85 is 40 characters"
+        );
+        assert_eq!(
+            KeyError::Z85(Z85Error::Overflow).to_string(),
+            "invalid CURVE key: Z85 group exceeds 32 bits"
+        );
+    }
 }

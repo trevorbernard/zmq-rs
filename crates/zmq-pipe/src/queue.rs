@@ -467,6 +467,16 @@ mod tests {
         }
         reader.join().unwrap();
     }
+
+    #[test]
+    fn the_ends_print_their_progress_and_not_their_items() {
+        let (mut producer, mut consumer) = queue();
+        producer.push("item");
+        producer.push("item");
+        consumer.pop(false);
+        assert_eq!(format!("{producer:?}"), "Producer { written: 2, .. }");
+        assert_eq!(format!("{consumer:?}"), "Consumer { read: 1, .. }");
+    }
 }
 
 #[cfg(all(test, loom))]

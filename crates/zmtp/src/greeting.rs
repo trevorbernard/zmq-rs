@@ -548,6 +548,7 @@ mod tests {
             panic!("expected unversioned peer, got {peer:?}");
         };
         assert_eq!(&*replay, b"\x04");
+        assert_eq!(format!("{replay:?}"), r#"Replay(b"\x04")"#);
         assert_eq!(output(&mut g), b"abc", "rest of our identity frame");
     }
 
