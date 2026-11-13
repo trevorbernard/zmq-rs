@@ -159,7 +159,7 @@ impl MdWorker {
 /// when dropped, as CZMQ's sockets do.
 fn connect(context: &Context, broker: &str) -> Result<Socket<Dealer>, zmq::Error> {
     let mut worker = context.socket_with::<Dealer>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     worker.connect(broker)?;

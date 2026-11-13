@@ -69,7 +69,7 @@ fn options(
         }
     };
     let zero_linger = SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     };
     (

@@ -5,7 +5,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Hwm, Linger, Pull, Push, Rep, Req, SocketOptions};
+use zmq::{
+    Context, Hwm, Linger, Message, Pull, Push, Rep, Req, SocketOptions, Sub, XPub, XPubEvent, XSub,
+};
 use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -83,11 +85,55 @@ fn an_unconnected_socket_with_nothing_queued_does_not_hold_up_the_drop() {
 }
 
 #[test]
+fn subscriptions_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
+    within(FIVE, || {
+        let context = Context::new().unwrap();
+        let mut sub = context.socket::<Sub>();
+        sub.subscribe("a");
+        sub.connect(&free_endpoint()).unwrap();
+        let mut xsub = context.socket::<XSub>();
+        xsub.subscribe("a");
+        xsub.send("upstream").unwrap();
+        xsub.connect(&free_endpoint()).unwrap();
+    });
+}
+
+#[cfg(feature = "draft")]
+#[test]
+fn joins_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
+    within(FIVE, || {
+        let context = Context::new().unwrap();
+        let mut dish = context.socket::<zmq::Dish>();
+        dish.join(&zmq::Group::new("group").unwrap());
+        dish.connect(&free_endpoint()).unwrap();
+    });
+}
+
+#[test]
+fn a_subscriber_asked_to_linger_does() {
+    let context = Context::new().unwrap();
+    let mut xsub = context.socket_with::<XSub>(SocketOptions {
+        linger: Some(Linger::Forever),
+        ..SocketOptions::default()
+    });
+    let endpoint = free_endpoint();
+    xsub.connect(&endpoint).unwrap();
+    xsub.send("upstream").unwrap();
+    drop(xsub);
+    let mut xpub = context.socket::<XPub>();
+    xpub.bind(&endpoint).unwrap();
+    assert_eq!(
+        within(FIVE, move || xpub.recv().unwrap()),
+        XPubEvent::Message(Message::from("upstream"))
+    );
+}
+
+#[test]
 fn a_bounded_linger_gives_up_on_an_unreachable_peer() {
     within(FIVE, || {
         let context = Context::new().unwrap();
         let mut push = context.socket_with::<Push>(SocketOptions {
-            linger: Linger::For(Duration::from_millis(100)),
+            linger: Some(Linger::For(Duration::from_millis(100))),
             ..SocketOptions::default()
         });
         push.connect(&free_endpoint()).unwrap();

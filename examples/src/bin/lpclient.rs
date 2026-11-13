@@ -15,7 +15,7 @@ const SERVER_ENDPOINT: &str = "tcp://localhost:5555";
 
 fn connect(context: &Context) -> Result<Socket<Req>, zmq::Error> {
     let mut client = context.socket_with::<Req>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     client.connect(SERVER_ENDPOINT)?;

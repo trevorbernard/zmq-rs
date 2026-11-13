@@ -8,9 +8,9 @@ use std::task::{Context as TaskContext, Poll};
 use std::time::Duration;
 
 use zmq_core::{
-    ConnectionConfig, EndpointId, FairQueue, LoadBalancer, Outstanding, Pair as PairRouting,
-    PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester, RouteOutcome, RouterTable,
-    SendError, Subscriber, Verbosity, XPubEvent,
+    ConnectionConfig, EndpointId, FairQueue, Linger, LoadBalancer, Outstanding,
+    Pair as PairRouting, PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester,
+    RouteOutcome, RouterTable, SendError, Subscriber, Verbosity, XPubEvent,
 };
 use zmtp::{Frame, Message, Subscription};
 
@@ -726,6 +726,16 @@ fn is_peer(_: zmtp::SocketType) -> bool {
     false
 }
 
+/// libzmq's `xsub_t` and `dish_t` start with a linger of zero, so that a
+/// socket being closed does not wait for its subscriptions to be sent.
+fn default_linger<T: SocketType>() -> Linger {
+    use zmtp::SocketType::{Dish, Sub, XSub};
+    match T::KIND {
+        Sub | XSub | Dish => Linger::For(Duration::ZERO),
+        _ => Linger::Forever,
+    }
+}
+
 impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
@@ -734,7 +744,7 @@ impl<T: SocketType> Socket<T> {
             recv_hwm: options.recv_hwm,
             // PEER's connect_peer names the peer at once.
             immediate: options.immediate && !is_peer(T::KIND),
-            linger: options.linger,
+            linger: options.linger.unwrap_or_else(default_linger::<T>),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
             message_properties: options.message_properties,

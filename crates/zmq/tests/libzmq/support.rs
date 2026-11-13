@@ -48,7 +48,7 @@ pub(crate) fn settle() {
 /// handshake does not hold the context's drop.
 pub(crate) fn zero_linger() -> SocketOptions {
     SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     }
 }

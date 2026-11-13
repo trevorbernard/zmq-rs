@@ -10,7 +10,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let mut mailbox = context.socket_with::<Dealer>(SocketOptions {
         send_hwm: Hwm::Messages(NonZeroUsize::new(4).expect("nonzero")),
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     mailbox.connect("tcp://localhost:9876")?;

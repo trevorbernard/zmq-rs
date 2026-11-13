@@ -150,7 +150,7 @@ fn serve(mut client: TcpStream, credentials: Option<(&str, &str)>) {
 
 fn zero_linger() -> SocketOptions {
     SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     }
 }

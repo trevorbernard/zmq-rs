@@ -97,7 +97,7 @@ impl MdClient {
 /// when dropped, as CZMQ's sockets do.
 fn connect(context: &Context, broker: &str, verbose: bool) -> Result<Socket<Dealer>, zmq::Error> {
     let mut client = context.socket_with::<Dealer>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     client.connect(broker)?;

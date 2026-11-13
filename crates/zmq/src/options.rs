@@ -24,9 +24,11 @@ pub struct SocketOptions {
     /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000).
     pub recv_hwm: Hwm,
     /// How long queued messages are still delivered after the socket is
-    /// dropped (`ZMQ_LINGER`, default forever). Dropping the context waits
-    /// that long for them.
-    pub linger: Linger,
+    /// dropped (`ZMQ_LINGER`). Dropping the context waits that long for
+    /// them. `None` is the socket type's default, as libzmq's: forever,
+    /// but not at all for SUB, XSUB and DISH, whose subscriptions and
+    /// joins a peer that never comes would otherwise hold up the context.
+    pub linger: Option<Linger>,
     /// How connections retry (`ZMQ_RECONNECT_IVL`, default 100 ms).
     pub reconnect: Reconnect,
     /// Whether a TCP or IPC connection becomes a peer only once its
@@ -78,7 +80,7 @@ impl Default for SocketOptions {
             identity: Identity::default(),
             send_hwm: hwm,
             recv_hwm: hwm,
-            linger: Linger::default(),
+            linger: None,
             reconnect: Reconnect::default(),
             immediate: false,
             max_message_size: None,
@@ -218,7 +220,7 @@ mod tests {
         let thousand = Hwm::Messages(NonZeroUsize::new(1000).unwrap());
         assert_eq!(options.send_hwm, thousand);
         assert_eq!(options.recv_hwm, thousand);
-        assert_eq!(options.linger, Linger::Forever);
+        assert_eq!(options.linger, None);
         assert_eq!(options.identity, Identity::default());
     }
 

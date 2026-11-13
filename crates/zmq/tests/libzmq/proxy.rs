@@ -27,7 +27,7 @@ fn rand(n: u64) -> u64 {
 
 pub(crate) fn no_linger() -> SocketOptions {
     SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     }
 }

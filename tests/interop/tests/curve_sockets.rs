@@ -156,7 +156,7 @@ fn libzmq_refuses_our_client_with_the_wrong_server_key() {
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..secured(Security::curve_client(
             Keypair::generate(),
             Keypair::generate().public(),

@@ -14,7 +14,7 @@ const SERVERS: [&str; 2] = ["tcp://localhost:5001", "tcp://localhost:5002"];
 fn connect(context: &Context, server: &str) -> Result<Socket<Req>, zmq::Error> {
     println!("I: connecting to server at {server}...");
     let mut client = context.socket_with::<Req>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     client.connect(server)?;

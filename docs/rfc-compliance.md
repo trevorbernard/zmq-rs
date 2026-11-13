@@ -389,6 +389,8 @@ Rules shared by every pattern:
 
 **`IMMEDIATE`** (`SocketOptions::immediate`): a TCP or IPC connection is a peer only while its handshake has completed, so messages are not queued for peers that are not there, and what was queued on a connection that breaks is discarded. As in libzmq, `inproc` ignores it. A connection accepted later reaches the socket only when the socket is next used, so an idle SUB subscribes on it then; `inproc` connections already waiting for a name join in the bind, as libzmq attaches them there, and keep what they queued even if their socket was dropped first. Their pipes then hold both sides' HWMs, as for a connect to a bound name, where before the bind they held only the connecting side's. PEER's `connect_peer`, which libzmq refuses with `IMMEDIATE`, ignores it.
 
+**`LINGER`**: `SocketOptions::linger` is `None` by default, the socket type's own default as libzmq has it: forever, but zero for SUB, XSUB and DISH, so that subscriptions and joins queued to a peer that never comes do not hold up the context. `Some` overrides it for any type.
+
 **`unbind` and `disconnect`** (`zmq_unbind`, `zmq_disconnect`): each undoes a bind or connect, closing its listener or ending its retries, and drops the peers that came through it. As in libzmq, what those peers sent is discarded and what was queued to them is delivered within the linger. Differences:
 - `unbind` returns once the I/O thread has closed the listener, so the address can be bound again at once; libzmq closes it in the background.
 - `unbind` of an `inproc` name also closes the connections accepted on it, as for TCP and IPC; libzmq frees only the name.

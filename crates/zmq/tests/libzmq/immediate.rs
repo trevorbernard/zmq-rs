@@ -13,7 +13,7 @@ use crate::support::{FIVE, SETTLE, settle};
 
 fn options(immediate: bool) -> SocketOptions {
     SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         immediate,
         ..SocketOptions::default()
     }

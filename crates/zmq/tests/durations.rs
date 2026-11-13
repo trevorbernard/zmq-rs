@@ -10,7 +10,7 @@ const FIVE: Duration = Duration::from_secs(5);
 
 fn forever() -> SocketOptions {
     SocketOptions {
-        linger: Linger::For(Duration::MAX),
+        linger: Some(Linger::For(Duration::MAX)),
         handshake_timeout: Some(Duration::MAX),
         heartbeat: Some(Heartbeat {
             interval: Duration::MAX,

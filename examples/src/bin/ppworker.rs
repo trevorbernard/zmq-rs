@@ -21,7 +21,7 @@ const PPP_HEARTBEAT: &[u8] = b"\x02"; // Signals worker heartbeat
 /// it is ready.
 fn worker_socket(context: &Context) -> Result<Socket<Dealer>, zmq::Error> {
     let mut worker = context.socket_with::<Dealer>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     worker.connect("tcp://localhost:5556")?;

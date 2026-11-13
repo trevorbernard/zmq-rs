@@ -20,7 +20,7 @@ fn tight() -> SocketOptions {
     SocketOptions {
         send_hwm: one,
         recv_hwm: one,
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     }
 }

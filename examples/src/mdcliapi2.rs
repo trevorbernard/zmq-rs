@@ -22,7 +22,7 @@ pub struct MdClient {
 impl MdClient {
     pub fn new(context: &Context, broker: &str, verbose: bool) -> Result<Self, zmq::Error> {
         let mut client = context.socket_with::<Dealer>(SocketOptions {
-            linger: Linger::For(Duration::ZERO),
+            linger: Some(Linger::For(Duration::ZERO)),
             ..SocketOptions::default()
         });
         client.connect(broker)?;

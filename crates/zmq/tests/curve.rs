@@ -144,7 +144,7 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..secured(Security::curve_client(
             Keypair::generate(),
             Keypair::generate().public(),
@@ -163,7 +163,7 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions {
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     push.connect(&bound.to_string()).unwrap();

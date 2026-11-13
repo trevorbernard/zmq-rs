@@ -41,7 +41,7 @@ fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receive
             let _ = seen.send(request.clone());
             zap_handler(request)
         }),
-        linger: Linger::For(Duration::ZERO),
+        linger: Some(Linger::For(Duration::ZERO)),
         ..SocketOptions::default()
     });
     let endpoint = server.bind(&free_endpoint()).unwrap().to_string();

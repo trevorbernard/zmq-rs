@@ -33,7 +33,7 @@ fn router_mandatory_hwm() {
     let context = Context::new().unwrap();
     let mut router = context.socket_with::<Router>(SocketOptions {
         send_hwm: ONE,
-        linger: Linger::For(Duration::from_millis(1)),
+        linger: Some(Linger::For(Duration::from_millis(1))),
         ..SocketOptions::default()
     });
     let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
