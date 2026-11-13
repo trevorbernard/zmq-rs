@@ -79,12 +79,14 @@ impl MessageMetadata {
 
 impl fmt::Debug for MessageMetadata {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_map()
-            .entries(
-                self.iter()
-                    .map(|(name, value)| (name.escape_ascii(), value.escape_ascii())),
-            )
-            .finish()
+        let mut map = f.debug_map();
+        for (name, value) in self.iter() {
+            map.entry(
+                &format_args!("\"{}\"", name.escape_ascii()),
+                &format_args!("\"{}\"", value.escape_ascii()),
+            );
+        }
+        map.finish()
     }
 }
 
@@ -543,5 +545,82 @@ mod tests {
         let metadata = MessageMetadata::new(properties);
         assert_eq!(metadata.iter().len(), many);
         assert_eq!(metadata.get("p0"), Some(&b"first"[..]));
+    }
+    fn metadata() -> MessageMetadata {
+        MessageMetadata::new([
+            (Frame::from("Socket-Type"), Frame::from("DEALER")),
+            (Frame::from("Routing-Id"), Frame::from("me")),
+            (Frame::from("Socket-Type"), Frame::from("ROUTER")),
+        ])
+    }
+
+    #[test]
+    fn metadata_keeps_the_first_of_each_name_and_matches_names_exactly() {
+        let metadata = metadata();
+        assert_eq!(metadata.get("Socket-Type"), Some(&b"DEALER"[..]));
+        assert_eq!(metadata.get("socket-type"), None);
+        assert_eq!(metadata.get("Peer-Address"), None);
+        assert_eq!(metadata.iter().len(), 2);
+        assert!(!metadata.is_empty());
+        assert!(MessageMetadata::new([]).is_empty());
+        assert_eq!(
+            format!("{metadata:?}"),
+            r#"{"Socket-Type": "DEALER", "Routing-Id": "me"}"#
+        );
+    }
+
+    #[test]
+    fn identity_is_the_routing_id_unless_announced_by_that_name() {
+        assert_eq!(metadata().get("Identity"), Some(&b"me"[..]));
+        let both = MessageMetadata::new([
+            (Frame::from("Routing-Id"), Frame::from("new")),
+            (Frame::from("Identity"), Frame::from("old")),
+        ]);
+        assert_eq!(both.get("Identity"), Some(&b"old"[..]));
+        assert_eq!(MessageMetadata::new([]).get("Identity"), None);
+        let other = MessageMetadata::new([(Frame::from("Other"), Frame::from("x"))]);
+        assert_eq!(other.get("Identity"), None);
+    }
+
+    #[test]
+    fn copies_of_metadata_are_the_same_and_equal_metadata_is_not() {
+        let metadata = metadata();
+        assert!(metadata.ptr_eq(&metadata.clone()));
+        assert!(!metadata.ptr_eq(&self::metadata()));
+    }
+
+    #[test]
+    fn a_message_carries_metadata_only_once_given_it() {
+        let mut msg = Message::new("hello");
+        assert!(msg.metadata().is_none());
+        assert_eq!(msg.property("Socket-Type"), None);
+        let metadata = metadata();
+        msg.set_metadata(Some(metadata.clone()));
+        assert!(msg.metadata().is_some_and(|held| held.ptr_eq(&metadata)));
+        assert_eq!(msg.property("Socket-Type"), Some(&b"DEALER"[..]));
+        assert_eq!(msg.property("Peer-Address"), None);
+        assert_eq!(msg, Message::new("hello"), "equal by its frames alone");
+        msg.set_metadata(None);
+        assert!(msg.metadata().is_none());
+    }
+
+    #[test]
+    fn hashing_follows_the_frames() {
+        use std::hash::{BuildHasher, RandomState};
+
+        let hasher = RandomState::new();
+        let message = |parts| Message::try_from(frames(parts)).unwrap();
+        assert_eq!(
+            hasher.hash_one(message(&["a", "b"])),
+            hasher.hash_one(message(&["a", "b"]))
+        );
+        assert_ne!(
+            hasher.hash_one(message(&["a", "b"])),
+            hasher.hash_one(message(&["a", "c"]))
+        );
+        assert_ne!(
+            hasher.hash_one(message(&["a"])),
+            hasher.hash_one(message(&["b"]))
+        );
     }
 }
