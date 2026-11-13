@@ -18,6 +18,9 @@ See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is 
 [docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
 Requires Rust 1.99.
 
+Contributions follow C4, as ZeroMQ's do: see [CONTRIBUTING.md](CONTRIBUTING.md).
+Licensed under the [MPL 2.0](LICENSE).
+
 ## Quick start
 
 Every example below is compiled and run as a doctest of the `zmq` crate.

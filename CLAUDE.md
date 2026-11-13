@@ -12,3 +12,4 @@
 - Commands: `just --list`; `just ci` matches CI
 - Config: `.config/nextest.toml`, `.cargo/mutants.toml`, `.github/workflows/`
 - The dev shell (`flake.nix`, via direnv) has nextest, cargo-mutants, cargo-llvm-cov, libzmq, gdb, python3
+- Process: C4 (`CONTRIBUTING.md`). A commit states the problem in its first line and the solution in its body, without `Problem:`/`Solution:` prefixes; an issue's title states a provable problem, never a feature request
