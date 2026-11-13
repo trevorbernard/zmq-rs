@@ -58,6 +58,10 @@ pub(crate) struct Engine {
     out: Output,
     /// The last look at the socket's pipe found it empty or closed.
     outbound_empty: bool,
+    /// The context of the peer's last PING, its PONG waiting for output to
+    /// drain: a peer that pings without reading is owed one answer, not one
+    /// for each, as libzmq keeps a single PONG to send.
+    pong_owed: Option<PingContext>,
     deadlines: Deadlines,
     /// Boxes and unboxes every frame once a CURVE handshake is done.
     curve: Option<CurveCodec>,
@@ -298,6 +302,7 @@ impl Engine {
             state,
             out,
             outbound_empty: false,
+            pong_owed: None,
             deadlines: Deadlines::default(),
             curve: None,
         }
@@ -413,6 +418,7 @@ impl Engine {
         }
         self.maybe_ping(now)?;
         let mut wrote = self.flush()?;
+        self.maybe_pong()?;
         let pulled = self.pull_outbound(pipes, cx)?;
         if pulled {
             wrote |= self.flush()?;
@@ -420,6 +426,27 @@ impl Engine {
         let received = self.receive(pipes, cx);
         pipes.inbound.flush();
         Ok(received? || wrote || pulled)
+    }
+
+    /// Answers the peer's last PING once output is no longer backed up.
+    fn maybe_pong(&mut self) -> Result<(), EngineError> {
+        let State::Active { encoder, .. } = &self.state else {
+            return Ok(());
+        };
+        let encoder = *encoder;
+        if self.out.len() < MAX_PENDING_OUTPUT
+            && let Some(context) = self.pong_owed.take()
+        {
+            self.pong(encoder, context)?;
+        }
+        Ok(())
+    }
+
+    fn pong(&mut self, encoder: Encoder, context: PingContext) -> Result<(), EngineError> {
+        let mut pong = Vec::new();
+        Command::Pong(context).encode(&mut pong);
+        self.write_command(encoder, &pong)?;
+        Ok(())
     }
 
     /// Whether the non-blocking connect has completed.
@@ -1036,9 +1063,11 @@ impl Engine {
                     .ttl
                     .get_or_insert(Instant::now() + ping.ttl.to_duration());
             }
-            let mut pong = Vec::new();
-            Command::Pong(ping.context).encode(&mut pong);
-            self.write_command(encoder, &pong)?;
+            if self.out.len() < MAX_PENDING_OUTPUT {
+                self.pong(encoder, ping.context)?;
+            } else {
+                self.pong_owed = Some(ping.context);
+            }
         }
         Ok(None)
     }
