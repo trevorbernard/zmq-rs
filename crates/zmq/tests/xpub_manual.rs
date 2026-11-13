@@ -171,3 +171,25 @@ fn accepting_a_message_says_whether_its_peer_is_still_there() {
     );
     assert!(!request.accept(), "the peer left after sending it");
 }
+
+#[test]
+fn a_welcome_reaches_a_subscriber_before_anything_is_accepted() {
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<ManualXPub>();
+    xpub.set_welcome(Some(Message::from("welcome")));
+    xpub.bind("inproc://welcome").unwrap();
+    let mut sub = subscriber(&context, "welcome", "w");
+    // The peer is welcomed once the socket takes it up, here to receive.
+    assert_eq!(xpub.recv().unwrap().event(), &subscribed("w"));
+    assert_eq!(sub.try_recv().unwrap(), Some(Message::from("welcome")));
+    assert_eq!(
+        xpub.send("w: not accepted").unwrap(),
+        0,
+        "the request to subscribe was left unaccepted"
+    );
+
+    xpub.set_welcome(None);
+    let mut late = subscriber(&context, "welcome", "w");
+    assert_eq!(xpub.recv().unwrap().event(), &subscribed("w"));
+    assert_eq!(late.try_recv().unwrap(), None, "no welcome any more");
+}

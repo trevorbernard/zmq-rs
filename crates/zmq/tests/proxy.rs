@@ -6,8 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
-    Context, Dealer, Message, Pair, Proxy, ProxyStatistics, Pub, Pull, Push, Rep, Req, Router, Sub,
-    XPub, XSub,
+    Capture, Context, Dealer, Message, Pair, Proxy, ProxyControl, ProxyStatistics, Pub, Pull, Push,
+    Rep, Req, Router, Sub, XPub, XSub,
 };
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -240,6 +240,230 @@ fn capture_sees_both_directions() {
         assert_eq!(
             copies,
             [Message::from("to the right"), Message::from("to the left")]
+        );
+        control.terminate();
+        running.join().unwrap();
+    });
+}
+
+/// Runs a streamer named `name` with `capture`, and returns what `tap`
+/// reads of the message sent through it.
+fn captured_by(
+    context: &Context,
+    name: &str,
+    capture: &mut impl Capture,
+    tap: impl FnOnce() -> Message + Send + 'static,
+) -> Message {
+    let mut frontend = context.socket::<Pull>();
+    frontend.bind(&format!("inproc://{name}-in")).unwrap();
+    let mut backend = context.socket::<Push>();
+    backend.bind(&format!("inproc://{name}-out")).unwrap();
+    let mut source = context.socket::<Push>();
+    source.connect(&format!("inproc://{name}-in")).unwrap();
+    let mut sink = context.socket::<Pull>();
+    sink.connect(&format!("inproc://{name}-out")).unwrap();
+
+    let mut proxy = Proxy::new(&mut frontend, &mut backend).capture(capture);
+    let control = proxy.control();
+    thread::scope(|scope| {
+        let running = scope.spawn(|| proxy.run());
+        let _stop = StopOnDrop(control.clone());
+        source.send("streamed").unwrap();
+        assert_eq!(
+            within(FIVE, move || sink.recv().unwrap()),
+            Message::from("streamed")
+        );
+        let copy = within(FIVE, tap);
+        control.terminate();
+        running.join().unwrap();
+        copy
+    })
+}
+
+#[test]
+fn a_push_captures() {
+    let context = Context::new().unwrap();
+    let mut capture = context.socket::<Push>();
+    capture.bind("inproc://push-tap").unwrap();
+    let mut tap = context.socket::<Pull>();
+    tap.connect("inproc://push-tap").unwrap();
+    assert_eq!(
+        captured_by(&context, "push-tapped", &mut capture, move || tap
+            .recv()
+            .unwrap()),
+        Message::from("streamed")
+    );
+}
+
+#[test]
+fn a_dealer_captures() {
+    let context = Context::new().unwrap();
+    let mut capture = context.socket::<Dealer>();
+    capture.bind("inproc://dealer-tap").unwrap();
+    let mut tap = context.socket::<Dealer>();
+    tap.connect("inproc://dealer-tap").unwrap();
+    assert_eq!(
+        captured_by(&context, "dealer-tapped", &mut capture, move || tap
+            .recv()
+            .unwrap()),
+        Message::from("streamed")
+    );
+}
+
+#[test]
+fn a_pair_captures() {
+    let context = Context::new().unwrap();
+    let mut capture = context.socket::<Pair>();
+    capture.bind("inproc://pair-tap").unwrap();
+    let mut tap = context.socket::<Pair>();
+    tap.connect("inproc://pair-tap").unwrap();
+    assert_eq!(
+        captured_by(&context, "pair-tapped", &mut capture, move || tap
+            .recv()
+            .unwrap()),
+        Message::from("streamed")
+    );
+}
+
+#[test]
+fn a_capture_with_no_room_does_not_hold_up_the_proxy() {
+    let context = Context::new().unwrap();
+    // No peer, so nowhere to send a copy.
+    let mut capture = context.socket::<Push>();
+    let mut never = context.socket::<Pull>();
+    assert_eq!(
+        captured_by(&context, "untapped", &mut capture, move || {
+            assert_eq!(never.try_recv().unwrap(), None);
+            Message::from("nothing")
+        }),
+        Message::from("nothing")
+    );
+}
+
+/// A SUB and a PUB as a proxy's ends, with a publisher upstream and a
+/// subscriber downstream, forwarding five messages.
+fn forwards_from_a_sub_to_a_pub(name: &str, no_drop: bool) {
+    let context = Context::new().unwrap();
+    let mut publisher = context.socket::<Pub>();
+    publisher
+        .bind(&format!("inproc://{name}-upstream"))
+        .unwrap();
+    let mut frontend = context.socket::<Sub>();
+    frontend.subscribe("");
+    frontend
+        .connect(&format!("inproc://{name}-upstream"))
+        .unwrap();
+    let mut backend = context.socket::<Pub>();
+    backend
+        .bind(&format!("inproc://{name}-downstream"))
+        .unwrap();
+    let mut subscriber = context.socket::<Sub>();
+    subscriber.subscribe("");
+    subscriber
+        .connect(&format!("inproc://{name}-downstream"))
+        .unwrap();
+
+    let mut proxy = Proxy::new(&mut frontend, &mut backend);
+    if no_drop {
+        proxy = proxy.no_drop();
+    }
+    let control = proxy.control();
+    thread::scope(|scope| {
+        let running = scope.spawn(|| proxy.run());
+        let _stop = StopOnDrop(control.clone());
+        for i in 0..5 {
+            assert_eq!(publisher.send(format!("{i}")).unwrap(), 1);
+        }
+        let received = within(FIVE, move || {
+            (0..5)
+                .map(|_| subscriber.recv().unwrap())
+                .collect::<Vec<_>>()
+        });
+        let expected: Vec<Message> = (0..5).map(|i| Message::from(format!("{i}"))).collect();
+        assert_eq!(received, expected);
+        control.terminate();
+        let statistics = running.join().unwrap();
+        assert_eq!(statistics.frontend.received.messages, 5);
+        assert_eq!(statistics.backend.sent.messages, 5);
+        assert_eq!(
+            statistics.backend.received.messages, 0,
+            "a PUB hears nothing"
+        );
+    });
+}
+
+#[test]
+fn a_sub_pub_proxy_is_a_forwarder() {
+    forwards_from_a_sub_to_a_pub("forwarder", false);
+}
+
+#[test]
+fn a_sub_pub_proxy_forwards_without_dropping() {
+    forwards_from_a_sub_to_a_pub("no-drop", true);
+}
+
+/// Waits until the proxy has received `count` messages on its backend.
+fn backend_received(control: &ProxyControl, count: u64) {
+    let started = Instant::now();
+    while control.statistics().backend.received.messages < count {
+        assert!(started.elapsed() < FIVE, "never received");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn what_comes_back_to_a_pull_is_dropped() {
+    let context = Context::new().unwrap();
+    let mut frontend = context.socket::<Pull>();
+    frontend.bind("inproc://one-way-in").unwrap();
+    let mut backend = context.socket::<Dealer>();
+    backend.bind("inproc://one-way-out").unwrap();
+    let mut source = context.socket::<Push>();
+    source.connect("inproc://one-way-in").unwrap();
+    let mut worker = context.socket::<Dealer>();
+    worker.connect("inproc://one-way-out").unwrap();
+
+    let mut proxy = Proxy::new(&mut frontend, &mut backend);
+    let control = proxy.control();
+    thread::scope(|scope| {
+        let running = scope.spawn(|| proxy.run());
+        let _stop = StopOnDrop(control.clone());
+        worker.send("the wrong way").unwrap();
+        backend_received(&control, 1);
+        source.send("the right way").unwrap();
+        assert_eq!(
+            within(FIVE, move || worker.recv().unwrap()),
+            Message::from("the right way")
+        );
+        control.terminate();
+        running.join().unwrap();
+    });
+}
+
+#[test]
+fn what_comes_back_to_a_sub_is_dropped() {
+    let context = Context::new().unwrap();
+    let mut publisher = context.socket::<Pub>();
+    publisher.bind("inproc://sub-one-way-in").unwrap();
+    let mut frontend = context.socket::<Sub>();
+    frontend.subscribe("");
+    frontend.connect("inproc://sub-one-way-in").unwrap();
+    let mut backend = context.socket::<Pair>();
+    backend.bind("inproc://sub-one-way-out").unwrap();
+    let mut listener = context.socket::<Pair>();
+    listener.connect("inproc://sub-one-way-out").unwrap();
+
+    let mut proxy = Proxy::new(&mut frontend, &mut backend);
+    let control = proxy.control();
+    thread::scope(|scope| {
+        let running = scope.spawn(|| proxy.run());
+        let _stop = StopOnDrop(control.clone());
+        listener.send("the wrong way").unwrap();
+        backend_received(&control, 1);
+        assert_eq!(publisher.send("the right way").unwrap(), 1);
+        assert_eq!(
+            within(FIVE, move || listener.recv().unwrap()),
+            Message::from("the right way")
         );
         control.terminate();
         running.join().unwrap();

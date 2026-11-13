@@ -183,6 +183,64 @@ fn forwarding_a_cancel_unsubscribes() {
 }
 
 #[test]
+fn forwarding_a_message_sends_it_upstream() {
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<XPub>();
+    xpub.bind("inproc://forward-message").unwrap();
+    let mut xsub = context.socket::<XSub>();
+    xsub.connect("inproc://forward-message").unwrap();
+    xsub.forward(XPubEvent::Message(Message::from("from below")))
+        .unwrap();
+    assert_eq!(
+        xpub.try_recv().unwrap(),
+        Some(XPubEvent::Message(Message::from("from below")))
+    );
+}
+
+#[test]
+fn xsub_waits_for_a_message() {
+    let context = Context::new().unwrap();
+    let mut publisher = context.socket::<Pub>();
+    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let mut xsub = context.socket::<XSub>();
+    xsub.subscribe("a");
+    xsub.connect(&bound.to_string()).unwrap();
+    let receiving = thread::spawn(move || xsub.recv().unwrap());
+    let started = Instant::now();
+    while publisher.send("a1").unwrap() == 0 {
+        assert!(started.elapsed() < FIVE, "the subscription never arrived");
+        thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        within(FIVE, move || receiving.join().unwrap()),
+        Message::from("a1")
+    );
+}
+
+#[cfg(feature = "draft")]
+#[test]
+fn xsub_counts_its_distinct_topics() {
+    let context = Context::new().unwrap();
+    let mut xsub = context.socket::<XSub>();
+    assert_eq!(xsub.topics_count(), 0);
+    xsub.subscribe("a");
+    xsub.subscribe("a");
+    xsub.subscribe("b");
+    assert_eq!(
+        xsub.topics_count(),
+        2,
+        "a topic subscribed twice counts once"
+    );
+    assert!(xsub.unsubscribe("a"));
+    assert_eq!(xsub.topics_count(), 2, "still subscribed once");
+    assert!(xsub.unsubscribe("a"));
+    assert_eq!(xsub.topics_count(), 1);
+    assert!(!xsub.unsubscribe("a"));
+    assert!(xsub.unsubscribe("b"));
+    assert_eq!(xsub.topics_count(), 0);
+}
+
+#[test]
 fn xsub_subscriptions_are_never_dropped_however_many() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();

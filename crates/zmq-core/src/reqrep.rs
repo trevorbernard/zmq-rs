@@ -519,4 +519,35 @@ mod tests {
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
         assert_eq!(outcome, RouteOutcome::UnknownPeer);
     }
+
+    #[test]
+    fn replies_to_a_peer_no_longer_listed_are_dropped() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        sa.to_socket.try_send(frames(&["", "q"])).unwrap();
+        let mut replier = Replier::default();
+        let Poll::Ready(request) = poll(|cx| replier.poll_recv(&mut peers, cx)) else {
+            panic!("a request is waiting");
+        };
+        assert!(peers.remove_key(request.peer));
+        let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
+        assert_eq!(outcome, RouteOutcome::UnknownPeer);
+        assert_eq!(drain(&mut sa), []);
+    }
+
+    #[test]
+    fn replies_to_a_full_peer_are_dropped() {
+        let (a, mut sa) = connection(1);
+        let mut peers = list(vec![a]);
+        sa.to_socket.try_send(frames(&["", "q"])).unwrap();
+        let mut replier = Replier::default();
+        let Poll::Ready(request) = poll(|cx| replier.poll_recv(&mut peers, cx)) else {
+            panic!("a request is waiting");
+        };
+        let peer = peers.get_mut(request.peer).unwrap();
+        peer.connection.tx.try_send(msg("in the way")).unwrap();
+        let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("a"));
+        assert_eq!(outcome, RouteOutcome::PeerFull);
+        assert_eq!(drain(&mut sa), [msg("in the way")]);
+    }
 }

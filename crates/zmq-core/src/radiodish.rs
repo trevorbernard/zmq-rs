@@ -147,3 +147,115 @@ impl Dish {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_support::*;
+
+    fn group(name: &'static str) -> Group {
+        Group::new(name).unwrap()
+    }
+
+    fn join(session: &mut FakeSession, name: &'static str) {
+        session
+            .to_socket
+            .try_send(Membership::Join(group(name)).to_message())
+            .unwrap();
+    }
+
+    fn leave(session: &mut FakeSession, name: &'static str) {
+        session
+            .to_socket
+            .try_send(Membership::Leave(group(name)).to_message())
+            .unwrap();
+    }
+
+    fn on_air(name: &'static str, body: &'static str) -> Message {
+        let mut message = msg(name);
+        message.push(Frame::from(body));
+        message
+    }
+
+    #[test]
+    fn a_message_goes_to_its_groups_members_only() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut radio = Radio::default();
+        join(&mut sa, "news");
+        join(&mut sb, "sport");
+        assert_eq!(
+            radio.send(&mut peers, &group("news"), Frame::from("rain")),
+            1
+        );
+        assert_eq!(
+            radio.send(&mut peers, &group("chess"), Frame::from("e4")),
+            0
+        );
+        assert_eq!(drain(&mut sa), [on_air("news", "rain")]);
+        assert_eq!(drain(&mut sb), []);
+    }
+
+    #[test]
+    fn a_group_is_forgotten_once_its_last_member_leaves() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut radio = Radio::default();
+        join(&mut sa, "news");
+        join(&mut sb, "news");
+        leave(&mut sa, "never joined");
+        assert_eq!(radio.send(&mut peers, &group("news"), Frame::from("1")), 2);
+
+        leave(&mut sa, "news");
+        assert_eq!(radio.send(&mut peers, &group("news"), Frame::from("2")), 1);
+        assert_eq!(radio.members.len(), 1);
+        leave(&mut sb, "news");
+        assert_eq!(radio.send(&mut peers, &group("news"), Frame::from("3")), 0);
+        assert!(radio.members.is_empty());
+        assert_eq!(drain(&mut sa), [on_air("news", "1")]);
+        assert_eq!(drain(&mut sb), [on_air("news", "1"), on_air("news", "2")]);
+    }
+
+    #[test]
+    fn what_is_not_a_join_or_a_leave_is_discarded() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut radio = Radio::default();
+        sa.to_socket.try_send(msg("not a membership")).unwrap();
+        join(&mut sa, "news");
+        assert_eq!(
+            radio.send(&mut peers, &group("news"), Frame::from("rain")),
+            1
+        );
+        assert_eq!(radio.members.len(), 1);
+    }
+
+    #[test]
+    fn a_departed_peer_is_forgotten_as_a_member() {
+        let (a, mut sa) = connection(10);
+        let (b, mut sb) = connection(10);
+        let mut peers = list(vec![a, b]);
+        let mut radio = Radio::default();
+        join(&mut sa, "news");
+        join(&mut sb, "news");
+        join(&mut sb, "sport");
+        radio.sync(&mut peers);
+        assert_eq!(radio.members.len(), 2);
+
+        drop(sb);
+        assert_eq!(
+            radio.send(&mut peers, &group("news"), Frame::from("rain")),
+            1
+        );
+        assert_eq!(peers.len(), 1, "the closed peer is removed");
+        assert_eq!(
+            radio.members.keys().collect::<Vec<_>>(),
+            [&group("news")],
+            "a group with no members left is forgotten"
+        );
+        assert_eq!(radio.members[&group("news")].len(), 1);
+        assert_eq!(drain(&mut sa), [on_air("news", "rain")]);
+    }
+}

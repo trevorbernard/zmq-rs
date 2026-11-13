@@ -4,7 +4,7 @@ use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Hwm, Message, Pull, Push, Rep, Req, Router, SocketOptions};
+use zmq::{Context, Dealer, Hwm, Message, Pair, Pull, Push, Rep, Req, Router, SocketOptions};
 
 const FIVE: Duration = Duration::from_secs(5);
 const BRIEFLY: Duration = Duration::from_millis(100);
@@ -114,6 +114,88 @@ fn a_push_is_writable_only_with_room() {
         Some([true])
     );
     assert!(push.try_send("fits").is_ok());
+}
+
+/// Queues of one message each way.
+fn tiny() -> SocketOptions {
+    let one = Hwm::Messages(NonZeroUsize::MIN);
+    SocketOptions {
+        send_hwm: one,
+        recv_hwm: one,
+        ..SocketOptions::default()
+    }
+}
+
+#[test]
+fn a_pair_is_writable_only_with_a_peer_that_has_room() {
+    let context = Context::new().unwrap();
+    let mut left = context.socket_with::<Pair>(tiny());
+    left.bind("inproc://pair-room").unwrap();
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
+        None,
+        "no peer"
+    );
+    let mut right = context.socket_with::<Pair>(tiny());
+    right.connect("inproc://pair-room").unwrap();
+    assert_eq!(zmq::poll([left.writable()]).unwrap(), [true]);
+    while left.try_send("fill").is_ok() {}
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
+        None,
+        "full"
+    );
+    right.recv().unwrap();
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], FIVE).unwrap(),
+        Some([true])
+    );
+    assert!(left.try_send("fits").is_ok());
+
+    while left.try_send("fill").is_ok() {}
+    drop(right);
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
+        None,
+        "the peer is gone"
+    );
+    let mut next = context.socket_with::<Pair>(tiny());
+    next.connect("inproc://pair-room").unwrap();
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], FIVE).unwrap(),
+        Some([true]),
+        "another took its place"
+    );
+}
+
+#[cfg(feature = "draft")]
+#[test]
+fn a_channel_is_writable_only_with_a_peer_that_has_room() {
+    use zmq::Channel;
+
+    let context = Context::new().unwrap();
+    let mut left = context.socket_with::<Channel>(tiny());
+    left.bind("inproc://channel-room").unwrap();
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
+        None,
+        "no peer"
+    );
+    let mut right = context.socket_with::<Channel>(tiny());
+    right.connect("inproc://channel-room").unwrap();
+    assert_eq!(zmq::poll([left.writable()]).unwrap(), [true]);
+    while left.try_send("fill").is_ok() {}
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
+        None,
+        "full"
+    );
+    right.recv().unwrap();
+    assert_eq!(
+        zmq::poll_timeout([left.writable()], FIVE).unwrap(),
+        Some([true])
+    );
+    assert!(left.try_send("fits").is_ok());
 }
 
 #[test]

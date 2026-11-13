@@ -1359,11 +1359,55 @@ mod tests {
     fn an_ipc_listener_accepts_by_polling_and_waiting() {
         let context = Context::new().unwrap();
         let mut listener = context.bind_ipc_anywhere(config(SocketType::Pull)).unwrap();
+        assert!(listener.try_accept().is_err(), "no one has connected");
         let _first = context.connect_ipc(listener.path(), config(SocketType::Push));
         let _second = context.connect_ipc(listener.path(), config(SocketType::Push));
+        let _third = context.connect_ipc(listener.path(), config(SocketType::Push));
         assert!(ready(|cx| listener.poll_accept(cx)).is_some());
-        let mut accept = std::pin::pin!(listener.accept());
-        assert!(ready(|cx| accept.as_mut().poll(cx)).is_some());
+        {
+            let mut accept = std::pin::pin!(listener.accept());
+            assert!(ready(|cx| accept.as_mut().poll(cx)).is_some());
+        }
+        assert!(listener.accept_blocking().is_some());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn an_abstract_ipc_listener_accepts_by_polling_and_waiting() {
+        let name = format!("zmq-core-accepts-{}", std::process::id());
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind_ipc_abstract(&name, config(SocketType::Pull))
+            .unwrap();
+        assert!(listener.try_accept().is_err(), "no one has connected");
+        let _first = context.connect_ipc_abstract(&name, config(SocketType::Push));
+        let _second = context.connect_ipc_abstract(&name, config(SocketType::Push));
+        let _third = context.connect_ipc_abstract(&name, config(SocketType::Push));
+        assert!(ready(|cx| listener.poll_accept(cx)).is_some());
+        {
+            let mut accept = std::pin::pin!(listener.accept());
+            assert!(ready(|cx| accept.as_mut().poll(cx)).is_some());
+        }
+        assert!(listener.accept_blocking().is_some());
+    }
+
+    #[test]
+    fn an_inproc_listener_accepts_by_polling_and_waiting() {
+        let context = Context::new().unwrap();
+        let mut listener = context
+            .bind_inproc("accepts", config(SocketType::Pull))
+            .unwrap();
+        assert!(listener.try_accept().is_err(), "no one has connected");
+        let _first = context.connect_inproc("accepts", config(SocketType::Push));
+        let _second = context.connect_inproc("accepts", config(SocketType::Push));
+        let _third = context.connect_inproc("accepts", config(SocketType::Push));
+        assert!(ready(|cx| listener.poll_accept(cx)).is_some());
+        {
+            let mut accept = std::pin::pin!(listener.accept());
+            assert!(ready(|cx| accept.as_mut().poll(cx)).is_some());
+        }
+        assert!(listener.accept_blocking().is_some());
+        assert!(listener.try_accept().is_err(), "each was accepted once");
     }
 
     #[test]

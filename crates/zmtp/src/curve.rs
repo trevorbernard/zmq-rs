@@ -1485,6 +1485,170 @@ mod tests {
         ));
     }
 
+    fn client_awaiting_welcome() -> CurveClient {
+        CurveClient::start(
+            SocketType::Dealer,
+            Identity::default(),
+            Metadata::new(),
+            &Keypair::generate(),
+            Keypair::generate().public(),
+            &V3_1,
+            &mut Vec::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn a_welcome_of_the_wrong_length_is_malformed() {
+        for len in [0, WELCOME - 1, WELCOME + 1] {
+            assert_eq!(
+                client_awaiting_welcome()
+                    .receive(zeroed(b"WELCOME", len), &mut Vec::new())
+                    .unwrap_err(),
+                malformed("WELCOME"),
+                "{len} octets"
+            );
+        }
+        assert_eq!(
+            client_awaiting_welcome()
+                .receive(zeroed(b"WELCOME", WELCOME), &mut Vec::new())
+                .unwrap_err(),
+            HandshakeError::Cryptographic
+        );
+    }
+
+    #[test]
+    fn a_command_out_of_turn_is_refused() {
+        for name in [&b"READY"[..], b"HELLO", b"PING"] {
+            assert_eq!(
+                client_awaiting_welcome()
+                    .receive(zeroed(name, 0), &mut Vec::new())
+                    .unwrap_err(),
+                unexpected(name),
+                "a client awaiting WELCOME"
+            );
+        }
+        let client = run_to_zap(SocketType::Dealer, SocketType::Router).client;
+        assert_eq!(
+            client
+                .receive(zeroed(b"WELCOME", WELCOME), &mut Vec::new())
+                .unwrap_err(),
+            unexpected(b"WELCOME"),
+            "a client awaiting READY"
+        );
+        let server = CurveServer::start(
+            server_config(SocketType::Router),
+            &Keypair::generate(),
+            &V3_1,
+        )
+        .unwrap();
+        assert_eq!(
+            server
+                .receive(zeroed(b"INITIATE", 0), &mut Vec::new())
+                .unwrap_err(),
+            unexpected(b"INITIATE"),
+            "a server awaiting HELLO"
+        );
+        assert_eq!(
+            server_awaiting_initiate()
+                .receive(zeroed(b"HELLO", HELLO), &mut Vec::new())
+                .unwrap_err(),
+            unexpected(b"HELLO"),
+            "a server awaiting INITIATE"
+        );
+    }
+
+    #[test]
+    fn an_error_without_its_reason_is_malformed() {
+        for body in [&b"\x05ERROR"[..], b"\x05ERROR\x04400"] {
+            let error = || Incoming::Command(Frame::from(body));
+            assert_eq!(
+                client_awaiting_welcome()
+                    .receive(error(), &mut Vec::new())
+                    .unwrap_err(),
+                malformed("ERROR"),
+                "{body:?}"
+            );
+            assert_eq!(
+                server_awaiting_initiate()
+                    .receive(error(), &mut Vec::new())
+                    .unwrap_err(),
+                malformed("ERROR"),
+                "{body:?}"
+            );
+        }
+    }
+
+    /// The client's INITIATE with its cookie replaced by one the server's
+    /// own cookie key seals, holding `transient` and `secret` in place of
+    /// C' and s' wherever they are given.
+    fn initiate_with_cookie(
+        transient: Option<Key>,
+        secret: Option<Key>,
+    ) -> Result<CurveServerStep, HandshakeError> {
+        let server_keys = Keypair::generate();
+        let mut hello = Vec::new();
+        let client = CurveClient::start(
+            SocketType::Dealer,
+            Identity::default(),
+            Metadata::new(),
+            &Keypair::generate(),
+            server_keys.public(),
+            &V3_1,
+            &mut hello,
+        )
+        .unwrap();
+        let server =
+            CurveServer::start(server_config(SocketType::Router), &server_keys, &V3_1).unwrap();
+        let mut welcome = Vec::new();
+        let CurveServerStep::Continue(server) = server.receive(only(&hello), &mut welcome).unwrap()
+        else {
+            panic!("expected WELCOME");
+        };
+        let mut initiate = Vec::new();
+        let CurveClientStep::Continue(_) = client.receive(only(&welcome), &mut initiate).unwrap()
+        else {
+            panic!("expected INITIATE");
+        };
+        let ServerState::WaitingForInitiate {
+            client_transient,
+            transient: ours,
+            cookie_key,
+        } = &server.state
+        else {
+            panic!("expected a server awaiting INITIATE");
+        };
+        let mut plaintext = Vec::new();
+        plaintext.extend_from_slice(&transient.unwrap_or(*client_transient));
+        plaintext.extend_from_slice(&secret.unwrap_or(*ours.secret));
+        let nonce = random::<LONG_NONCE>();
+        let sealed = seal(cookie_key, &long_nonce(b"COOKIE--", &nonce), &plaintext);
+        let mut body = commands(&initiate).remove(0).to_vec();
+        let name = b"\x08INITIATE".len();
+        body[name..name + LONG_NONCE].copy_from_slice(&nonce);
+        body[name + LONG_NONCE..name + COOKIE].copy_from_slice(&sealed);
+        server.receive(Incoming::Command(Frame::from(body)), &mut Vec::new())
+    }
+
+    #[test]
+    fn a_cookie_must_hold_this_connections_transient_keys() {
+        assert!(
+            matches!(
+                initiate_with_cookie(None, None),
+                Ok(CurveServerStep::Authenticate(..))
+            ),
+            "resealed with what it held, the cookie is still good"
+        );
+        assert!(matches!(
+            initiate_with_cookie(Some(random()), None),
+            Err(HandshakeError::Cryptographic)
+        ));
+        assert!(matches!(
+            initiate_with_cookie(None, Some(random())),
+            Err(HandshakeError::Cryptographic)
+        ));
+    }
+
     #[test]
     fn curve_needs_zmtp_3() {
         let legacy = PeerGreeting::Zmtp2 { socket_type: 5 };
