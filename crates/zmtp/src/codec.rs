@@ -1180,7 +1180,6 @@ mod tests {
             Version::V3_1,
             DecoderConfig {
                 max_message_size: Some(4),
-                ..DecoderConfig::default()
             },
         );
         d.extend_from_slice(b"\x02\x7f\xff\xff\xff\xff\xff\xff\xff");
