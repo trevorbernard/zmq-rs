@@ -1118,4 +1118,77 @@ mod tests {
             "frame size exceeds 2^63 - 1 octets"
         );
     }
+    /// What `encode_parts` wrote, and the payloads it left to the caller
+    /// with where each belongs.
+    fn encode_parts(msg: Message, apart: usize) -> (Vec<u8>, Vec<(usize, Bytes)>) {
+        let mut out = Vec::new();
+        let mut shared = Vec::new();
+        Encoder::new(Version::V3_1).encode_parts(msg, apart, &mut out, |at, payload| {
+            shared.push((at, payload));
+        });
+        (out, shared)
+    }
+
+    #[test]
+    fn frames_under_the_threshold_are_copied_whole() {
+        let msg = message(&[b"abc", b"de", b"fgh"]);
+        let (out, shared) = encode_parts(msg.clone(), 4);
+        assert_eq!(out, encode(Version::V3_1, &msg));
+        assert_eq!(shared, []);
+    }
+
+    #[test]
+    fn frames_at_the_threshold_are_left_to_the_caller() {
+        let payload = |text: &'static [u8]| Bytes::from_static(text);
+        assert_eq!(
+            encode_parts(message(&[b"abcd", b"ef", b"gh"]), 4),
+            (
+                b"\x01\x04\x01\x02ef\x00\x02gh".to_vec(),
+                vec![(2, payload(b"abcd"))]
+            ),
+            "the first"
+        );
+        assert_eq!(
+            encode_parts(message(&[b"ab", b"cdef", b"gh"]), 4),
+            (
+                b"\x01\x02ab\x01\x04\x00\x02gh".to_vec(),
+                vec![(6, payload(b"cdef"))]
+            ),
+            "one in the middle"
+        );
+        assert_eq!(
+            encode_parts(message(&[b"ab", b"cd", b"efgh"]), 4),
+            (
+                b"\x01\x02ab\x01\x02cd\x00\x04".to_vec(),
+                vec![(10, payload(b"efgh"))]
+            ),
+            "the last"
+        );
+        assert_eq!(
+            encode_parts(message(&[b"abcd", b"efghi"]), 4),
+            (
+                b"\x01\x04\x00\x05".to_vec(),
+                vec![(2, payload(b"abcd")), (4, payload(b"efghi"))]
+            ),
+            "all of them"
+        );
+    }
+
+    #[test]
+    fn the_largest_frame_size_is_not_an_overflow() {
+        let mut d = Decoder::new(
+            Version::V3_1,
+            DecoderConfig {
+                max_message_size: Some(4),
+                ..DecoderConfig::default()
+            },
+        );
+        d.extend_from_slice(b"\x02\x7f\xff\xff\xff\xff\xff\xff\xff");
+        assert_eq!(
+            d.decode(),
+            Err(DecodeError::MessageTooLarge {
+                size: i64::MAX as u64
+            })
+        );
+    }
 }

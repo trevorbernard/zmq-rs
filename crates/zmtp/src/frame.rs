@@ -306,4 +306,12 @@ mod tests {
             assert_eq!(Bytes::from(frame), &b"abc"[..]);
         }
     }
+    #[test]
+    fn a_frame_is_its_octets_to_what_takes_them() {
+        let frame = Frame::from(Box::<[u8]>::from(&b"boxed"[..]));
+        assert_eq!(frame.as_slice(), b"boxed");
+        assert_eq!(AsRef::<[u8]>::as_ref(&frame), b"boxed");
+        assert!(frame == b"boxed"[..]);
+        assert!(frame != b"other"[..]);
+    }
 }

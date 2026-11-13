@@ -833,4 +833,26 @@ mod tests {
             "malformed PING command"
         );
     }
+    #[test]
+    fn names_may_be_255_octets() {
+        assert!(PropertyName::new("a".repeat(255)).is_ok());
+        assert!(CommandName::new("A".repeat(255)).is_ok());
+    }
+
+    #[test]
+    fn property_names_hash_as_they_compare_whatever_their_case() {
+        use std::hash::{BuildHasher, RandomState};
+
+        let hasher = RandomState::new();
+        let name = |name: &'static str| PropertyName::new(name).unwrap();
+        assert_eq!(name("Socket-Type"), name("socket-type"));
+        assert_eq!(
+            hasher.hash_one(name("Socket-Type")),
+            hasher.hash_one(name("socket-type"))
+        );
+        assert_ne!(
+            hasher.hash_one(name("Socket-Type")),
+            hasher.hash_one(name("Identity"))
+        );
+    }
 }
