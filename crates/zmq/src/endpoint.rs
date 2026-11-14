@@ -180,7 +180,7 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
 }
 
 /// The address to bind for `endpoint`: `*` for every interface, an
-/// address, or an interface name, as libzmq binds, or a host name. `*` as
+/// address, an interface name or a host name, as libzmq binds. `*` as
 /// the port means any free port.
 fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
     let (host, port) = host_port(tcp_address(endpoint)?, endpoint)?;
@@ -188,7 +188,7 @@ fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
     if let Some(addr) = local_addr(host, port) {
         return Ok(addr);
     }
-    // libzmq's bind takes no host names; ours resolves one at once. One
+    // A host name is resolved at once, as libzmq's bind does. One
     // that does not resolve is libzmq's EINVAL.
     zmq_core::resolve_tcp(host, port).map_err(|_| invalid(endpoint))
 }
