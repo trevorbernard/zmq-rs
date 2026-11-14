@@ -281,6 +281,7 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - ERROR reason strings are `"400"` or `"500"`. A 300 closes the connection silently.
   - NULL uses ZAP only when a domain is set.
   - CURVE without a handler accepts the connection (encryption only, the "Stonehouse" pattern) unless `ZAP_ENFORCE_DOMAIN` is set.
+  - The request's identity frame is the server socket's own identity (`ZapRequest::identity`), not the connecting peer's as RFC 27 can be read to say (libzmq [#4161](https://github.com/zeromq/libzmq/issues/4161)).
 
 **Design:**
 - `Authenticator` is a Rust trait: `authenticate(&self, ZapRequest, ZapResponder)`. The responder may answer at once or later from any thread, so authentication never has to block an I/O thread; a responder dropped unanswered counts as status 500. A closure `Fn(&ZapRequest) -> ZapReply` implements it for the synchronous case. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. An optional adapter can bind the RFC's inproc endpoint for existing handlers.
