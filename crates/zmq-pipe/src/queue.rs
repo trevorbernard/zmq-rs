@@ -1,7 +1,8 @@
 //! The unbounded queue under a pipe, after libzmq's `yqueue_t`: items live
-//! in chunks of [`CHUNK`] slots, linked as the writer fills them, and the
-//! reader hands each chunk it empties back as a spare for the writer to
-//! reuse, so a queue that keeps up allocates nothing.
+//! in chunks of [`CHUNK`] slots, after a first of [`FIRST`], linked as the
+//! writer fills them, and the reader hands each chunk it empties back as a
+//! spare for the writer to reuse, so a queue that keeps up allocates
+//! nothing.
 //!
 //! Each slot says whether it holds an item. A reader about to wait marks
 //! the slot it is waiting on as sleeping, so the writer's exchange that
@@ -15,9 +16,10 @@
 //! interleaving of the models in `loom_tests`.
 #![allow(unsafe_code)]
 
+use std::alloc::{self, Layout};
 use std::fmt;
 use std::marker::PhantomData;
-use std::mem::MaybeUninit;
+use std::mem::{self, MaybeUninit};
 use std::ptr;
 
 use sync::atomic::{AtomicPtr, AtomicU8, AtomicU64, Ordering};
@@ -61,6 +63,18 @@ const CHUNK: usize = 256;
 #[cfg(loom)]
 const CHUNK: usize = 2;
 
+/// Slots in a queue's first chunk, so that a pipe that carries little,
+/// as most of a socket's do with many peers, holds little: a full chunk
+/// of messages is 22 KiB.
+#[cfg(not(loom))]
+const FIRST: usize = 16;
+#[cfg(loom)]
+const FIRST: usize = 1;
+
+/// The first position. The first chunk holds the last [`FIRST`] positions
+/// of a full one, so every chunk ends where `position % CHUNK` does.
+const START: u64 = (CHUNK - FIRST) as u64;
+
 /// Slot states.
 const EMPTY: u8 = 0;
 const FULL: u8 = 1;
@@ -72,45 +86,111 @@ struct Slot<T> {
     item: UnsafeCell<MaybeUninit<T>>,
 }
 
+/// A chunk's header. Its slots follow it in the same allocation: [`CHUNK`]
+/// of them, or [`FIRST`] in a queue's first chunk.
+#[repr(C)]
 struct Chunk<T> {
-    slots: [Slot<T>; CHUNK],
     /// Set by the writer before it fills this chunk's last slot.
     next: AtomicPtr<Chunk<T>>,
+    slots: [Slot<T>; 0],
 }
 
 impl<T> Chunk<T> {
-    fn allocate() -> *mut Self {
-        #[cfg(not(loom))]
-        let slots = [const {
-            Slot {
-                state: AtomicU8::new(EMPTY),
-                item: UnsafeCell::new(MaybeUninit::uninit()),
+    fn layout(slots: usize) -> Layout {
+        let slots = Layout::array::<Slot<T>>(slots).expect("a chunk's size fits");
+        let (layout, offset) = Layout::new::<Self>()
+            .extend(slots)
+            .expect("a chunk's size fits");
+        debug_assert_eq!(offset, mem::offset_of!(Self, slots));
+        layout
+    }
+
+    fn allocate(slots: usize) -> *mut Self {
+        let layout = Self::layout(slots);
+        // SAFETY: the layout holds the header, so its size is not zero.
+        let chunk = unsafe { alloc::alloc(layout) }.cast::<Self>();
+        if chunk.is_null() {
+            alloc::handle_alloc_error(layout);
+        }
+        // SAFETY: the allocation is ours, with room for the header and
+        // `slots` slots after it.
+        unsafe {
+            (&raw mut (*chunk).next).write(AtomicPtr::new(ptr::null_mut()));
+            let first = Self::first_slot(chunk);
+            for index in 0..slots {
+                first.add(index).write(Slot {
+                    state: AtomicU8::new(EMPTY),
+                    item: UnsafeCell::new(MaybeUninit::uninit()),
+                });
             }
-        }; CHUNK];
-        // Loom's atomics have no `const fn new`.
-        #[cfg(loom)]
-        let slots = std::array::from_fn(|_| Slot {
-            state: AtomicU8::new(EMPTY),
-            item: UnsafeCell::new(MaybeUninit::uninit()),
-        });
-        Box::into_raw(Box::new(Self {
-            slots,
-            next: AtomicPtr::new(ptr::null_mut()),
-        }))
+        }
+        chunk
+    }
+
+    /// # Safety
+    ///
+    /// `chunk` must be live, holding no items, and have been allocated with
+    /// `slots` slots.
+    unsafe fn free(chunk: *mut Self, slots: usize) {
+        // SAFETY: the caller's; the header and the slots need no dropping
+        // (loom's do, to stop tracking them).
+        unsafe {
+            #[cfg(loom)]
+            {
+                let first = Self::first_slot(chunk);
+                for index in 0..slots {
+                    first.add(index).drop_in_place();
+                }
+                (&raw mut (*chunk).next).drop_in_place();
+            }
+            alloc::dealloc(chunk.cast(), Self::layout(slots));
+        }
     }
 
     /// # Safety
     ///
     /// `chunk` must be live.
-    unsafe fn slot<'a>(chunk: *mut Self, position: u64) -> &'a Slot<T> {
-        let index = (position % CHUNK as u64) as usize;
-        // SAFETY: the caller's chunk is live; `index` is in bounds.
-        unsafe { &(*chunk).slots[index] }
+    unsafe fn first_slot(chunk: *mut Self) -> *mut Slot<T> {
+        // SAFETY: the slots follow the header in the caller's allocation.
+        unsafe { chunk.byte_add(mem::offset_of!(Self, slots)) }.cast()
     }
+
+    /// Where the chunk's slot for the position `p` is, less `p % CHUNK`
+    /// slots. A chunk of `slots` slots holds the last `slots` positions of
+    /// a full one, so for a first chunk this is before its allocation.
+    ///
+    /// # Safety
+    ///
+    /// `chunk` must be live.
+    unsafe fn slots(chunk: *mut Self, slots: usize) -> *mut Slot<T> {
+        // SAFETY: the caller's.
+        unsafe { Self::first_slot(chunk) }.wrapping_sub(CHUNK - slots)
+    }
+}
+
+/// # Safety
+///
+/// `slots` must be a live chunk's, from [`Chunk::slots`], and `position`
+/// one of the positions the chunk holds.
+unsafe fn slot<'a, T>(slots: *mut Slot<T>, position: u64) -> &'a Slot<T> {
+    let index = (position % CHUNK as u64) as usize;
+    // SAFETY: the caller's position is in the chunk, so this is one of its
+    // slots, initialized when it was allocated.
+    unsafe { &*slots.wrapping_add(index) }
 }
 
 fn is_last_slot(position: u64) -> bool {
     position % CHUNK as u64 == CHUNK as u64 - 1
+}
+
+/// How many slots the chunk holding `position` has: positions start at
+/// [`START`], so that only the first chunk's are below [`CHUNK`].
+fn slots_at(position: u64) -> usize {
+    if position < CHUNK as u64 {
+        FIRST
+    } else {
+        CHUNK
+    }
 }
 
 struct Shared<T> {
@@ -129,6 +209,8 @@ pub(crate) struct Producer<T> {
     shared: Arc<Shared<T>>,
     /// The chunk the next item goes into.
     back: *mut Chunk<T>,
+    /// Its slots, from [`Chunk::slots`].
+    slots: *mut Slot<T>,
     written: u64,
 }
 
@@ -137,13 +219,15 @@ pub(crate) struct Consumer<T> {
     shared: Arc<Shared<T>>,
     /// The chunk the next item comes from.
     front: *mut Chunk<T>,
+    /// Its slots, from [`Chunk::slots`].
+    slots: *mut Slot<T>,
     read: u64,
 }
 
 impl<T> fmt::Debug for Producer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Producer")
-            .field("written", &self.written)
+            .field("written", &(self.written - START))
             .finish_non_exhaustive()
     }
 }
@@ -151,7 +235,7 @@ impl<T> fmt::Debug for Producer<T> {
 impl<T> fmt::Debug for Consumer<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Consumer")
-            .field("read", &self.read)
+            .field("read", &(self.read - START))
             .finish_non_exhaustive()
     }
 }
@@ -163,23 +247,27 @@ unsafe impl<T: Send> Send for Producer<T> {}
 unsafe impl<T: Send> Send for Consumer<T> {}
 
 pub(crate) fn queue<T>() -> (Producer<T>, Consumer<T>) {
-    let first = Chunk::allocate();
+    let first = Chunk::allocate(FIRST);
+    // SAFETY: just allocated, with `FIRST` slots.
+    let slots = unsafe { Chunk::slots(first, FIRST) };
     let shared = Arc::new(Shared {
         spare: AtomicPtr::new(ptr::null_mut()),
         front: AtomicPtr::new(first),
-        read: AtomicU64::new(0),
-        written: AtomicU64::new(0),
+        read: AtomicU64::new(START),
+        written: AtomicU64::new(START),
         _items: PhantomData,
     });
     let producer = Producer {
         shared: shared.clone(),
         back: first,
-        written: 0,
+        slots,
+        written: START,
     };
     let consumer = Consumer {
         shared,
         front: first,
-        read: 0,
+        slots,
+        read: START,
     };
     (producer, consumer)
 }
@@ -191,13 +279,13 @@ impl<T> Producer<T> {
         // SAFETY: `back` is live: the reader frees nothing, and recycles a
         // chunk only once it has moved past it, which needs this end to
         // have linked the next.
-        let slot = unsafe { Chunk::slot(self.back, self.written) };
+        let slot = unsafe { slot(self.slots, self.written) };
         // SAFETY: the slot is empty (or the reader sleeps on it) and stays
         // so until the exchange below, so the reader does not touch it.
         slot.item.with_mut(|cell| unsafe { (*cell).write(item) });
         if is_last_slot(self.written) {
             let next = match self.shared.spare.swap(ptr::null_mut(), Ordering::Acquire) {
-                spare if spare.is_null() => Chunk::allocate(),
+                spare if spare.is_null() => Chunk::allocate(CHUNK),
                 spare => {
                     // SAFETY: the reader gave up the spare in its swap; it
                     // is ours now. A stale `next` would mislead the final
@@ -209,6 +297,8 @@ impl<T> Producer<T> {
             // SAFETY: as above. The exchange below publishes the link.
             unsafe { (*self.back).next.store(next, Ordering::Relaxed) };
             self.back = next;
+            // SAFETY: a spare or a new chunk, of `CHUNK` slots either way.
+            self.slots = unsafe { Chunk::slots(next, CHUNK) };
         }
         self.written += 1;
         // Release publishes the item and any new link; Acquire pairs with a
@@ -227,7 +317,7 @@ impl<T> Consumer<T> {
     /// Whether the writer has added nothing past what was taken.
     pub(crate) fn is_empty(&self) -> bool {
         // SAFETY: `front` is live: only this end frees or recycles it.
-        let slot = unsafe { Chunk::slot(self.front, self.read) };
+        let slot = unsafe { slot(self.slots, self.read) };
         slot.state.load(Ordering::Acquire) != FULL
     }
 
@@ -236,7 +326,7 @@ impl<T> Consumer<T> {
     /// that it must be woken: register the waker first.
     pub(crate) fn pop(&mut self, sleep: bool) -> Option<T> {
         // SAFETY: `front` is live: only this end frees or recycles it.
-        let slot = unsafe { Chunk::slot(self.front, self.read) };
+        let slot = unsafe { slot(self.slots, self.read) };
         match slot.state.load(Ordering::Acquire) {
             FULL => {}
             EMPTY if sleep => {
@@ -262,11 +352,19 @@ impl<T> Consumer<T> {
             // SAFETY: the writer linked the next chunk before filling the
             // slot just read, and our Acquire load of its state saw that.
             self.front = unsafe { (*emptied).next.load(Ordering::Relaxed) };
-            let previous = self.shared.spare.swap(emptied, Ordering::AcqRel);
-            if !previous.is_null() {
-                // SAFETY: a spare the writer never took is unreachable from
-                // either end; it holds no items.
-                drop(unsafe { Box::from_raw(previous) });
+            // SAFETY: the writer only links chunks of `CHUNK` slots.
+            self.slots = unsafe { Chunk::slots(self.front, CHUNK) };
+            // The first chunk is too small to be a spare.
+            let unused = match slots_at(self.read) {
+                CHUNK => self.shared.spare.swap(emptied, Ordering::AcqRel),
+                _ => emptied,
+            };
+            if !unused.is_null() {
+                // SAFETY: the emptied first chunk, which the writer left
+                // when it linked the next, or a spare the writer never
+                // took: unreachable from either end, holding no items. A
+                // spare is never a first chunk.
+                unsafe { Chunk::free(unused, slots_at(self.read)) };
             }
         }
         self.read += 1;
@@ -291,7 +389,7 @@ impl<T> Drop for Shared<T> {
             // SAFETY: items between the reader's position and the writer's
             // count were written and never read. Each slot's chunk is
             // reached by following links, as the reader would.
-            let slot = unsafe { Chunk::slot(chunk, position) };
+            let slot = unsafe { slot(Chunk::slots(chunk, slots_at(position)), position) };
             // SAFETY: as above.
             slot.item
                 .with_mut(|cell| unsafe { (*cell).assume_init_drop() });
@@ -300,7 +398,7 @@ impl<T> Drop for Shared<T> {
                 let next = unsafe { (*chunk).next.load(Ordering::Relaxed) };
                 // SAFETY: its last item was just dropped, and nothing else
                 // links to it.
-                drop(unsafe { Box::from_raw(chunk) });
+                unsafe { Chunk::free(chunk, slots_at(position)) };
                 chunk = next;
             }
         }
@@ -308,13 +406,14 @@ impl<T> Drop for Shared<T> {
         if !chunk.is_null() {
             // SAFETY: unreachable elsewhere, holding no items, and linked to
             // nothing: a link is made only when filling the last slot, which
-            // moves `back` past this chunk.
-            drop(unsafe { Box::from_raw(chunk) });
+            // moves `back` past this chunk. It is the first chunk if the
+            // writer never filled it.
+            unsafe { Chunk::free(chunk, slots_at(written)) };
         }
         let spare = self.spare.load(Ordering::Relaxed);
         if !spare.is_null() {
-            // SAFETY: as above.
-            drop(unsafe { Box::from_raw(spare) });
+            // SAFETY: as above; a spare is never a first chunk.
+            unsafe { Chunk::free(spare, CHUNK) };
         }
     }
 }
@@ -343,13 +442,15 @@ mod tests {
     #[test]
     fn the_writer_moves_on_only_after_a_chunks_last_slot() {
         let (mut producer, _consumer) = queue();
-        let first = producer.back;
-        for i in 0..CHUNK - 1 {
-            producer.push(i);
-            assert_eq!(producer.back, first, "after {i}");
+        for slots in [FIRST, CHUNK, CHUNK] {
+            let chunk = producer.back;
+            for i in 0..slots - 1 {
+                producer.push(i);
+                assert_eq!(producer.back, chunk, "after {i} of {slots}");
+            }
+            producer.push(slots - 1);
+            assert_ne!(producer.back, chunk, "a chunk of {slots}");
         }
-        producer.push(CHUNK - 1);
-        assert_ne!(producer.back, first);
     }
 
     #[test]
@@ -369,15 +470,15 @@ mod tests {
     #[test]
     fn a_reader_waiting_on_a_chunks_last_slot_is_reported() {
         let (mut producer, mut consumer) = queue();
-        for i in 0..CHUNK - 1 {
+        for i in 0..FIRST - 1 {
             producer.push(i);
             assert_eq!(consumer.pop(true), Some(i));
         }
         assert_eq!(consumer.pop(true), None);
-        assert!(producer.push(CHUNK - 1));
-        assert_eq!(consumer.pop(true), Some(CHUNK - 1));
+        assert!(producer.push(FIRST - 1));
+        assert_eq!(consumer.pop(true), Some(FIRST - 1));
         assert_eq!(consumer.pop(true), None);
-        assert!(producer.push(CHUNK), "and on the next chunk's first");
+        assert!(producer.push(FIRST), "and on the next chunk's first");
     }
 
     #[test]
@@ -390,6 +491,11 @@ mod tests {
     #[test]
     fn a_queue_that_keeps_up_reuses_one_spare() {
         let (mut producer, mut consumer) = queue();
+        // The first chunk is too small to be one.
+        for i in 0..FIRST {
+            producer.push(i);
+            assert_eq!(consumer.pop(true), Some(i));
+        }
         let mut chunks = HashSet::new();
         for i in 0..CHUNK * 20 {
             producer.push(i);
@@ -412,6 +518,10 @@ mod tests {
         let cases = [
             (0, 0),
             (5, 2),
+            (FIRST - 1, 0),
+            (FIRST, 0),
+            (FIRST, FIRST),
+            (FIRST + 1, FIRST),
             (CHUNK - 1, 0),
             (CHUNK, 0),
             (CHUNK, CHUNK),

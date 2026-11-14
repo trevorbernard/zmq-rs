@@ -60,13 +60,19 @@ fn run(sent: u64, received: u64, first: FirstDropped) {
 
 #[test]
 fn every_chunk_is_freed_once() {
-    // Spanning several of the queue's 256-slot chunks, read up to each
-    // boundary and past it, so the reader hands back spares the writer
-    // takes or leaves.
+    // Spanning the queue's 16-slot first chunk and several of its 256-slot
+    // ones, read up to each boundary and past it, so the reader hands back
+    // spares the writer takes or leaves.
     let cases = [
         (0, 0),
         (1, 0),
         (1, 1),
+        (15, 15),
+        (16, 16),
+        (17, 16),
+        (271, 271),
+        (272, 272),
+        (273, 272),
         (255, 255),
         (256, 256),
         (257, 256),
