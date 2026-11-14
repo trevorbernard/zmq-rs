@@ -4,6 +4,8 @@
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 use std::io;
+use std::mem;
+use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError, mpsc};
 use std::task::{Context, Wake, Waker};
@@ -81,6 +83,9 @@ pub(crate) struct IoThread {
     commands: mpsc::Sender<IoCommand>,
     waker: Arc<mio::Waker>,
     thread: Mutex<Option<JoinHandle<()>>>,
+    /// The process that spawned the thread: a forked child has the
+    /// handle but no thread, as libzmq's objects remember their pid.
+    pid: u32,
 }
 
 impl IoThread {
@@ -109,13 +114,21 @@ impl IoThread {
             commands,
             waker,
             thread: Mutex::new(Some(thread)),
+            pid: process::id(),
         })
     }
 
+    /// Whether this is a forked child of the process that spawned the
+    /// thread, where the thread does not run and must not be waited for.
+    pub(crate) fn forked(&self) -> bool {
+        process::id() != self.pid
+    }
+
     /// Hands `command` to the thread. If the thread is gone, the command and
-    /// any pipes or sockets in it are dropped, which closes them.
+    /// any pipes or sockets in it are dropped, which closes them, as in a
+    /// forked child, whose wake would reach the parent's thread.
     pub(crate) fn send(&self, command: IoCommand) {
-        if self.commands.send(command).is_ok() {
+        if !self.forked() && self.commands.send(command).is_ok() {
             let _ = self.waker.wake();
         }
     }
@@ -129,7 +142,10 @@ impl IoThread {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .take();
-        if let Some(thread) = thread {
+        if self.forked() {
+            // Nothing to join, and no thread to detach either.
+            mem::forget(thread);
+        } else if let Some(thread) = thread {
             let _ = thread.join();
         }
     }

@@ -488,7 +488,9 @@ impl Peers {
             keep
         });
         self.list.retain_mut(|peer| peer.endpoint != Some(endpoint));
-        wait_closed(closing);
+        if !self.context.forked() {
+            wait_closed(closing);
+        }
     }
 
     /// A new monitor of this socket's events, from now on.
@@ -566,7 +568,9 @@ impl Drop for Peers {
             .drain(..)
             .filter_map(|(_, mut queue)| queue.closed.take())
             .collect();
-        wait_closed(closing);
+        if !self.context.forked() {
+            wait_closed(closing);
+        }
     }
 }
 

@@ -392,6 +392,8 @@ Rules shared by every pattern:
 
 **`LINGER`**: `SocketOptions::linger` is `None` by default, the socket type's own default as libzmq has it: forever, but zero for SUB, XSUB and DISH, so that subscriptions and joins queued to a peer that never comes do not hold up the context. `Some` overrides it for any type.
 
+**`fork`**: as in libzmq, a forked child may only close the sockets and contexts it inherited, which waits for nothing there, the I/O threads being the parent's; it then makes a context of its own.
+
 **`unbind` and `disconnect`** (`zmq_unbind`, `zmq_disconnect`): each undoes a bind or connect, closing its listener or ending its retries, and drops the peers that came through it. As in libzmq, what those peers sent is discarded and what was queued to them is delivered within the linger. Differences:
 - `unbind` returns once the I/O thread has closed the listener, so the address can be bound again at once; libzmq closes it in the background.
 - `unbind` of an `inproc` name also closes the connections accepted on it, as for TCP and IPC; libzmq frees only the name.

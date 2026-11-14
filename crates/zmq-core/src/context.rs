@@ -1130,6 +1130,13 @@ impl Context {
         self.inner.termination.watch()
     }
 
+    /// Whether this is a forked child of the process that made the
+    /// context: its I/O threads do not run here, so nothing waits for
+    /// them.
+    pub(crate) fn forked(&self) -> bool {
+        self.inner.io_threads.iter().any(IoThread::forked)
+    }
+
     /// The next I/O thread, round robin.
     fn io_thread(&self) -> &IoThread {
         let threads = &self.inner.io_threads;
