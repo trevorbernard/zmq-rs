@@ -62,6 +62,10 @@ pub(crate) struct Engine {
     /// drain: a peer that pings without reading is owed one answer, not one
     /// for each, as libzmq keeps a single PONG to send.
     pong_owed: Option<PingContext>,
+    /// A write failed. The engine stops writing but reads on until
+    /// input fails too, as libzmq's does, so that what the peer sent
+    /// before it left is not lost.
+    write_failed: bool,
     deadlines: Deadlines,
     /// Boxes and unboxes every frame once a CURVE handshake is done.
     curve: Option<CurveCodec>,
@@ -303,6 +307,7 @@ impl Engine {
             out,
             outbound_empty: false,
             pong_owed: None,
+            write_failed: false,
             deadlines: Deadlines::default(),
             curve: None,
         }
@@ -416,6 +421,34 @@ impl Engine {
         if self.deadlines.expired(now) {
             return Err(EngineError::Timeout);
         }
+        let sent = if self.write_failed {
+            false
+        } else {
+            match self.send(pipes, cx, now) {
+                Ok(sent) => sent,
+                Err(EngineError::Io(_)) if self.is_established() => {
+                    self.write_failed = true;
+                    false
+                }
+                Err(err) => return Err(err),
+            }
+        };
+        let received = self.receive(pipes, cx);
+        pipes.inbound.flush();
+        if self.write_failed {
+            // What reading queued: answers to commands.
+            self.out = Output::default();
+        }
+        Ok(received? || sent)
+    }
+
+    /// Writes pending output, heartbeats and the socket's messages.
+    fn send(
+        &mut self,
+        pipes: &mut Pipes<'_>,
+        cx: &mut Context<'_>,
+        now: Instant,
+    ) -> Result<bool, EngineError> {
         self.maybe_ping(now)?;
         let mut wrote = self.flush()?;
         self.maybe_pong()?;
@@ -423,9 +456,7 @@ impl Engine {
         if pulled {
             wrote |= self.flush()?;
         }
-        let received = self.receive(pipes, cx);
-        pipes.inbound.flush();
-        Ok(received? || wrote || pulled)
+        Ok(wrote || pulled)
     }
 
     /// Answers the peer's last PING once output is no longer backed up.

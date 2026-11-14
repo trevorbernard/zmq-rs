@@ -330,3 +330,39 @@ mod abstract_names {
         );
     }
 }
+
+#[test]
+fn sending_to_a_peer_that_left_does_not_lose_what_it_sent() {
+    let one = zmq::Hwm::Messages(std::num::NonZeroUsize::MIN);
+    let context = Context::new().unwrap();
+    let mut sender = context.socket::<zmq::Pair>();
+    let bound = sender.bind("ipc://*").unwrap().to_string();
+    let other = Context::new().unwrap();
+    let mut receiver = other.socket_with::<zmq::Pair>(zmq::SocketOptions {
+        send_hwm: one,
+        recv_hwm: one,
+        linger: Some(zmq::Linger::For(Duration::ZERO)),
+        ..zmq::SocketOptions::default()
+    });
+    receiver.connect(&bound).unwrap();
+    sender.send("0").unwrap();
+    assert_eq!(
+        receiver.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("0"))
+    );
+    for i in 1..=10 {
+        sender.send(i.to_string()).unwrap();
+    }
+    within(FIVE, move || {
+        drop(sender);
+        drop(context);
+    });
+    let mut received = Vec::new();
+    while let Some(message) = receiver.recv_timeout(Duration::from_millis(500)).unwrap() {
+        received.push(message);
+        let _ = receiver.try_send("ack");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let expected: Vec<Message> = (1..=10).map(|i| Message::from(i.to_string())).collect();
+    assert_eq!(received, expected);
+}
