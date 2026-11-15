@@ -147,8 +147,8 @@ pub use socket::{HearsDisconnects, HearsHiccups, SendsHello};
 #[doc(inline)]
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
-    Monitor, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError,
-    ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
+    Monitor, ProtocolError, ProtocolErrorKind, Reconnect, RecvTimeoutError, RouteOutcome, Security,
+    SendError, ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 #[cfg(feature = "draft")]
 #[doc(inline)]
@@ -156,13 +156,22 @@ pub use zmq_core::{InvalidMetadata, ReconnectStop, RouterNotify};
 #[doc(inline)]
 pub use zmq_pipe::Hwm;
 #[doc(inline)]
+pub use zmtp::z85::Z85Error;
+#[doc(inline)]
 pub use zmtp::{
-    Credential, Frame, Identity, InvalidIdentity, KeyError, Keypair, Message, MessageMetadata,
-    Metadata, PlainCredentials, PublicKey, SecretKey, ZapCredentials, ZapReply, ZapRequest,
+    Credential, EmptyMessage, Frame, Identity, InvalidIdentity, InvalidName, KeyError, Keypair,
+    Message, MessageMetadata, Metadata, PlainCredentials, PropertyName, PublicKey, SecretKey,
+    TooLong, ZapCredentials, ZapReply, ZapRequest,
 };
 #[cfg(feature = "draft")]
 #[doc(inline)]
-pub use zmtp::{Group, InvalidGroup, InvalidName};
+pub use zmtp::{Group, InvalidGroup};
+
+/// The iterators over a [`Message`]'s frames.
+pub mod message {
+    #[doc(inline)]
+    pub use zmtp::{IntoIter, Iter};
+}
 
 /// Owns the I/O threads sockets run on. Cloning shares them.
 ///

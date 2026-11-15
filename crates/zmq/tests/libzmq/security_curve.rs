@@ -5,6 +5,7 @@
 //! The malformed commands start from valid ones made by `zmtp`'s CURVE
 //! client, which plays the part of libzmq's `curve_client_tools_t`.
 
+use std::error::Error;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
@@ -151,14 +152,19 @@ fn handshake_events(monitor: &mut Monitor, timeout: Duration) -> Vec<EventKind> 
     events
 }
 
+/// What `zmtp` made of the peer's mistake: `zmq` itself only displays it.
+fn detail<T: Error + 'static>(error: &ProtocolError) -> Option<&T> {
+    error.source()?.downcast_ref()
+}
+
 /// Waits for the server to report the handshake failing with `error`.
 fn expect_protocol_error(monitor: &mut Monitor, error: impl Fn(&HandshakeError) -> bool) {
     let events = handshake_events(monitor, FIVE);
     assert!(
         events.iter().any(|event| matches!(
             event,
-            EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Handshake(e)))
-                if error(e)
+            EventKind::HandshakeFailed(HandshakeFailure::Protocol(e))
+                if detail::<HandshakeError>(e).is_some_and(&error)
         )),
         "{events:?}"
     );
@@ -244,9 +250,8 @@ fn curve_security_with_bogus_client_credentials() {
 fn is_mechanism_mismatch(event: &EventKind) -> bool {
     matches!(
         event,
-        EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Greeting(
-            GreetingError::MechanismMismatch { .. }
-        )))
+        EventKind::HandshakeFailed(HandshakeFailure::Protocol(e))
+            if matches!(detail(e), Some(GreetingError::MechanismMismatch { .. }))
     )
 }
 

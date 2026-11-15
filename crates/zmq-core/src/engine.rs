@@ -24,12 +24,13 @@ use zmtp::{
 };
 
 use crate::context::PeerSlot;
+use crate::monitor::{ProtocolDetail, ProtocolError};
 use crate::output::Output;
 use crate::socks::{SocksClient, SocksError};
 use crate::transport::Stream;
 use crate::{
-    Authenticator, ConnectionConfig, HandshakeFailure, MessageProperties, ProtocolError, Security,
-    Topics, ZapResponder,
+    Authenticator, ConnectionConfig, HandshakeFailure, MessageProperties, Security, Topics,
+    ZapResponder,
 };
 
 /// The shortest PING interval, so a zero interval cannot spin.
@@ -188,6 +189,10 @@ pub(crate) enum EngineError {
     Proxy(#[expect(dead_code, reason = "shown when the error is debugged")] SocksError),
 }
 
+fn protocol(detail: ProtocolDetail) -> HandshakeFailure {
+    HandshakeFailure::Protocol(ProtocolError::new(detail))
+}
+
 impl EngineError {
     /// What a monitor is told when this ends a handshake, as libzmq tells
     /// it: authentication with a ZAP status, a protocol error, or no
@@ -210,12 +215,10 @@ impl EngineError {
                     },
                 }
             }
-            Self::Handshake(err) => {
-                HandshakeFailure::Protocol(ProtocolError::Handshake(err.clone()))
-            }
-            Self::Greeting(err) => HandshakeFailure::Protocol(ProtocolError::Greeting(err.clone())),
-            Self::Decode(err) => HandshakeFailure::Protocol(ProtocolError::Decode(err.clone())),
-            Self::Curve(err) => HandshakeFailure::Protocol(ProtocolError::Curve(*err)),
+            Self::Handshake(err) => protocol(ProtocolDetail::Handshake(err.clone())),
+            Self::Greeting(err) => protocol(ProtocolDetail::Greeting(err.clone())),
+            Self::Decode(err) => protocol(ProtocolDetail::Decode(err.clone())),
+            Self::Curve(err) => protocol(ProtocolDetail::Curve(*err)),
             Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) => {
                 HandshakeFailure::NoDetail
             }

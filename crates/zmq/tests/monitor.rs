@@ -7,7 +7,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{
     Context, Credential, Event, EventKind, HandshakeFailure, Monitor, PlainCredentials,
-    ProtocolError, Pull, Push, Reconnect, Security, SocketOptions, ZapReply, ZapRequest,
+    ProtocolErrorKind, Pull, Push, Reconnect, Security, SocketOptions, ZapReply, ZapRequest,
 };
 use zmq_test_ports::{free_endpoint, free_port};
 
@@ -135,7 +135,8 @@ fn an_incompatible_peer_fails_the_handshake_on_both_sides() {
     assert!(
         matches!(
             failed.kind,
-            EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Handshake(_)))
+            EventKind::HandshakeFailed(HandshakeFailure::Protocol(ref error))
+                if error.kind() == ProtocolErrorKind::Handshake
         ),
         "{failed:?}"
     );

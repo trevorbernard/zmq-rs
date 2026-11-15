@@ -13,7 +13,7 @@ use zmq::{
 };
 use zmq_test_ports::free_endpoint;
 
-use zmq::ProtocolError;
+use zmq::ProtocolErrorKind;
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -127,7 +127,8 @@ fn a_zmtp_1_0_peer_is_refused() {
     expect(&mut server, |kind| {
         matches!(
             kind,
-            EventKind::HandshakeFailed(HandshakeFailure::Protocol(ProtocolError::Greeting(_)))
+            EventKind::HandshakeFailed(HandshakeFailure::Protocol(error))
+                if error.kind() == ProtocolErrorKind::Greeting
         )
     });
     assert_eq!(pull.try_recv().unwrap(), None);

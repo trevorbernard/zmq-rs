@@ -69,14 +69,73 @@ pub enum HandshakeFailure {
     NoDetail,
 }
 
-/// The protocol error that ended a handshake.
+/// The protocol error that ended a handshake. It displays what the peer
+/// got wrong; [`kind`](Self::kind) tells which part of the protocol.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProtocolError {
+pub struct ProtocolError(ProtocolDetail);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ProtocolDetail {
     Greeting(GreetingError),
     Handshake(HandshakeError),
     Decode(DecodeError),
     Curve(CurveError),
+}
+
+/// Which part of the protocol a [`ProtocolError`] is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum ProtocolErrorKind {
+    /// The greeting: its signature, version or mechanism.
+    Greeting,
+    /// The mechanism's handshake commands.
+    Handshake,
+    /// The framing of what the peer sent.
+    Decode,
+    /// CURVE's own rules.
+    Curve,
+}
+
+impl ProtocolError {
+    pub(crate) fn new(detail: ProtocolDetail) -> Self {
+        Self(detail)
+    }
+
+    pub fn kind(&self) -> ProtocolErrorKind {
+        match self.0 {
+            ProtocolDetail::Greeting(_) => ProtocolErrorKind::Greeting,
+            ProtocolDetail::Handshake(_) => ProtocolErrorKind::Handshake,
+            ProtocolDetail::Decode(_) => ProtocolErrorKind::Decode,
+            ProtocolDetail::Curve(_) => ProtocolErrorKind::Curve,
+        }
+    }
+
+    fn detail(&self) -> &(dyn std::error::Error + 'static) {
+        match &self.0 {
+            ProtocolDetail::Greeting(err) => err,
+            ProtocolDetail::Handshake(err) => err,
+            ProtocolDetail::Decode(err) => err,
+            ProtocolDetail::Curve(err) => err,
+        }
+    }
+}
+
+impl fmt::Display for ProtocolError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let part = match self.kind() {
+            ProtocolErrorKind::Greeting => "greeting",
+            ProtocolErrorKind::Handshake => "handshake",
+            ProtocolErrorKind::Decode => "framing",
+            ProtocolErrorKind::Curve => "CURVE",
+        };
+        write!(f, "{part}: {}", self.detail())
+    }
+}
+
+impl std::error::Error for ProtocolError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        Some(self.detail())
+    }
 }
 
 /// Where a socket's events go: shared by the socket, its listeners and its
