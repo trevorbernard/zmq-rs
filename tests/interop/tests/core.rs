@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect, ShutdownTimedOut};
+use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{ConnectError, Peer, Security};
 use zmq_pipe::Hwm;
@@ -439,7 +439,7 @@ fn shutdown_reports_what_it_had_to_abandon() {
     let result = within(Duration::from_secs(5), move || {
         context.shutdown(Duration::from_millis(200))
     });
-    assert_eq!(result, Err(ShutdownTimedOut { abandoned: 1 }));
+    assert_eq!(result.map_err(|timed_out| timed_out.abandoned), Err(1));
     assert!(started.elapsed() >= Duration::from_millis(200));
 }
 
@@ -456,10 +456,13 @@ fn concurrent_shutdowns_each_report_what_was_abandoned() {
     let second = within(Duration::from_secs(5), move || {
         context.shutdown(Duration::from_millis(200))
     });
-    assert_eq!(second, Err(ShutdownTimedOut { abandoned: 1 }));
+    assert_eq!(second.map_err(|timed_out| timed_out.abandoned), Err(1));
     assert_eq!(
-        first.join().unwrap(),
-        Err(ShutdownTimedOut { abandoned: 1 })
+        first
+            .join()
+            .unwrap()
+            .map_err(|timed_out| timed_out.abandoned),
+        Err(1)
     );
 }
 

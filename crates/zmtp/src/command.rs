@@ -85,6 +85,7 @@ pub struct TooLong {
 
 /// Why a [`Group`] was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidGroup {
     TooLong,
     ContainsNul,
@@ -92,6 +93,7 @@ pub enum InvalidGroup {
 
 /// Why a [`PropertyName`] or [`CommandName`] was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidName {
     Empty,
     TooLong,

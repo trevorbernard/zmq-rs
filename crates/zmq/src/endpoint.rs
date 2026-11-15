@@ -38,6 +38,7 @@ impl From<crate::Terminated> for Error {
 /// reports it. Displays as an endpoint string another socket can connect
 /// to.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Endpoint {
     /// A TCP address, with the actual port when bound to `*`.
     Tcp(SocketAddr),

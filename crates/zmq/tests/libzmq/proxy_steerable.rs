@@ -18,7 +18,9 @@ use crate::proxy::{QT_CLIENTS, QT_WORKERS, client_task, no_linger, server_worker
 use crate::support::within;
 
 fn moved(statistics: ProxyStatistics) -> u64 {
-    let ProxyStatistics { frontend, backend } = statistics;
+    let ProxyStatistics {
+        frontend, backend, ..
+    } = statistics;
     frontend.received.messages
         + frontend.sent.messages
         + backend.received.messages

@@ -19,6 +19,7 @@ use crate::{FairQueue, LoadBalancer};
 
 /// What happened to a reply REP was asked to send.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum RouteOutcome {
     Sent,
     /// The requester is gone. The reply was dropped.

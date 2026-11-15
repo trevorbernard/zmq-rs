@@ -98,10 +98,7 @@ mod stop {
     fn reconnect_stop_on_refused() {
         let context = Context::new().unwrap();
         let mut sub = context.socket_with::<Sub>(zero_linger());
-        sub.set_reconnect_stop(ReconnectStop {
-            connection_refused: true,
-            ..ReconnectStop::default()
-        });
+        sub.set_reconnect_stop(ReconnectStop::default().connection_refused(true));
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
         // The one retry is refused, and is the last.
@@ -128,10 +125,7 @@ mod stop {
         let context = Context::new().unwrap();
         let mut sub =
             context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
-        sub.set_reconnect_stop(ReconnectStop {
-            handshake_failed: true,
-            ..ReconnectStop::default()
-        });
+        sub.set_reconnect_stop(ReconnectStop::default().handshake_failed(true));
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
 

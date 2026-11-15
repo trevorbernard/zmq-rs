@@ -25,16 +25,20 @@ fn recv(router: zmq::Socket<Router>) -> (Vec<u8>, Message, zmq::Socket<Router>) 
     })
 }
 
-fn router_notify(notify: RouterNotify) {
+fn router_notify(connect: bool, disconnect: bool) {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    router.set_notify(notify);
+    router.set_notify(
+        RouterNotify::default()
+            .connect(connect)
+            .disconnect(disconnect),
+    );
     let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(named("X"));
     dealer.connect(&endpoint).unwrap();
 
-    if notify.connect {
+    if connect {
         let (from, message, back) = recv(router);
         router = back;
         assert_eq!(from, b"X");
@@ -49,7 +53,7 @@ fn router_notify(notify: RouterNotify) {
 
     dealer.disconnect(&endpoint).unwrap();
 
-    if notify.disconnect {
+    if disconnect {
         let (from, message, back) = recv(router);
         router = back;
         assert_eq!(from, b"X");
@@ -60,26 +64,17 @@ fn router_notify(notify: RouterNotify) {
 
 #[test]
 fn router_notify_connect() {
-    router_notify(RouterNotify {
-        connect: true,
-        disconnect: false,
-    });
+    router_notify(true, false);
 }
 
 #[test]
 fn router_notify_disconnect() {
-    router_notify(RouterNotify {
-        connect: false,
-        disconnect: true,
-    });
+    router_notify(false, true);
 }
 
 #[test]
 fn router_notify_both() {
-    router_notify(RouterNotify {
-        connect: true,
-        disconnect: true,
-    });
+    router_notify(true, true);
 }
 
 /// libzmq sends this through a STREAM socket; a plain TCP stream does the
@@ -88,10 +83,7 @@ fn router_notify_both() {
 fn handshake_fail() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    router.set_notify(RouterNotify {
-        connect: true,
-        disconnect: true,
-    });
+    router.set_notify(RouterNotify::default().connect(true).disconnect(true));
     let endpoint = router.bind(&free_endpoint()).unwrap();
 
     let mut stream = TcpStream::connect(endpoint.tcp_addr().unwrap()).unwrap();
@@ -113,10 +105,7 @@ fn error_during_multipart() {
             // The handshake fails if this is too small.
             .max_message_size(64),
     );
-    router.set_notify(RouterNotify {
-        connect: false,
-        disconnect: true,
-    });
+    router.set_notify(RouterNotify::default().connect(false).disconnect(true));
     let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(named("X"));

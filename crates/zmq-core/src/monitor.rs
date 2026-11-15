@@ -18,6 +18,7 @@ const MONITOR_HWM: NonZeroUsize = NonZeroUsize::new(1000).unwrap();
 
 /// Something that happened to one of a socket's listeners or connections.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Event {
     /// The endpoint it concerns, as an endpoint string: what the socket
     /// connected to, or the bound endpoint for listeners and the

@@ -14,6 +14,7 @@ use crate::{Frame, Metadata, PublicKey, TooLong};
 
 /// What a server asks its authenticator about a connecting peer.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ZapRequest {
     /// The server's ZAP domain, possibly empty.
     pub domain: Frame,
@@ -25,8 +26,26 @@ pub struct ZapRequest {
     pub credentials: ZapCredentials,
 }
 
+impl ZapRequest {
+    /// A request as a server would make it, to try an authenticator with.
+    pub fn new(
+        domain: impl Into<Frame>,
+        address: impl Into<String>,
+        identity: impl Into<Frame>,
+        credentials: ZapCredentials,
+    ) -> Self {
+        Self {
+            domain: domain.into(),
+            address: address.into(),
+            identity: identity.into(),
+            credentials,
+        }
+    }
+}
+
 /// The credentials a peer presented, by mechanism.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ZapCredentials {
     /// NULL presents nothing.
     Null,
@@ -39,6 +58,7 @@ pub enum ZapCredentials {
 
 /// The authenticator's verdict.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum ZapReply {
     /// 200: accepted, with the user id and metadata to attach to the
     /// connection.

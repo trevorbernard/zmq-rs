@@ -523,12 +523,12 @@ proptest! {
             Security::Plain(credentials) => ZapCredentials::Plain(credentials.clone()),
             Security::Curve { client, .. } => ZapCredentials::Curve(client.public()),
         };
-        let expected_zap = ZapRequest {
-            domain: Frame::from("domain"),
-            address: "127.0.0.1".to_owned(),
-            identity: Frame::copy_from_slice(sides.server_id.as_bytes()),
+        let expected_zap = ZapRequest::new(
+            "domain",
+            "127.0.0.1",
+            Frame::copy_from_slice(sides.server_id.as_bytes()),
             credentials,
-        };
+        );
         prop_assert_eq!(server.zap.as_ref(), Some(&expected_zap));
 
         let (user_id, metadata) = match verdict {
@@ -551,6 +551,7 @@ proptest! {
                 prop_assert_eq!(client.established, Some(Err(reason("500"))));
                 return Ok(());
             }
+            other => panic!("a verdict this test does not know: {other:?}"),
         };
 
         if !server_type.accepts(client_type) {

@@ -237,10 +237,26 @@ pub struct ConnectionConfig {
 /// `ZMQ_NOTIFY_CONNECT` and `ZMQ_NOTIFY_DISCONNECT`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RouterNotify {
-    /// The handshake with the peer has completed.
-    pub connect: bool,
-    /// The connection has ended, having completed its handshake.
-    pub disconnect: bool,
+    pub(crate) connect: bool,
+    pub(crate) disconnect: bool,
+}
+
+impl RouterNotify {
+    /// Whether the ROUTER is told that the handshake with a peer has
+    /// completed.
+    #[must_use]
+    pub fn connect(mut self, notify: bool) -> Self {
+        self.connect = notify;
+        self
+    }
+
+    /// Whether the ROUTER is told that a connection has ended, having
+    /// completed its handshake.
+    #[must_use]
+    pub fn disconnect(mut self, notify: bool) -> Self {
+        self.disconnect = notify;
+        self
+    }
 }
 
 /// TCP keepalive probes on each TCP connection, which find a peer that
@@ -348,6 +364,7 @@ impl From<Linger> for SharedLinger {
 /// [`Context::shutdown`] gave up on connections that were still delivering,
 /// or still disconnected, when its timeout ran out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ShutdownTimedOut {
     /// How many connections were cut off.
     pub abandoned: usize,
@@ -1218,6 +1235,7 @@ impl ConnectionConfig {
 
 /// Why an application property was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidMetadata {
     /// The name does not start with `X-`, the prefix RFC 37 reserves for
     /// applications.

@@ -6,6 +6,7 @@ use std::time::Duration;
 /// How a connecting session retries after its connection fails or ends.
 /// Protocol errors, such as an incompatible peer, never retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum Reconnect {
     /// Give up: the connection's pipes close.
     Never,
@@ -35,14 +36,28 @@ impl Default for Reconnect {
 /// no flag: a disconnected endpoint is never retried.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReconnectStop {
-    /// A TCP connection attempt is refused: nothing is bound there
-    /// (`ZMQ_RECONNECT_STOP_CONN_REFUSED`).
-    pub connection_refused: bool,
-    /// A connection breaks, or times out, before its handshake completes,
-    /// as with a peer that does not speak ZMTP
+    pub(crate) connection_refused: bool,
+    pub(crate) handshake_failed: bool,
+}
+
+impl ReconnectStop {
+    /// Whether to give up when a TCP connection attempt is refused:
+    /// nothing is bound there (`ZMQ_RECONNECT_STOP_CONN_REFUSED`).
+    #[must_use]
+    pub fn connection_refused(mut self, stop: bool) -> Self {
+        self.connection_refused = stop;
+        self
+    }
+
+    /// Whether to give up when a connection breaks, or times out, before
+    /// its handshake completes, as with a peer that does not speak ZMTP
     /// (`ZMQ_RECONNECT_STOP_HANDSHAKE_FAILED`). A handshake the peer fails
     /// by breaking the protocol never retries, with or without this.
-    pub handshake_failed: bool,
+    #[must_use]
+    pub fn handshake_failed(mut self, stop: bool) -> Self {
+        self.handshake_failed = stop;
+        self
+    }
 }
 
 /// The retry schedule of one session.

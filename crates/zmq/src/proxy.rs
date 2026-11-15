@@ -117,6 +117,7 @@ enum Mode {
 /// What a proxy has moved, as libzmq's STATISTICS reports it. Each part of
 /// a multipart message counts as one message.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ProxyStatistics {
     pub frontend: SideStatistics,
     pub backend: SideStatistics,
@@ -124,6 +125,7 @@ pub struct ProxyStatistics {
 
 /// One side of a proxy's traffic.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct SideStatistics {
     /// Received by this side's socket.
     pub received: Count,
@@ -133,6 +135,7 @@ pub struct SideStatistics {
 
 /// Message parts and their octets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct Count {
     /// Message parts: a multipart message counts once for each part.
     pub messages: u64,

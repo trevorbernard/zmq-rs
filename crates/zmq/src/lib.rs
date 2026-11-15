@@ -95,6 +95,18 @@
 //! let mut router = context.socket::<zmq::Router>();
 //! router.send("to nobody in particular");
 //! ```
+//!
+//! # Stability
+//!
+//! Types marked `#[non_exhaustive]` may gain variants or fields in a minor
+//! release: the errors, [`Endpoint`], [`Event`] and [`EventKind`],
+//! [`Reconnect`], [`RouteOutcome`], [`Security`], the ZAP types
+//! [`ZapRequest`], [`ZapCredentials`] and [`ZapReply`], [`ShutdownTimedOut`]
+//! and a proxy's statistics. Match them with a wildcard arm, which for an
+//! authenticator should deny.
+//!
+//! Everything behind the `draft` feature follows libzmq's draft API, whose
+//! RFCs are drafts, and may change in any release.
 
 #[cfg(doctest)]
 #[doc = include_str!("../../../README.md")]

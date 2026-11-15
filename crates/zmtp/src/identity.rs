@@ -13,6 +13,7 @@ pub struct Identity(Frame);
 
 /// Why an [`Identity`] was rejected.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum InvalidIdentity {
     /// Longer than 255 octets.
     TooLong,
