@@ -7,19 +7,14 @@
 //! `ZMQ_ZAP_ENFORCE_DOMAIN`, it refuses every peer, which is zmq-rs's
 //! authenticator that never answers.
 
-use zmq::{
-    Authenticator, Context, Dealer, Security, Socket, SocketOptions, ZapRequest, ZapResponder,
-};
+use zmq::{Authenticator, Context, Dealer, Security, Socket, ZapRequest, ZapResponder};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, bounce_content, zero_linger};
 
 /// Client and server over TCP, the server with `security`.
 fn pair(context: &Context, security: Security) -> (Socket<Dealer>, Socket<Dealer>) {
-    let mut server = context.socket_with::<Dealer>(SocketOptions {
-        security,
-        ..zero_linger()
-    });
+    let mut server = context.socket_with::<Dealer>(zero_linger().security(security));
     let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(zero_linger());
     client.connect(&endpoint).unwrap();

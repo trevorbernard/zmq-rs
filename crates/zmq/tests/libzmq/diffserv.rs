@@ -11,10 +11,7 @@ use zmq_test_ports::free_endpoint;
 use crate::support::bounce_pair;
 
 fn serviced(type_of_service: u8) -> SocketOptions {
-    SocketOptions {
-        type_of_service,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().type_of_service(type_of_service)
 }
 
 #[test]

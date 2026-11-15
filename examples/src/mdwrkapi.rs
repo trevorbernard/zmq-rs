@@ -158,10 +158,8 @@ impl MdWorker {
 /// A new socket connected to `broker`. It discards what it could not send
 /// when dropped, as CZMQ's sockets do.
 fn connect(context: &Context, broker: &str) -> Result<Socket<Dealer>, zmq::Error> {
-    let mut worker = context.socket_with::<Dealer>(SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut worker =
+        context.socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
     worker.connect(broker)?;
     Ok(worker)
 }

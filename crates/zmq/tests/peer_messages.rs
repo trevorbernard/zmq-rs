@@ -11,12 +11,9 @@ const FIVE: Duration = Duration::from_secs(5);
 const QUIET: Duration = Duration::from_millis(100);
 
 fn quick() -> SocketOptions {
-    SocketOptions {
-        reconnect: Reconnect::Fixed {
-            interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(10),
+    })
 }
 
 fn frames(message: Message) -> Vec<Frame> {
@@ -122,17 +119,14 @@ fn hello_and_disconnect_messages_over_curve() {
     let keys = Keypair::generate();
     let server_key = keys.public();
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        security: Security::curve_server(keys),
-        ..SocketOptions::default()
-    });
+    let mut router =
+        context.socket_with::<Router>(SocketOptions::new().security(Security::curve_server(keys)));
     router.set_hello_message("welcome");
     router.set_disconnect_message("left");
     let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        security: Security::curve_client(Keypair::generate(), server_key),
-        ..SocketOptions::default()
-    });
+    let mut dealer = context.socket_with::<Dealer>(
+        SocketOptions::new().security(Security::curve_client(Keypair::generate(), server_key)),
+    );
     dealer.set_hello_message("hello");
     dealer.connect(&endpoint).unwrap();
 

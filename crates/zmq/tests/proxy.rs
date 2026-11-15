@@ -532,17 +532,11 @@ fn a_slow_backend_holds_up_only_its_own_direction() {
     let one = zmq::Hwm::Messages(std::num::NonZeroUsize::MIN);
     let mut frontend = context.socket::<Pair>();
     frontend.bind("inproc://busy-left").unwrap();
-    let mut backend = context.socket_with::<Pair>(zmq::SocketOptions {
-        send_hwm: one,
-        ..zmq::SocketOptions::default()
-    });
+    let mut backend = context.socket_with::<Pair>(zmq::SocketOptions::new().send_hwm(one));
     backend.bind("inproc://busy-right").unwrap();
     let mut left = context.socket::<Pair>();
     left.connect("inproc://busy-left").unwrap();
-    let mut right = context.socket_with::<Pair>(zmq::SocketOptions {
-        recv_hwm: one,
-        ..zmq::SocketOptions::default()
-    });
+    let mut right = context.socket_with::<Pair>(zmq::SocketOptions::new().recv_hwm(one));
     right.connect("inproc://busy-right").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();

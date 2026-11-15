@@ -93,15 +93,9 @@ fn sending_to_an_unknown_or_departed_client_fails() {
 fn a_full_client_makes_try_send_hand_the_frame_back() {
     let context = Context::new().unwrap();
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    let mut server = context.socket_with::<Server>(SocketOptions {
-        send_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut server = context.socket_with::<Server>(SocketOptions::new().send_hwm(one));
     server.bind("inproc://full").unwrap();
-    let mut client = context.socket_with::<Client>(SocketOptions {
-        recv_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut client = context.socket_with::<Client>(SocketOptions::new().recv_hwm(one));
     client.connect("inproc://full").unwrap();
     client.send("hi").unwrap();
     let (id, _) = server.try_recv().unwrap().unwrap();

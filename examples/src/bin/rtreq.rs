@@ -10,10 +10,7 @@ use zmq::{Context, Message, Req, Router, SocketOptions};
 const NBR_WORKERS: usize = 10;
 
 fn worker_task(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut worker = context.socket_with::<Req>(SocketOptions {
-        identity: random_identity(),
-        ..SocketOptions::default()
-    });
+    let mut worker = context.socket_with::<Req>(SocketOptions::new().identity(random_identity()));
     worker.connect("tcp://localhost:5671")?;
 
     let mut total = 0;

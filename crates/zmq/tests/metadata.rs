@@ -12,10 +12,7 @@ use zmq_test_ports::free_endpoint;
 const FIVE: Duration = Duration::from_secs(5);
 
 fn named(identity: &'static str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(identity).unwrap())
 }
 
 /// A message sent from a DEALER named `id` over `transport`, as received.
@@ -84,10 +81,7 @@ fn a_message_over_inproc_has_no_metadata() {
 
 #[test]
 fn a_socket_can_turn_metadata_off() {
-    let options = SocketOptions {
-        message_properties: MessageProperties::Off,
-        ..SocketOptions::default()
-    };
+    let options = SocketOptions::new().message_properties(MessageProperties::Off);
     let (first, second) = received_with(&free_endpoint(), options);
     assert!(first.metadata().is_none());
     assert!(second.metadata().is_none());
@@ -192,16 +186,12 @@ fn application_properties_are_announced_under_every_mechanism() {
     ];
     for (mechanism, server_security, client_security) in mechanisms {
         let context = Context::new().unwrap();
-        let mut server = context.socket_with::<Dealer>(SocketOptions {
-            security: server_security,
-            ..SocketOptions::default()
-        });
+        let mut server =
+            context.socket_with::<Dealer>(SocketOptions::new().security(server_security));
         server.add_metadata("X-Side", "server").unwrap();
         let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
-        let mut client = context.socket_with::<Dealer>(SocketOptions {
-            security: client_security,
-            ..SocketOptions::default()
-        });
+        let mut client =
+            context.socket_with::<Dealer>(SocketOptions::new().security(client_security));
         client.add_metadata("X-Side", "client").unwrap();
         client.connect(&endpoint).unwrap();
 

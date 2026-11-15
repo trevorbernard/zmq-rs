@@ -49,12 +49,9 @@ fn next_command(peer: &mut Peer) -> Command {
 fn our_dish_sends_join_and_leave_and_rejoins_after_reconnecting() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
-    let mut dish = context.socket_with::<Dish>(SocketOptions {
-        reconnect: Reconnect::Fixed {
-            interval: Duration::from_millis(20),
-        },
-        ..SocketOptions::default()
-    });
+    let mut dish = context.socket_with::<Dish>(SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(20),
+    }));
     dish.join(&group("a"));
     dish.join(&group("b"));
     dish.connect(&format!("tcp://{}", listener.local_addr().unwrap()))

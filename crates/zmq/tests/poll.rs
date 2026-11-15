@@ -86,19 +86,13 @@ fn a_poll_times_out_with_nothing_ready() {
 fn a_push_is_writable_only_with_room() {
     let one = Hwm::Messages(NonZeroUsize::MIN);
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        send_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(one));
     assert_eq!(
         zmq::poll_timeout([push.writable()], BRIEFLY).unwrap(),
         None,
         "no peer"
     );
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        recv_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(one));
     pull.bind("inproc://room").unwrap();
     push.connect("inproc://room").unwrap();
     assert_eq!(zmq::poll([push.writable()]).unwrap(), [true]);
@@ -119,11 +113,7 @@ fn a_push_is_writable_only_with_room() {
 /// Queues of one message each way.
 fn tiny() -> SocketOptions {
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    SocketOptions {
-        send_hwm: one,
-        recv_hwm: one,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 
 #[test]

@@ -190,14 +190,14 @@ fn open<T: SocketType>(
     endpoint: &str,
     prepare: impl FnOnce(&mut Socket<T>),
 ) -> (Socket<T>, Monitor) {
-    let options = SocketOptions {
+    let mut options = SocketOptions::new()
         // The context outlives every run: nothing may linger.
-        linger: Some(Linger::For(Duration::ZERO)),
-        max_message_size: Some(zmtp_fuzz::MAX_MESSAGE_SIZE),
-        security: security(setup),
-        heartbeat: setup.heartbeat,
-        ..SocketOptions::default()
-    };
+        .linger(Linger::For(Duration::ZERO))
+        .max_message_size(zmtp_fuzz::MAX_MESSAGE_SIZE)
+        .security(security(setup));
+    if let Some(heartbeat) = setup.heartbeat {
+        options = options.heartbeat(heartbeat);
+    }
     let mut socket = CONTEXT.socket_with::<T>(options);
     let monitor = socket.monitor();
     prepare(&mut socket);

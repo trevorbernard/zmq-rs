@@ -37,11 +37,11 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
 fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open("testdata")?;
 
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        send_hwm: Hwm::Unlimited,
-        recv_hwm: Hwm::Unlimited,
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(
+        SocketOptions::new()
+            .send_hwm(Hwm::Unlimited)
+            .recv_hwm(Hwm::Unlimited),
+    );
     router.bind("tcp://*:6000")?;
     loop {
         // First frame in each message is the sender identity, which the

@@ -24,10 +24,7 @@ fn expect_bounce_fail(server: &mut Socket<Pair>, client: &mut Socket<Pair>) {
 }
 
 fn reconnect_ivl_against_pair_socket(context: &Context, server: &mut Socket<Pair>, endpoint: &str) {
-    let mut client = context.socket_with::<Pair>(SocketOptions {
-        reconnect: Reconnect::Never,
-        ..SocketOptions::default()
-    });
+    let mut client = context.socket_with::<Pair>(SocketOptions::new().reconnect(Reconnect::Never));
     client.connect(endpoint).unwrap();
     bounce_pair(server, &mut client);
 

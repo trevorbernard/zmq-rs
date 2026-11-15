@@ -10,10 +10,8 @@ use zmq::{Context, Dealer, Message, Router, SocketOptions};
 const NBR_WORKERS: usize = 10;
 
 fn worker_task(context: Context) -> Result<(), zmq::Error> {
-    let mut worker = context.socket_with::<Dealer>(SocketOptions {
-        identity: random_identity(),
-        ..SocketOptions::default()
-    });
+    let mut worker =
+        context.socket_with::<Dealer>(SocketOptions::new().identity(random_identity()));
     worker.connect("tcp://localhost:5671")?;
 
     let mut total = 0;

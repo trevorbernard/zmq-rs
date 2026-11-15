@@ -9,20 +9,18 @@ use zmq_test_ports::free_endpoint;
 const FIVE: Duration = Duration::from_secs(5);
 
 fn forever() -> SocketOptions {
-    SocketOptions {
-        linger: Some(Linger::For(Duration::MAX)),
-        handshake_timeout: Some(Duration::MAX),
-        heartbeat: Some(Heartbeat {
+    SocketOptions::new()
+        .linger(Linger::For(Duration::MAX))
+        .handshake_timeout(Duration::MAX)
+        .heartbeat(Heartbeat {
             interval: Duration::MAX,
             timeout: Duration::MAX,
             ttl: Duration::MAX,
-        }),
-        reconnect: Reconnect::Backoff {
+        })
+        .reconnect(Reconnect::Backoff {
             initial: Duration::MAX,
             max: Duration::MAX,
-        },
-        ..SocketOptions::default()
-    }
+        })
 }
 
 /// A PUSH and a PULL with `options`, connected over TCP, exchange a

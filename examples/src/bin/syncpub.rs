@@ -11,10 +11,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // Socket to talk to clients
-    let mut publisher = context.socket_with::<Pub>(SocketOptions {
-        send_hwm: Hwm::Messages(NonZeroUsize::new(1_100_000).expect("nonzero")),
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(Hwm::Messages(
+        NonZeroUsize::new(1_100_000).expect("nonzero"),
+    )));
     publisher.bind("tcp://*:5561")?;
 
     // Socket to receive signals

@@ -37,10 +37,8 @@ fn libzmq_reads_what_we_announce_as_we_would() {
     let theirs = Socket::new(Kind::Dealer);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("ours").unwrap(),
-        ..SocketOptions::default()
-    });
+    let mut ours = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("ours").unwrap()));
     ours.connect(&format!("tcp://{addr}")).unwrap();
     ours.send_timeout("hi", FIVE).expect("sent");
 
@@ -62,12 +60,10 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     let addr = free_port();
     first.bind(&format!("tcp://{addr}"));
     let context = Context::new().unwrap();
-    let mut ours = context.socket_with::<zmq::Pull>(SocketOptions {
-        reconnect: zmq::Reconnect::Fixed {
+    let mut ours =
+        context.socket_with::<zmq::Pull>(SocketOptions::new().reconnect(zmq::Reconnect::Fixed {
             interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    });
+        }));
     ours.connect(&format!("tcp://{addr}")).unwrap();
     first.send(&[b"one"]).unwrap();
     let message = ours

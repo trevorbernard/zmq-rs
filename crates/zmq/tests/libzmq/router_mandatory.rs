@@ -20,10 +20,7 @@ fn dealer_called(
     identity: &'static str,
     options: SocketOptions,
 ) -> Socket<Dealer> {
-    context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..options
-    })
+    context.socket_with::<Dealer>(options.identity(Identity::new(identity).unwrap()))
 }
 
 #[test]
@@ -59,15 +56,9 @@ fn basic() {
 fn get_peer_state() {
     let hwm = Hwm::Messages(NonZeroUsize::new(100).unwrap());
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        send_hwm: hwm,
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm));
     router.bind("inproc://test_get_peer_state").unwrap();
-    let low_hwm = || SocketOptions {
-        recv_hwm: hwm,
-        ..SocketOptions::default()
-    };
+    let low_hwm = || SocketOptions::new().recv_hwm(hwm);
     let mut dealer1 = dealer_called(&context, "X", low_hwm());
     let mut dealer2 = dealer_called(&context, "Y", low_hwm());
     dealer1.connect("inproc://test_get_peer_state").unwrap();

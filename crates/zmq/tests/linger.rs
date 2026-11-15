@@ -39,10 +39,7 @@ fn dropping_the_context_delivers_what_was_queued() {
     within(FIVE * 6, move || {
         let context = Context::new().unwrap();
         // So nearly everything is still queued when the context goes.
-        let mut push = context.socket_with::<Push>(SocketOptions {
-            send_hwm: Hwm::Unlimited,
-            ..SocketOptions::default()
-        });
+        let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(Hwm::Unlimited));
         push.connect(&endpoint).unwrap();
         // Too much for the kernel's socket buffers to take at once.
         for _ in 0..COUNT {
@@ -112,10 +109,7 @@ fn joins_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
 #[test]
 fn a_subscriber_asked_to_linger_does() {
     let context = Context::new().unwrap();
-    let mut xsub = context.socket_with::<XSub>(SocketOptions {
-        linger: Some(Linger::Forever),
-        ..SocketOptions::default()
-    });
+    let mut xsub = context.socket_with::<XSub>(SocketOptions::new().linger(Linger::Forever));
     let endpoint = free_endpoint();
     xsub.connect(&endpoint).unwrap();
     xsub.send("upstream").unwrap();
@@ -132,10 +126,9 @@ fn a_subscriber_asked_to_linger_does() {
 fn a_bounded_linger_gives_up_on_an_unreachable_peer() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut push = context.socket_with::<Push>(SocketOptions {
-            linger: Some(Linger::For(Duration::from_millis(100))),
-            ..SocketOptions::default()
-        });
+        let mut push = context.socket_with::<Push>(
+            SocketOptions::new().linger(Linger::For(Duration::from_millis(100))),
+        );
         push.connect(&free_endpoint()).unwrap();
         push.send("never delivered").unwrap();
     });

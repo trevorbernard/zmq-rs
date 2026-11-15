@@ -15,11 +15,7 @@ const CHUNK_SIZE: usize = 250_000;
 
 fn one() -> SocketOptions {
     let hwm = Hwm::Messages(NonZeroUsize::MIN);
-    SocketOptions {
-        send_hwm: hwm,
-        recv_hwm: hwm,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().send_hwm(hwm).recv_hwm(hwm)
 }
 
 fn client_thread(context: Context) -> Result<(), zmq::Error> {

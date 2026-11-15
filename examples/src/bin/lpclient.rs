@@ -14,10 +14,8 @@ const REQUEST_RETRIES: usize = 3;
 const SERVER_ENDPOINT: &str = "tcp://localhost:5555";
 
 fn connect(context: &Context) -> Result<Socket<Req>, zmq::Error> {
-    let mut client = context.socket_with::<Req>(SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut client =
+        context.socket_with::<Req>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
     client.connect(SERVER_ENDPOINT)?;
     Ok(client)
 }

@@ -176,17 +176,11 @@ fn publisher_and_slow_subscribers(
     context: &Context,
     name: &str,
 ) -> (zmq::Socket<Pub>, zmq::Socket<Sub>, zmq::Socket<Sub>) {
-    let mut publisher = context.socket_with::<Pub>(SocketOptions {
-        send_hwm: one(),
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(one()));
     let endpoint = format!("inproc://{name}");
     publisher.bind(&endpoint).unwrap();
     let slow = |topic: &str| {
-        let mut sub = context.socket_with::<Sub>(SocketOptions {
-            recv_hwm: one(),
-            ..SocketOptions::default()
-        });
+        let mut sub = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one()));
         sub.subscribe(topic);
         sub.connect(&endpoint).unwrap();
         sub
@@ -234,15 +228,9 @@ fn send_all_waits_for_every_matching_subscriber() {
 #[test]
 fn an_xpub_can_send_without_dropping_too() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket_with::<XPub>(SocketOptions {
-        send_hwm: one(),
-        ..SocketOptions::default()
-    });
+    let mut xpub = context.socket_with::<XPub>(SocketOptions::new().send_hwm(one()));
     xpub.bind("inproc://xnodrop").unwrap();
-    let mut sub = context.socket_with::<Sub>(SocketOptions {
-        recv_hwm: one(),
-        ..SocketOptions::default()
-    });
+    let mut sub = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one()));
     sub.subscribe("a");
     sub.connect("inproc://xnodrop").unwrap();
     assert_eq!(events(&mut xpub, 1), [subscribed("a")]);

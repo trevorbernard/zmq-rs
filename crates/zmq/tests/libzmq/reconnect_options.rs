@@ -9,9 +9,7 @@
 
 use std::time::Duration;
 
-use zmq::{
-    Context, EventKind, Monitor, Pub, Reconnect, RecvTimeoutError, Socket, SocketOptions, Sub,
-};
+use zmq::{Context, EventKind, Monitor, Pub, Reconnect, RecvTimeoutError, Socket, Sub};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, zero_linger};
@@ -43,10 +41,7 @@ fn publisher(context: &Context, endpoint: &str) -> Socket<Pub> {
 }
 
 fn subscriber(context: &Context, interval: Duration) -> Socket<Sub> {
-    context.socket_with::<Sub>(SocketOptions {
-        reconnect: Reconnect::Fixed { interval },
-        ..zero_linger()
-    })
+    context.socket_with::<Sub>(zero_linger().reconnect(Reconnect::Fixed { interval }))
 }
 
 /// Connects to a publisher at `endpoint` that then goes away, as each of
@@ -131,10 +126,8 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(SocketOptions {
-            handshake_timeout: Some(Duration::from_secs(1)),
-            ..zero_linger()
-        });
+        let mut sub =
+            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
         sub.set_reconnect_stop(ReconnectStop {
             handshake_failed: true,
             ..ReconnectStop::default()
@@ -158,10 +151,8 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(SocketOptions {
-            handshake_timeout: Some(Duration::from_secs(1)),
-            ..zero_linger()
-        });
+        let mut sub =
+            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
 

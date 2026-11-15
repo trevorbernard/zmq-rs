@@ -20,11 +20,7 @@ const FIVE: Duration = Duration::from_secs(5);
 /// leaves no room.
 fn tiny() -> SocketOptions {
     let one = Hwm::Messages(NonZeroUsize::new(1).unwrap());
-    SocketOptions {
-        send_hwm: one,
-        recv_hwm: one,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 
 /// Checks `send_timeout` (one call, true if it sent) on `sender`. `fill`
@@ -132,10 +128,8 @@ fn router() {
     let context = Context::new().unwrap();
     let mut router = context.socket_with::<Router>(tiny());
     router.bind("inproc://router").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("dealer").unwrap(),
-        ..tiny()
-    });
+    let mut dealer =
+        context.socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()));
     dealer.connect("inproc://router").unwrap();
     dealer.send("hello").unwrap();
     assert_eq!(
@@ -167,10 +161,8 @@ fn router_reports_a_full_peer_after_the_timeout() {
     let context = Context::new().unwrap();
     let mut router = context.socket_with::<Router>(tiny());
     router.bind("inproc://full").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("dealer").unwrap(),
-        ..tiny()
-    });
+    let mut dealer =
+        context.socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()));
     dealer.connect("inproc://full").unwrap();
     dealer.send("hello").unwrap();
     assert!(router.recv_timeout(FIVE).unwrap().is_some());

@@ -12,11 +12,9 @@ use zmq_test_ports::free_endpoint;
 use crate::support::{FIVE, SETTLE, settle};
 
 fn options(immediate: bool) -> SocketOptions {
-    SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        immediate,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new()
+        .linger(Linger::For(Duration::ZERO))
+        .immediate(immediate)
 }
 
 /// Receives until nothing arrives for 250 ms, as libzmq's `ZMQ_RCVTIMEO`

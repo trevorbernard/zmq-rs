@@ -20,13 +20,11 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 }
 
 fn immediate() -> SocketOptions {
-    SocketOptions {
-        immediate: true,
-        reconnect: Reconnect::Fixed {
+    SocketOptions::new()
+        .immediate(true)
+        .reconnect(Reconnect::Fixed {
             interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    }
+        })
 }
 
 /// Sends `message` until a peer takes it.

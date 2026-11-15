@@ -47,10 +47,9 @@ fn unsubscribe_cleanup() {
 #[test]
 fn manual_last_value() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<ManualXPub>(SocketOptions {
-        send_hwm: Hwm::Messages(NonZeroUsize::new(2000).unwrap()),
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<ManualXPub>(
+        SocketOptions::new().send_hwm(Hwm::Messages(NonZeroUsize::new(2000).unwrap())),
+    );
     publisher
         .bind("inproc://libzmq-xpub-manual-last-value")
         .unwrap();

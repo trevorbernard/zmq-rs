@@ -14,10 +14,7 @@ const NBR_WORKERS: usize = 3;
 type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 
 fn with_identity() -> SocketOptions {
-    SocketOptions {
-        identity: random_identity(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(random_identity())
 }
 
 /// A client: a REQ that sends one request and prints the reply.

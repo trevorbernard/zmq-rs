@@ -14,62 +14,41 @@ use crate::endpoint::{Target, connect_target};
 
 /// How a socket presents itself and buffers messages. Given when the socket
 /// is created, so it applies to every connection the socket makes.
+///
+/// Starts from libzmq's defaults; each method sets one option and returns
+/// the options, so they chain:
+///
+/// ```
+/// use std::time::Duration;
+/// use zmq::{Context, Dealer, Identity, Linger, SocketOptions};
+///
+/// let options = SocketOptions::new()
+///     .identity(Identity::new("worker-1")?)
+///     .linger(Linger::For(Duration::ZERO));
+/// let context = Context::new()?;
+/// let worker = context.socket_with::<Dealer>(options);
+/// # drop(worker);
+/// # Ok::<(), Box<dyn std::error::Error>>(())
+/// ```
 #[derive(Debug, Clone)]
 pub struct SocketOptions {
-    /// The identity announced to ROUTER peers (`ZMQ_ROUTING_ID`). Empty by
-    /// default, in which case a ROUTER generates one for us.
-    pub identity: Identity,
-    /// Messages queued per peer towards it (`ZMQ_SNDHWM`, default 1000).
-    pub send_hwm: Hwm,
-    /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000).
-    pub recv_hwm: Hwm,
-    /// How long queued messages are still delivered after the socket is
-    /// dropped (`ZMQ_LINGER`). Dropping the context waits that long for
-    /// them. `None` is the socket type's default, as libzmq's: forever,
-    /// but not at all for SUB, XSUB and DISH, whose subscriptions and
-    /// joins a peer that never comes would otherwise hold up the context.
-    pub linger: Option<Linger>,
-    /// How connections retry (`ZMQ_RECONNECT_IVL`, default 100 ms).
-    pub reconnect: Reconnect,
-    /// Whether a TCP or IPC connection becomes a peer only once its
-    /// handshake completes, and stops being one whenever it breaks,
-    /// discarding what was queued on it (`ZMQ_IMMEDIATE`, default off). Off,
-    /// messages queue on it from [`connect`](crate::Socket::connect) on and
-    /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
-    pub immediate: bool,
-    /// The largest message accepted from peers, counting all its frames
-    /// (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is disconnected.
-    pub max_message_size: Option<u64>,
-    /// Whether received messages carry their connection's properties, read
-    /// with [`Message::property`](crate::Message::property) as libzmq's
-    /// `zmq_msg_gets`. On by default, as in libzmq.
-    pub message_properties: MessageProperties,
-    /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
-    /// default.
-    pub security: Security,
-    /// ZMTP 3.1 heartbeats (`ZMQ_HEARTBEAT_IVL` and friends), off by
-    /// default.
-    pub heartbeat: Option<Heartbeat>,
-    /// TCP keepalive probes on TCP connections (`ZMQ_TCP_KEEPALIVE` and
-    /// friends), off by default, leaving the system's setting. They find a
-    /// peer that vanished without closing, as when a NAT or load balancer
-    /// drops an idle connection.
-    pub tcp_keepalive: Option<TcpKeepalive>,
-    /// The IP type of service, or IPv6 traffic class, of what TCP
-    /// connections send (`ZMQ_TOS`), set before they connect or listen.
-    /// Zero, the default, leaves the system's.
-    pub type_of_service: u8,
-    /// The network interface TCP connections and listeners are bound to
-    /// (`ZMQ_BINDTODEVICE`, Linux's `SO_BINDTODEVICE`), none by default. A
-    /// bind fails, and a connect keeps retrying, where the system does not
-    /// support or permit it.
-    pub bind_to_device: Option<String>,
-    /// The SOCKS5 proxy TCP connections are made through
-    /// (`ZMQ_SOCKS_PROXY`), none by default.
-    pub socks_proxy: Option<SocksProxy>,
-    /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
-    /// `None` or zero means no limit, as libzmq's 0 does.
-    pub handshake_timeout: Option<Duration>,
+    pub(crate) identity: Identity,
+    pub(crate) send_hwm: Hwm,
+    pub(crate) recv_hwm: Hwm,
+    /// `None` is the socket type's default.
+    pub(crate) linger: Option<Linger>,
+    pub(crate) reconnect: Reconnect,
+    pub(crate) immediate: bool,
+    pub(crate) max_message_size: Option<u64>,
+    pub(crate) message_properties: MessageProperties,
+    pub(crate) security: Security,
+    pub(crate) heartbeat: Option<Heartbeat>,
+    pub(crate) tcp_keepalive: Option<TcpKeepalive>,
+    pub(crate) type_of_service: u8,
+    pub(crate) bind_to_device: Option<String>,
+    pub(crate) socks_proxy: Option<SocksProxy>,
+    /// `None` or zero is no limit.
+    pub(crate) handshake_timeout: Option<Duration>,
 }
 
 impl Default for SocketOptions {
@@ -96,6 +75,144 @@ impl Default for SocketOptions {
     }
 }
 
+impl SocketOptions {
+    /// libzmq's defaults, as [`SocketOptions::default`].
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The identity announced to ROUTER peers (`ZMQ_ROUTING_ID`). Empty by
+    /// default, in which case a ROUTER generates one for us.
+    #[must_use]
+    pub fn identity(mut self, identity: Identity) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Messages queued per peer towards it (`ZMQ_SNDHWM`, default 1000).
+    #[must_use]
+    pub fn send_hwm(mut self, hwm: impl Into<Hwm>) -> Self {
+        self.send_hwm = hwm.into();
+        self
+    }
+
+    /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000).
+    #[must_use]
+    pub fn recv_hwm(mut self, hwm: impl Into<Hwm>) -> Self {
+        self.recv_hwm = hwm.into();
+        self
+    }
+
+    /// How long queued messages are still delivered after the socket is
+    /// dropped (`ZMQ_LINGER`). Dropping the context waits that long for
+    /// them. The default is the socket type's, as libzmq's: forever, but
+    /// not at all for SUB, XSUB and DISH, whose subscriptions and joins a
+    /// peer that never comes would otherwise hold up the context.
+    #[must_use]
+    pub fn linger(mut self, linger: Linger) -> Self {
+        self.linger = Some(linger);
+        self
+    }
+
+    /// How connections retry (`ZMQ_RECONNECT_IVL`, default 100 ms).
+    #[must_use]
+    pub fn reconnect(mut self, reconnect: Reconnect) -> Self {
+        self.reconnect = reconnect;
+        self
+    }
+
+    /// Whether a TCP or IPC connection becomes a peer only once its
+    /// handshake completes, and stops being one whenever it breaks,
+    /// discarding what was queued on it (`ZMQ_IMMEDIATE`, default off). Off,
+    /// messages queue on it from [`connect`](crate::Socket::connect) on and
+    /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
+    #[must_use]
+    pub fn immediate(mut self, immediate: bool) -> Self {
+        self.immediate = immediate;
+        self
+    }
+
+    /// The largest message accepted from peers, in octets, counting all its
+    /// frames (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is
+    /// disconnected. No limit by default.
+    #[must_use]
+    pub fn max_message_size(mut self, octets: u64) -> Self {
+        self.max_message_size = Some(octets);
+        self
+    }
+
+    /// Whether received messages carry their connection's properties, read
+    /// with [`Message::property`](crate::Message::property) as libzmq's
+    /// `zmq_msg_gets`. On by default, as in libzmq.
+    #[must_use]
+    pub fn message_properties(mut self, message_properties: MessageProperties) -> Self {
+        self.message_properties = message_properties;
+        self
+    }
+
+    /// The security mechanism (`ZMQ_PLAIN_SERVER` and friends), NULL by
+    /// default.
+    #[must_use]
+    pub fn security(mut self, security: Security) -> Self {
+        self.security = security;
+        self
+    }
+
+    /// ZMTP 3.1 heartbeats (`ZMQ_HEARTBEAT_IVL` and friends), off by
+    /// default.
+    #[must_use]
+    pub fn heartbeat(mut self, heartbeat: Heartbeat) -> Self {
+        self.heartbeat = Some(heartbeat);
+        self
+    }
+
+    /// TCP keepalive probes on TCP connections (`ZMQ_TCP_KEEPALIVE` and
+    /// friends), off by default, leaving the system's setting. They find a
+    /// peer that vanished without closing, as when a NAT or load balancer
+    /// drops an idle connection.
+    #[must_use]
+    pub fn tcp_keepalive(mut self, keepalive: TcpKeepalive) -> Self {
+        self.tcp_keepalive = Some(keepalive);
+        self
+    }
+
+    /// The IP type of service, or IPv6 traffic class, of what TCP
+    /// connections send (`ZMQ_TOS`), set before they connect or listen.
+    /// Zero, the default, leaves the system's.
+    #[must_use]
+    pub fn type_of_service(mut self, type_of_service: u8) -> Self {
+        self.type_of_service = type_of_service;
+        self
+    }
+
+    /// The network interface TCP connections and listeners are bound to
+    /// (`ZMQ_BINDTODEVICE`, Linux's `SO_BINDTODEVICE`), none by default. A
+    /// bind fails, and a connect keeps retrying, where the system does not
+    /// support or permit it.
+    #[must_use]
+    pub fn bind_to_device(mut self, device: impl Into<String>) -> Self {
+        self.bind_to_device = Some(device.into());
+        self
+    }
+
+    /// The SOCKS5 proxy TCP connections are made through
+    /// (`ZMQ_SOCKS_PROXY`), none by default.
+    #[must_use]
+    pub fn socks_proxy(mut self, proxy: SocksProxy) -> Self {
+        self.socks_proxy = Some(proxy);
+        self
+    }
+
+    /// How long a handshake may take (`ZMQ_HANDSHAKE_IVL`, default 30 s).
+    /// Zero means no limit, as libzmq's 0 does.
+    #[must_use]
+    pub fn handshake_timeout(mut self, timeout: Duration) -> Self {
+        self.handshake_timeout = Some(timeout);
+        self
+    }
+}
+
 /// A SOCKS5 proxy (RFC 1928) for a socket's TCP connections, as libzmq's
 /// `ZMQ_SOCKS_PROXY`. The proxy is asked to connect to each endpoint, a host
 /// name being left for it to resolve; `ipc` and `inproc` connects, and
@@ -103,10 +220,7 @@ impl Default for SocketOptions {
 ///
 /// ```
 /// let proxy = zmq::SocksProxy::new("proxy.example:1080")?;
-/// let options = zmq::SocketOptions {
-///     socks_proxy: Some(proxy),
-///     ..zmq::SocketOptions::default()
-/// };
+/// let options = zmq::SocketOptions::new().socks_proxy(proxy);
 /// # Ok::<(), zmq::Error>(())
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -222,6 +336,7 @@ mod tests {
         assert_eq!(options.recv_hwm, thousand);
         assert_eq!(options.linger, None);
         assert_eq!(options.identity, Identity::default());
+        assert_eq!(options.socks_proxy, None);
     }
 
     #[test]

@@ -23,10 +23,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     request.join().expect("request panicked")?;
 
     // Then set the identity ourselves
-    let mut identified = context.socket_with::<Req>(SocketOptions {
-        identity: Identity::new("PEER2")?,
-        ..SocketOptions::default()
-    });
+    let mut identified =
+        context.socket_with::<Req>(SocketOptions::new().identity(Identity::new("PEER2")?));
     identified.connect("inproc://example")?;
     let request =
         thread::spawn(move || identified.request("ROUTER socket uses REQ's socket identity"));

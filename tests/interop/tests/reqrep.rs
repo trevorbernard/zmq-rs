@@ -101,10 +101,7 @@ fn a_router_sees_the_req_envelope() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let options = SocketOptions {
-        identity: zmq::Identity::new("asker").unwrap(),
-        ..SocketOptions::default()
-    };
+    let options = SocketOptions::new().identity(zmq::Identity::new("asker").unwrap());
     let mut req = context.socket_with::<Req>(options);
     req.connect(&format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("q"));
@@ -164,10 +161,7 @@ fn a_peer_closing_before_replying_fails_the_request() {
     let rep = Socket::new(Kind::Rep);
     let addr = rep.bind_loopback();
     let context = Context::new().unwrap();
-    let options = SocketOptions {
-        reconnect: Reconnect::Never,
-        ..SocketOptions::default()
-    };
+    let options = SocketOptions::new().reconnect(Reconnect::Never);
     let mut req = context.socket_with::<Req>(options);
     req.connect(&format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("anyone?"));

@@ -12,10 +12,7 @@ fn inproc(name: &str) -> String {
 }
 
 fn named(id: &str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(id.to_owned()).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(id.to_owned()).unwrap())
 }
 
 /// SHALL receive incoming messages from its peers using a fair-queuing

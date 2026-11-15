@@ -9,8 +9,7 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Frame, Metadata, Security, Socket, SocketOptions, ZapCredentials, ZapReply,
-    ZapRequest,
+    Context, Dealer, Frame, Metadata, Security, Socket, ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
 
@@ -43,10 +42,9 @@ fn server_in_domain(
             ZapReply::AuthenticationFailure
         }
     };
-    let server = context.socket_with::<Dealer>(SocketOptions {
-        security: Security::null_authenticated(domain, handler),
-        ..zero_linger()
-    });
+    let server = context.socket_with::<Dealer>(
+        zero_linger().security(Security::null_authenticated(domain, handler)),
+    );
     (server, requests)
 }
 

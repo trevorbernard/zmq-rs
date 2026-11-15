@@ -17,12 +17,10 @@ fn inproc(name: &str) -> String {
 /// cases below set with `ZMQ_SNDHWM`, `ZMQ_RCVHWM` and `ZMQ_LINGER`.
 fn tight() -> SocketOptions {
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    SocketOptions {
-        send_hwm: one,
-        recv_hwm: one,
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new()
+        .send_hwm(one)
+        .recv_hwm(one)
+        .linger(Linger::For(Duration::ZERO))
 }
 
 /// PUSH: SHALL route outgoing messages to connected peers using a

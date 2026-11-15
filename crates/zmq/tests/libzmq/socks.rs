@@ -149,10 +149,7 @@ fn serve(mut client: TcpStream, credentials: Option<(&str, &str)>) {
 }
 
 fn zero_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().linger(Linger::For(Duration::ZERO))
 }
 
 /// A PUSH bound to a loopback port, and the endpoint to reach it at.
@@ -167,10 +164,11 @@ fn setup_pull_client(
     connect_address: &str,
     socks_proxy: Option<SocksProxy>,
 ) -> Socket<Pull> {
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        socks_proxy,
-        ..zero_linger()
-    });
+    let mut options = zero_linger();
+    if let Some(proxy) = socks_proxy {
+        options = options.socks_proxy(proxy);
+    }
+    let mut pull = context.socket_with::<Pull>(options);
     pull.connect(connect_address).unwrap();
     pull
 }
@@ -215,7 +213,6 @@ const DELAY: Duration = Duration::from_millis(300);
 
 #[test]
 fn socks_proxy_options() {
-    assert_eq!(SocketOptions::default().socks_proxy, None);
     SocksProxy::new("somehost:1080").unwrap();
     // Empty value not allowed for proxy server
     assert!(matches!(

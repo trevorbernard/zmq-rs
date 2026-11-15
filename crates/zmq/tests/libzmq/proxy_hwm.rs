@@ -36,11 +36,7 @@ const UNBLOCKED: u64 = 10_000;
 
 fn lower_hwm() -> SocketOptions {
     let hwm = Hwm::Messages(NonZeroUsize::new(HWM).unwrap());
-    SocketOptions {
-        send_hwm: hwm,
-        recv_hwm: hwm,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().send_hwm(hwm).recv_hwm(hwm)
 }
 
 fn publisher_thread_main(context: Context) -> u64 {

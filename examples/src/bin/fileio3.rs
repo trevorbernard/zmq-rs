@@ -54,11 +54,8 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
     let mut file = File::open("testdata")?;
 
     let hwm = Hwm::Messages(NonZeroUsize::new(PIPELINE * 2).expect("nonzero"));
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        send_hwm: hwm,
-        recv_hwm: hwm,
-        ..SocketOptions::default()
-    });
+    let mut router =
+        context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm).recv_hwm(hwm));
     router.bind("tcp://*:6000")?;
     loop {
         let (identity, request) = router.recv()?;

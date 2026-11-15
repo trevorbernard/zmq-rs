@@ -338,12 +338,12 @@ fn sending_to_a_peer_that_left_does_not_lose_what_it_sent() {
     let mut sender = context.socket::<zmq::Pair>();
     let bound = sender.bind("ipc://*").unwrap().to_string();
     let other = Context::new().unwrap();
-    let mut receiver = other.socket_with::<zmq::Pair>(zmq::SocketOptions {
-        send_hwm: one,
-        recv_hwm: one,
-        linger: Some(zmq::Linger::For(Duration::ZERO)),
-        ..zmq::SocketOptions::default()
-    });
+    let mut receiver = other.socket_with::<zmq::Pair>(
+        zmq::SocketOptions::new()
+            .send_hwm(one)
+            .recv_hwm(one)
+            .linger(zmq::Linger::For(Duration::ZERO)),
+    );
     receiver.connect(&bound).unwrap();
     sender.send("0").unwrap();
     assert_eq!(

@@ -8,10 +8,7 @@ use zmq_test_ports::free_endpoint;
 use crate::support::{FIVE, within};
 
 fn named(identity: &'static str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(identity).unwrap())
 }
 
 #[test]

@@ -13,13 +13,11 @@ use zmq_test_ports::free_endpoint;
 const FIVE: Duration = Duration::from_secs(5);
 
 fn proxied(address: &str) -> SocketOptions {
-    SocketOptions {
-        socks_proxy: Some(SocksProxy::new(address).unwrap()),
-        reconnect: Reconnect::Fixed {
+    SocketOptions::new()
+        .socks_proxy(SocksProxy::new(address).unwrap())
+        .reconnect(Reconnect::Fixed {
             interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    }
+        })
 }
 
 /// A proxy that answers every CONNECT with `reply`, reporting each client.

@@ -7,10 +7,8 @@ use zmq_test_ports::free_endpoint;
 use crate::support::{FIVE, SETTLE};
 
 fn dealer_called_x(context: &Context, endpoint: &str) -> Socket<Dealer> {
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("X").unwrap(),
-        ..SocketOptions::default()
-    });
+    let mut dealer =
+        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("X").unwrap()));
     dealer.connect(endpoint).unwrap();
     dealer
 }

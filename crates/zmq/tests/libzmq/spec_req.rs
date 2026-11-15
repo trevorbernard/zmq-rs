@@ -111,10 +111,8 @@ fn block_on_send_no_peers() {
 /// discarded.
 fn req_only_listens_to_current_peer(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut req = context.socket_with::<Req>(SocketOptions {
-        identity: Identity::new("A").unwrap(),
-        ..SocketOptions::default()
-    });
+    let mut req =
+        context.socket_with::<Req>(SocketOptions::new().identity(Identity::new("A").unwrap()));
     let connect_address = req.bind(bind_address).unwrap().to_string();
 
     // libzmq sets ZMQ_ROUTER_MANDATORY here; a zmq-rs ROUTER's `send`

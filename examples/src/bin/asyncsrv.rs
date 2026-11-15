@@ -20,10 +20,8 @@ type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 /// make tracing easier.
 fn client_task(context: Context) -> TaskResult {
     let name = format!("{:04X}-{:04X}", randof(0x10000), randof(0x10000));
-    let mut client = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new(name.clone())?,
-        ..SocketOptions::default()
-    });
+    let mut client =
+        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new(name.clone())?));
     client.connect("tcp://localhost:5570")?;
 
     let mut request_nbr = 0;

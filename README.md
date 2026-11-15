@@ -125,10 +125,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut broker = context.socket::<Router>();
     let endpoint = broker.bind("tcp://127.0.0.1:*")?.to_string();
 
-    let mut worker = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("worker-1")?,
-        ..SocketOptions::default()
-    });
+    let options = SocketOptions::new().identity(Identity::new("worker-1")?);
+    let mut worker = context.socket_with::<Dealer>(options);
     worker.connect(&endpoint)?;
     worker.send("ready")?;
 
@@ -204,16 +202,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     let context = Context::new()?;
-    let mut server = context.socket_with::<Pull>(SocketOptions {
-        security: Security::curve_server_authenticated(server_keys, "global", authenticator),
-        ..SocketOptions::default()
-    });
+    let security = Security::curve_server_authenticated(server_keys, "global", authenticator);
+    let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security));
     let endpoint = server.bind("tcp://127.0.0.1:*")?.to_string();
 
-    let mut client = context.socket_with::<Push>(SocketOptions {
-        security: Security::curve_client(client_keys, server_public),
-        ..SocketOptions::default()
-    });
+    let security = Security::curve_client(client_keys, server_public);
+    let mut client = context.socket_with::<Push>(SocketOptions::new().security(security));
     client.connect(&endpoint)?;
     client.send("encrypted")?;
     assert_eq!(server.recv()?, "encrypted".into());

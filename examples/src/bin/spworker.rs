@@ -14,10 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Set random identity to make tracing easier
     let identity = random_identity();
     let name = text(identity.as_bytes());
-    let mut worker = context.socket_with::<Req>(SocketOptions {
-        identity,
-        ..SocketOptions::default()
-    });
+    let mut worker = context.socket_with::<Req>(SocketOptions::new().identity(identity));
     worker.connect("tcp://localhost:5556")?;
 
     // Tell broker we're ready for work

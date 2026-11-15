@@ -96,10 +96,8 @@ impl MdClient {
 /// A new socket connected to `broker`. It discards what it could not send
 /// when dropped, as CZMQ's sockets do.
 fn connect(context: &Context, broker: &str, verbose: bool) -> Result<Socket<Dealer>, zmq::Error> {
-    let mut client = context.socket_with::<Dealer>(SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut client =
+        context.socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
     client.connect(broker)?;
     if verbose {
         log(&format!("I: connecting to broker at {broker}..."));

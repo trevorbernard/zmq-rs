@@ -75,10 +75,7 @@ fn dealer_and_router_exchange_identities() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.bind("inproc://broker").unwrap();
-    let named = SocketOptions {
-        identity: Identity::new("worker").unwrap(),
-        ..SocketOptions::default()
-    };
+    let named = SocketOptions::new().identity(Identity::new("worker").unwrap());
     let mut worker = context.socket_with::<Dealer>(named);
     worker.connect("inproc://broker").unwrap();
     let mut anonymous = context.socket::<Dealer>();
@@ -210,15 +207,9 @@ fn large_frames_cross_without_copying() {
 fn the_high_water_mark_is_the_sum_of_both_sides() {
     let context = Context::new().unwrap();
     let hwm = |n| Hwm::Messages(NonZeroUsize::new(n).unwrap());
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        recv_hwm: hwm(3),
-        ..SocketOptions::default()
-    });
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));
     pull.bind("inproc://bounded").unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        send_hwm: hwm(2),
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
     push.connect("inproc://bounded").unwrap();
     for i in 0..5 {
         push.try_send(format!("{i}")).expect("2 + 3 messages fit");
@@ -240,15 +231,9 @@ fn empty_inproc_names_are_invalid() {
 fn the_sum_holds_towards_the_connecting_side_too() {
     let context = Context::new().unwrap();
     let hwm = |n| Hwm::Messages(NonZeroUsize::new(n).unwrap());
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        send_hwm: hwm(2),
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
     push.bind("inproc://outbound").unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        recv_hwm: hwm(3),
-        ..SocketOptions::default()
-    });
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));
     pull.connect("inproc://outbound").unwrap();
     // The bound PUSH learns of its peer as it next sends.
     for i in 0..5 {

@@ -88,11 +88,7 @@ fn run<F: Future>(future: F) -> F::Output {
 /// leaves no room.
 fn tiny() -> SocketOptions {
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    SocketOptions {
-        send_hwm: one,
-        recv_hwm: one,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 
 #[test]
@@ -182,10 +178,8 @@ fn a_router_receives_and_answers() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.bind("inproc://router").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("d").unwrap(),
-        ..SocketOptions::default()
-    });
+    let mut dealer =
+        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("d").unwrap()));
     dealer.connect("inproc://router").unwrap();
 
     let task = Task::new();

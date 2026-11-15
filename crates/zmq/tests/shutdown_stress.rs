@@ -100,10 +100,8 @@ fn the_last_handle_ends_the_context_on_any_thread(address: fn() -> String) {
                     let context = context.clone();
                     let endpoint = endpoint.clone();
                     thread::spawn(move || {
-                        let options = SocketOptions {
-                            linger: Some(Linger::For(Duration::from_millis(50))),
-                            ..SocketOptions::default()
-                        };
+                        let options =
+                            SocketOptions::new().linger(Linger::For(Duration::from_millis(50)));
                         let mut dealer = context.socket_with::<Dealer>(options);
                         dealer.connect(&endpoint).unwrap();
                         let _ = dealer.try_send(format!("{worker}"));

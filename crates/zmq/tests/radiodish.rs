@@ -111,15 +111,9 @@ fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
 fn a_radio_drops_for_a_slow_dish_instead_of_blocking() {
     let context = Context::new().unwrap();
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    let mut radio = context.socket_with::<Radio>(SocketOptions {
-        send_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut radio = context.socket_with::<Radio>(SocketOptions::new().send_hwm(one));
     radio.bind("inproc://slow-dish").unwrap();
-    let mut dish = context.socket_with::<Dish>(SocketOptions {
-        recv_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut dish = context.socket_with::<Dish>(SocketOptions::new().recv_hwm(one));
     dish.join(&group("g"));
     dish.connect("inproc://slow-dish").unwrap();
     let sent: Vec<usize> = (0..4)

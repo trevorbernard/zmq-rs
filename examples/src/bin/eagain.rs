@@ -8,11 +8,11 @@ use zmq::{Context, Dealer, Hwm, Linger, SocketOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut mailbox = context.socket_with::<Dealer>(SocketOptions {
-        send_hwm: Hwm::Messages(NonZeroUsize::new(4).expect("nonzero")),
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut mailbox = context.socket_with::<Dealer>(
+        SocketOptions::new()
+            .send_hwm(Hwm::Messages(NonZeroUsize::new(4).expect("nonzero")))
+            .linger(Linger::For(Duration::ZERO)),
+    );
     mailbox.connect("tcp://localhost:9876")?;
 
     for count in 0..10 {

@@ -12,10 +12,7 @@ use crate::support::{FIVE, within};
 const SETTLE: Duration = Duration::from_millis(300);
 
 fn named(identity: &'static str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(identity).unwrap())
 }
 
 fn router_2_router(named_: bool) {

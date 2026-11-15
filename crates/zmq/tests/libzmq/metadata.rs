@@ -36,14 +36,17 @@ fn zap_handler(request: &ZapRequest) -> ZapReply {
 /// request goes to the returned receiver.
 fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receiver<ZapRequest>) {
     let (seen, requests) = mpsc::channel();
-    let mut server = context.socket_with::<T>(SocketOptions {
-        security: Security::null_authenticated("DOMAIN", move |request: &ZapRequest| {
-            let _ = seen.send(request.clone());
-            zap_handler(request)
-        }),
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut server = context.socket_with::<T>(
+        SocketOptions::new()
+            .security(Security::null_authenticated(
+                "DOMAIN",
+                move |request: &ZapRequest| {
+                    let _ = seen.send(request.clone());
+                    zap_handler(request)
+                },
+            ))
+            .linger(Linger::For(Duration::ZERO)),
+    );
     let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }

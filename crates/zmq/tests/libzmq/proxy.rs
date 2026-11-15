@@ -26,10 +26,7 @@ fn rand(n: u64) -> u64 {
 }
 
 pub(crate) fn no_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().linger(Linger::For(Duration::ZERO))
 }
 
 fn control_socket(control_context: &Context) -> zmq::Socket<Sub> {
@@ -45,10 +42,9 @@ pub(crate) fn client_task(context: Context, control_context: Context, endpoint: 
     // A random routing id, to make tracing easier; libzmq's includes the
     // terminating NUL, making it ROUTING_ID_SIZE octets.
     let routing_id = format!("{:04X}-{:04X}\0", rand(0xFFFF), rand(0xFFFF));
-    let mut client = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new(routing_id.into_bytes()).unwrap(),
-        ..no_linger()
-    });
+    let mut client = context.socket_with::<Dealer>(
+        no_linger().identity(Identity::new(routing_id.into_bytes()).unwrap()),
+    );
     client.connect(&endpoint).unwrap();
     let mut control = control_socket(&control_context);
 

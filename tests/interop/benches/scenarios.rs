@@ -123,11 +123,9 @@ fn rate_text(rate: f64) -> String {
 }
 
 fn unlimited() -> SocketOptions {
-    SocketOptions {
-        send_hwm: Hwm::Unlimited,
-        recv_hwm: Hwm::Unlimited,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new()
+        .send_hwm(Hwm::Unlimited)
+        .recv_hwm(Hwm::Unlimited)
 }
 
 fn run(scenario: Scenario, ours: bool) -> f64 {
@@ -427,15 +425,12 @@ fn curve(ours: bool, size: usize, count: usize) -> f64 {
     if ours {
         let (send_cx, recv_cx) = (Context::new().unwrap(), Context::new().unwrap());
         let server_key = server.public();
-        let mut pull = recv_cx.socket_with::<Pull>(SocketOptions {
-            security: Security::curve_server(server),
-            ..SocketOptions::default()
-        });
+        let mut pull = recv_cx
+            .socket_with::<Pull>(SocketOptions::new().security(Security::curve_server(server)));
         let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
-        let mut push = send_cx.socket_with::<Push>(SocketOptions {
-            security: Security::curve_client(client, server_key),
-            ..SocketOptions::default()
-        });
+        let mut push = send_cx.socket_with::<Push>(
+            SocketOptions::new().security(Security::curve_client(client, server_key)),
+        );
         push.connect(&bound.to_string()).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {

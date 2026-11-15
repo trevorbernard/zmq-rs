@@ -65,10 +65,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = Context::new()?;
     let identity = Identity::new(me.clone())?;
-    let named = || SocketOptions {
-        identity: identity.clone(),
-        ..SocketOptions::default()
-    };
+    let named = || SocketOptions::new().identity(identity.clone());
 
     // Bind cloud frontend to endpoint
     let mut cloudfe = context.socket_with::<Router>(named());

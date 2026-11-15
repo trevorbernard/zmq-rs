@@ -31,18 +31,18 @@ fn send_until_full(router: &mut zmq::Socket<Router>, to: &RoutingId, mut sent: u
 #[test]
 fn router_mandatory_hwm() {
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        send_hwm: ONE,
-        linger: Some(Linger::For(Duration::from_millis(1))),
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(
+        SocketOptions::new()
+            .send_hwm(ONE)
+            .linger(Linger::For(Duration::from_millis(1))),
+    );
     let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
 
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("X").unwrap(),
-        recv_hwm: ONE,
-        ..SocketOptions::default()
-    });
+    let mut dealer = context.socket_with::<Dealer>(
+        SocketOptions::new()
+            .identity(Identity::new("X").unwrap())
+            .recv_hwm(ONE),
+    );
     dealer.connect(&endpoint).unwrap();
     dealer.send("Hello").unwrap();
     let (x, _) = router.recv_timeout(FIVE).unwrap().expect("Hello from X");

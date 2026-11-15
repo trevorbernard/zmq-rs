@@ -19,10 +19,9 @@ const HWM: usize = 2000;
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<XPub>(SocketOptions {
-        send_hwm: Hwm::Messages(NonZeroUsize::new(HWM).unwrap()),
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<XPub>(
+        SocketOptions::new().send_hwm(Hwm::Messages(NonZeroUsize::new(HWM).unwrap())),
+    );
     publisher.bind("inproc://libzmq-xpub-nodrop").unwrap();
 
     let mut subscriber = context.socket::<Sub>();

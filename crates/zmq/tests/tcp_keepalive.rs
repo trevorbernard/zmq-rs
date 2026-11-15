@@ -9,14 +9,11 @@ const FIVE: Duration = Duration::from_secs(5);
 
 #[test]
 fn connections_with_keepalive_carry_messages_both_ways_of_connecting() {
-    let keepalive = SocketOptions {
-        tcp_keepalive: Some(TcpKeepalive {
-            idle: Some(Duration::from_secs(30)),
-            interval: Some(Duration::from_secs(5)),
-            count: Some(3),
-        }),
-        ..SocketOptions::default()
-    };
+    let keepalive = SocketOptions::new().tcp_keepalive(TcpKeepalive {
+        idle: Some(Duration::from_secs(30)),
+        interval: Some(Duration::from_secs(5)),
+        count: Some(3),
+    });
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(keepalive.clone());
     let bound = pull.bind(&free_endpoint()).unwrap().to_string();

@@ -91,12 +91,9 @@ fn a_lost_peer_is_reported_and_retried() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let bound = pull.bind(&free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        reconnect: Reconnect::Fixed {
-            interval: Duration::from_millis(30),
-        },
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(30),
+    }));
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
     expect(&mut client, |kind| *kind == EventKind::HandshakeSucceeded);
@@ -154,19 +151,17 @@ fn an_incompatible_peer_fails_the_handshake_on_both_sides() {
 #[test]
 fn a_denied_client_is_reported_as_an_authentication_failure() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        security: Security::plain_server("", |_: &ZapRequest| ZapReply::AuthenticationFailure),
-        ..SocketOptions::default()
-    });
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
+        Security::plain_server("", |_: &ZapRequest| ZapReply::AuthenticationFailure),
+    ));
     let mut server = pull.monitor();
     let bound = pull.bind(&free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        security: Security::PlainClient(PlainCredentials {
+    let mut push = context.socket_with::<Push>(SocketOptions::new().security(
+        Security::PlainClient(PlainCredentials {
             username: Credential::new("who").unwrap(),
             password: Credential::new("me").unwrap(),
         }),
-        ..SocketOptions::default()
-    });
+    ));
     let mut client = push.monitor();
     push.connect(&bound.to_string()).unwrap();
     let denied = EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 });
@@ -178,11 +173,11 @@ fn a_denied_client_is_reported_as_an_authentication_failure() {
 fn a_silent_server_fails_the_handshake_without_detail() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        handshake_timeout: Some(Duration::from_millis(50)),
-        reconnect: Reconnect::Never,
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(
+        SocketOptions::new()
+            .handshake_timeout(Duration::from_millis(50))
+            .reconnect(Reconnect::Never),
+    );
     let mut client = push.monitor();
     push.connect(&format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
@@ -206,13 +201,11 @@ fn backoff_starts_over_once_a_connection_is_made() {
     });
     let initial = Duration::from_millis(20);
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        reconnect: Reconnect::Backoff {
+    let mut push =
+        context.socket_with::<Push>(SocketOptions::new().reconnect(Reconnect::Backoff {
             initial,
             max: Duration::from_secs(1),
-        },
-        ..SocketOptions::default()
-    });
+        }));
     let mut monitor = push.monitor();
     push.connect(&format!("tcp://{address}")).unwrap();
     for _ in 0..4 {
@@ -228,10 +221,7 @@ fn backoff_starts_over_once_a_connection_is_made() {
 
 #[test]
 fn a_zero_handshake_timeout_means_none() {
-    let no_limit = || SocketOptions {
-        handshake_timeout: Some(Duration::ZERO),
-        ..SocketOptions::default()
-    };
+    let no_limit = || SocketOptions::new().handshake_timeout(Duration::ZERO);
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(no_limit());
     let bound = pull.bind(&free_endpoint()).unwrap();
@@ -292,12 +282,9 @@ fn an_accepted_connection_is_not_also_reported_as_connected() {
 #[test]
 fn an_attempt_that_never_connects_only_retries() {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        reconnect: Reconnect::Fixed {
-            interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    });
+    let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(10),
+    }));
     let mut monitor = push.monitor();
     push.connect(&free_endpoint()).unwrap();
     let mut seen = Vec::new();

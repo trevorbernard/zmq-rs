@@ -15,7 +15,7 @@ use std::time::Duration;
 use zmq::{
     Context, Credential, Dealer, EventKind, Frame, HandshakeFailure, Identity, Keypair, Metadata,
     Monitor, PlainCredentials, ProtocolError, PublicKey, SecretKey, Security, Socket,
-    SocketOptions, ZapCredentials, ZapReply, ZapRequest,
+    ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
 use zmtp::{CurveClient, CurveClientStep, GreetingError, HandshakeError, Incoming, PeerGreeting};
@@ -78,11 +78,9 @@ impl Fixture {
                 ZapReply::AuthenticationFailure
             }
         };
-        let mut server = context.socket_with::<Dealer>(SocketOptions {
-            identity,
-            security: Security::curve_server_authenticated(server_keys, DOMAIN, handler),
-            ..zero_linger()
-        });
+        let mut server = context.socket_with::<Dealer>(zero_linger().identity(identity).security(
+            Security::curve_server_authenticated(server_keys, DOMAIN, handler),
+        ));
         let server_monitor = server.monitor();
         let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
         Self {
@@ -98,10 +96,9 @@ impl Fixture {
     }
 
     fn client(&self, security: Security) -> (Socket<Dealer>, Monitor) {
-        let mut client = self.context.socket_with::<Dealer>(SocketOptions {
-            security,
-            ..zero_linger()
-        });
+        let mut client = self
+            .context
+            .socket_with::<Dealer>(zero_linger().security(security));
         let monitor = client.monitor();
         client.connect(&self.endpoint).unwrap();
         (client, monitor)

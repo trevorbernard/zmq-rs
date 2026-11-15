@@ -81,26 +81,21 @@ fn a_libzmq_push_finds_our_wildcard_path() {
 fn plain_over_ipc_reports_an_empty_zap_address() {
     let path = socket_path("plain");
     let (seen, address) = mpsc::channel();
-    let server = SocketOptions {
-        security: Security::plain_server("", move |request: &ZapRequest| {
+    let server =
+        SocketOptions::new().security(Security::plain_server("", move |request: &ZapRequest| {
             let _ = seen.send(request.address.clone());
             ZapReply::Ok {
                 user_id: Frame::from("user"),
                 metadata: zmtp::Metadata::new(),
             }
-        }),
-        ..SocketOptions::default()
-    };
+        }));
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(server);
     pull.bind(&format!("ipc://{}", path.display())).unwrap();
-    let client = SocketOptions {
-        security: Security::PlainClient(PlainCredentials {
-            username: Credential::new("user").unwrap(),
-            password: Credential::new("secret").unwrap(),
-        }),
-        ..SocketOptions::default()
-    };
+    let client = SocketOptions::new().security(Security::PlainClient(PlainCredentials {
+        username: Credential::new("user").unwrap(),
+        password: Credential::new("secret").unwrap(),
+    }));
     let mut push = context.socket_with::<Push>(client);
     push.connect(&format!("ipc://{}", path.display())).unwrap();
     push.send("authenticated").unwrap();

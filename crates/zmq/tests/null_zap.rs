@@ -49,10 +49,7 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) -> EventKi
 fn guarded(
     authenticator: impl Fn(&ZapRequest) -> ZapReply + Send + Sync + 'static,
 ) -> SocketOptions {
-    SocketOptions {
-        security: Security::null_authenticated("lan", authenticator),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().security(Security::null_authenticated("lan", authenticator))
 }
 
 fn accepted() -> ZapReply {

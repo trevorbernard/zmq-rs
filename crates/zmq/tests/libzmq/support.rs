@@ -47,10 +47,7 @@ pub(crate) fn settle() {
 /// theirs, so a message queued to a peer that never completes its
 /// handshake does not hold the context's drop.
 pub(crate) fn zero_linger() -> SocketOptions {
-    SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().linger(Linger::For(Duration::ZERO))
 }
 
 /// A message of `parts`, as libzmq's `s_send_seq`; `""` is an empty frame.

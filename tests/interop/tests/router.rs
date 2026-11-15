@@ -21,10 +21,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 }
 
 fn identity(id: &str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(id.to_owned()).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(id.to_owned()).unwrap())
 }
 
 fn id(text: &str) -> RoutingId {
@@ -262,15 +259,12 @@ fn plain_secured_dealer_and_router() {
         }
     };
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        security: Security::plain_server("", authenticator),
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(
+        SocketOptions::new().security(Security::plain_server("", authenticator)),
+    );
     let addr = router.bind(&free_endpoint()).unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        security: Security::PlainClient(expected),
-        ..identity("secure")
-    });
+    let mut dealer =
+        context.socket_with::<Dealer>(identity("secure").security(Security::PlainClient(expected)));
     dealer.connect(&addr.to_string()).unwrap();
     dealer.send("over plain").unwrap();
     let (from, received) = within(Duration::from_secs(5), move || router.recv().unwrap());

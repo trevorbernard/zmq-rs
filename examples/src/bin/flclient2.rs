@@ -19,10 +19,8 @@ struct Flclient {
 impl Flclient {
     fn new(context: &Context) -> Self {
         Self {
-            socket: context.socket_with::<Dealer>(SocketOptions {
-                linger: Some(Linger::For(Duration::ZERO)),
-                ..SocketOptions::default()
-            }),
+            socket: context
+                .socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO))),
             servers: 0,
             sequence: 0,
         }

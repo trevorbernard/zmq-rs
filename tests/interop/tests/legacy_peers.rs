@@ -157,10 +157,7 @@ fn unhex(hex: &str) -> Vec<u8> {
 }
 
 fn named(identity: &'static str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(identity).unwrap())
 }
 
 fn message(frames: &[&'static str]) -> Message {
@@ -399,13 +396,12 @@ fn our_sub_gets_only_its_topic_from_an_old_pub(libzmq: Libzmq) {
 /// closed. Nothing it sends arrives.
 fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        security: Security::plain_server("", |_: &ZapRequest| ZapReply::Ok {
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
+        Security::plain_server("", |_: &ZapRequest| ZapReply::Ok {
             user_id: zmq::Frame::from("anyone"),
             metadata: zmq::Metadata::new(),
         }),
-        ..SocketOptions::default()
-    });
+    ));
     let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;

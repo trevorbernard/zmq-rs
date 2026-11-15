@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use zmq::{
     Context, Credential, Dealer, Frame, Identity, Metadata, PlainCredentials, Security, Socket,
-    SocketOptions, ZapCredentials, ZapReply, ZapRequest,
+    ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
 
@@ -43,26 +43,28 @@ fn authenticate(request: &ZapRequest) -> ZapReply {
 /// the returned receiver.
 fn set_up(context: &Context) -> (Socket<Dealer>, String, mpsc::Receiver<ZapRequest>) {
     let (seen, requests) = mpsc::channel();
-    let mut server = context.socket_with::<Dealer>(SocketOptions {
-        identity: Identity::new("IDENT").unwrap(),
-        security: Security::plain_server(DOMAIN, move |request: &ZapRequest| {
-            let _ = seen.send(request.clone());
-            authenticate(request)
-        }),
-        ..zero_linger()
-    });
+    let mut server = context.socket_with::<Dealer>(
+        zero_linger()
+            .identity(Identity::new("IDENT").unwrap())
+            .security(Security::plain_server(
+                DOMAIN,
+                move |request: &ZapRequest| {
+                    let _ = seen.send(request.clone());
+                    authenticate(request)
+                },
+            )),
+    );
     let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
 
 fn plain_client(context: &Context, username: &str, password: &str) -> Socket<Dealer> {
-    context.socket_with::<Dealer>(SocketOptions {
-        security: Security::PlainClient(PlainCredentials {
+    context.socket_with::<Dealer>(
+        zero_linger().security(Security::PlainClient(PlainCredentials {
             username: Credential::new(username).unwrap(),
             password: Credential::new(password).unwrap(),
-        }),
-        ..zero_linger()
-    })
+        })),
+    )
 }
 
 #[test]
@@ -85,10 +87,9 @@ fn plain_success() {
 fn plain_client_as_server_fails() {
     let context = Context::new().unwrap();
     let (mut server, endpoint, requests) = set_up(&context);
-    let mut client = context.socket_with::<Dealer>(SocketOptions {
-        security: Security::plain_server(DOMAIN, authenticate),
-        ..zero_linger()
-    });
+    let mut client = context.socket_with::<Dealer>(
+        zero_linger().security(Security::plain_server(DOMAIN, authenticate)),
+    );
     client.connect(&endpoint).unwrap();
     expect_bounce_fail(&mut server, &mut client);
     assert!(requests.try_recv().is_err(), "ZAP was asked");

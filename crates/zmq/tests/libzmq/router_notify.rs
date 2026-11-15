@@ -14,10 +14,7 @@ use crate::support::{FIVE, within};
 const SETTLE: Duration = Duration::from_millis(300);
 
 fn named(identity: &'static str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(identity).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(identity).unwrap())
 }
 
 fn recv(router: zmq::Socket<Router>) -> (Vec<u8>, Message, zmq::Socket<Router>) {
@@ -111,11 +108,11 @@ fn handshake_fail() {
 #[test]
 fn error_during_multipart() {
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        // The handshake fails if this is too small.
-        max_message_size: Some(64),
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(
+        SocketOptions::new()
+            // The handshake fails if this is too small.
+            .max_message_size(64),
+    );
     router.set_notify(RouterNotify {
         connect: false,
         disconnect: true,

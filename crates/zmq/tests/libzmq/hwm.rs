@@ -21,17 +21,11 @@ fn hwm(messages: usize) -> Hwm {
 }
 
 fn sender(context: &Context, send_hwm: usize) -> Socket<Push> {
-    context.socket_with::<Push>(SocketOptions {
-        send_hwm: hwm(send_hwm),
-        ..SocketOptions::default()
-    })
+    context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(send_hwm)))
 }
 
 fn receiver(context: &Context, recv_hwm: usize) -> Socket<Pull> {
-    context.socket_with::<Pull>(SocketOptions {
-        recv_hwm: hwm(recv_hwm),
-        ..SocketOptions::default()
-    })
+    context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(recv_hwm)))
 }
 
 /// Sends until the PUSH would block, at most [`MAX_SENDS`].

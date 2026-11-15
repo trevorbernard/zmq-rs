@@ -29,10 +29,7 @@ fn one() -> Hwm {
 }
 
 fn named(id: &str) -> SocketOptions {
-    SocketOptions {
-        identity: Identity::new(id.to_owned()).unwrap(),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().identity(Identity::new(id.to_owned()).unwrap())
 }
 
 fn id(text: &str) -> RoutingId {
@@ -45,15 +42,9 @@ fn router_and_slow_dealer(
     context: &Context,
     name: &str,
 ) -> (zmq::Socket<Router>, zmq::Socket<Dealer>) {
-    let mut router = context.socket_with::<Router>(SocketOptions {
-        send_hwm: one(),
-        ..SocketOptions::default()
-    });
+    let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(one()));
     router.bind(&format!("inproc://{name}")).unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions {
-        recv_hwm: one(),
-        ..named("d")
-    });
+    let mut dealer = context.socket_with::<Dealer>(named("d").recv_hwm(one()));
     dealer.connect(&format!("inproc://{name}")).unwrap();
     (router, dealer)
 }

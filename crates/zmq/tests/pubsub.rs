@@ -142,15 +142,9 @@ fn messages_queued_before_unsubscribing_are_filtered_out() {
 fn a_publisher_drops_for_slow_subscribers_instead_of_blocking() {
     let context = Context::new().unwrap();
     let one = Hwm::Messages(NonZeroUsize::MIN);
-    let mut publisher = context.socket_with::<Pub>(SocketOptions {
-        send_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(one));
     publisher.bind("inproc://slow").unwrap();
-    let mut subscriber = context.socket_with::<Sub>(SocketOptions {
-        recv_hwm: one,
-        ..SocketOptions::default()
-    });
+    let mut subscriber = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one));
     subscriber.subscribe("");
     subscriber.connect("inproc://slow").unwrap();
     let delivered: Vec<usize> = (0..5)

@@ -68,23 +68,16 @@ fn options(
             )
         }
     };
-    let zero_linger = SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    };
+    let zero_linger = SocketOptions::new().linger(Linger::For(Duration::ZERO));
     (
-        SocketOptions {
-            identity: Identity::new("IDENT").unwrap(),
-            security: server,
+        zero_linger
+            .clone()
+            .identity(Identity::new("IDENT").unwrap())
+            .security(server)
             // Long enough for a handshake, short enough for a test to see
             // a handler that never answers.
-            handshake_timeout: Some(SETTLE),
-            ..zero_linger.clone()
-        },
-        SocketOptions {
-            security: client,
-            ..zero_linger
-        },
+            .handshake_timeout(SETTLE),
+        zero_linger.security(client),
     )
 }
 

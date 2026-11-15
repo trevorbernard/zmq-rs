@@ -14,10 +14,7 @@ use zmq_test_ports::free_endpoint;
 use crate::support::bounce_pair;
 
 fn bound_to_device() -> SocketOptions {
-    SocketOptions {
-        bind_to_device: Some("lo".to_owned()),
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().bind_to_device("lo".to_owned())
 }
 
 #[test]

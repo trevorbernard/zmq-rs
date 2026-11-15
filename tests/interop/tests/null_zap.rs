@@ -32,16 +32,15 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) {
 #[test]
 fn we_authenticate_a_libzmq_null_peer() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        security: Security::null_authenticated("lan", |request: &ZapRequest| {
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
+        Security::null_authenticated("lan", |request: &ZapRequest| {
             assert_eq!(request.credentials, ZapCredentials::Null);
             ZapReply::Ok {
                 user_id: Frame::from("libzmq"),
                 metadata: Metadata::new(),
             }
         }),
-        ..SocketOptions::default()
-    });
+    ));
     let bound = pull.bind(&free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
@@ -60,12 +59,9 @@ fn we_authenticate_a_libzmq_null_peer() {
 #[test]
 fn we_refuse_a_libzmq_null_peer() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        security: Security::null_authenticated("lan", |_: &ZapRequest| {
-            ZapReply::AuthenticationFailure
-        }),
-        ..SocketOptions::default()
-    });
+    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
+        Security::null_authenticated("lan", |_: &ZapRequest| ZapReply::AuthenticationFailure),
+    ));
     let mut monitor = pull.monitor();
     let bound = pull.bind(&free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);

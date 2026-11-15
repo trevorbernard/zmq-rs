@@ -11,12 +11,9 @@ const FIVE: Duration = Duration::from_secs(5);
 const BRIEFLY: Duration = Duration::from_millis(200);
 
 fn fast_reconnect() -> SocketOptions {
-    SocketOptions {
-        reconnect: Reconnect::Fixed {
-            interval: Duration::from_millis(10),
-        },
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(10),
+    })
 }
 
 #[test]
@@ -196,10 +193,7 @@ fn an_immediate_connection_can_be_disconnected() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let bound = pull.bind(&free_endpoint()).unwrap().to_string();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        immediate: true,
-        ..fast_reconnect()
-    });
+    let mut push = context.socket_with::<Push>(fast_reconnect().immediate(true));
     push.connect(&bound).unwrap();
     push.send("connected").unwrap();
     assert_eq!(

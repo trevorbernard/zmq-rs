@@ -25,10 +25,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 }
 
 fn secured(security: Security) -> SocketOptions {
-    SocketOptions {
-        security,
-        ..SocketOptions::default()
-    }
+    SocketOptions::new().security(security)
 }
 
 #[test]
@@ -56,10 +53,8 @@ fn max_message_size_counts_every_frame_of_a_curve_message() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions {
-        max_message_size: Some(1000),
-        ..secured(Security::curve_server(server))
-    });
+    let mut pull =
+        context.socket_with::<Pull>(secured(Security::curve_server(server)).max_message_size(1000));
     let bound = pull.bind(&free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(secured(Security::curve_client(
         Keypair::generate(),
@@ -143,13 +138,13 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind(&free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..secured(Security::curve_client(
+    let mut push = context.socket_with::<Push>(
+        secured(Security::curve_client(
             Keypair::generate(),
             Keypair::generate().public(),
         ))
-    });
+        .linger(Linger::For(Duration::ZERO)),
+    );
     push.connect(&bound.to_string()).unwrap();
     push.send("lost").unwrap();
     thread::sleep(Duration::from_millis(300));
@@ -162,10 +157,8 @@ fn a_plaintext_client_cannot_talk_to_a_curve_server() {
     let mut pull =
         context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
     let bound = pull.bind(&free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions {
-        linger: Some(Linger::For(Duration::ZERO)),
-        ..SocketOptions::default()
-    });
+    let mut push =
+        context.socket_with::<Push>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
     push.connect(&bound.to_string()).unwrap();
     // A refused client has no pipe left, so `send` could block for good.
     let _ = push.try_send("in the clear");
@@ -178,17 +171,17 @@ fn heartbeats_and_subscriptions_travel_boxed() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<Pub>(SocketOptions {
-        security: Security::curve_server(server),
-        heartbeat: Some(Heartbeat::every(Duration::from_millis(20))),
-        ..SocketOptions::default()
-    });
+    let mut publisher = context.socket_with::<Pub>(
+        SocketOptions::new()
+            .security(Security::curve_server(server))
+            .heartbeat(Heartbeat::every(Duration::from_millis(20))),
+    );
     let bound = publisher.bind(&free_endpoint()).unwrap();
-    let mut subscriber = context.socket_with::<Sub>(SocketOptions {
-        security: Security::curve_client(Keypair::generate(), server_key),
-        heartbeat: Some(Heartbeat::every(Duration::from_millis(20))),
-        ..SocketOptions::default()
-    });
+    let mut subscriber = context.socket_with::<Sub>(
+        SocketOptions::new()
+            .security(Security::curve_client(Keypair::generate(), server_key))
+            .heartbeat(Heartbeat::every(Duration::from_millis(20))),
+    );
     subscriber.subscribe("news");
     subscriber.connect(&bound.to_string()).unwrap();
     let started = std::time::Instant::now();
