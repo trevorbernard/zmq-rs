@@ -1,4 +1,4 @@
-//! Per-socket options, fixed when the socket is created.
+//! Per-socket options, given when the socket is created.
 
 use std::fmt;
 use std::num::NonZeroUsize;
@@ -14,6 +14,13 @@ use crate::endpoint::{Target, connect_target};
 
 /// How a socket presents itself and buffers messages. Given when the socket
 /// is created, so it applies to every connection the socket makes.
+///
+/// Each option can be changed later with the socket's method of the same
+/// name prefixed with `set_`, such as
+/// [`set_linger`](crate::Socket::set_linger), as libzmq's `zmq_setsockopt`
+/// on a live socket: the linger and the high-water marks change for the
+/// connections the socket has, every other option for binds and connects
+/// made afterwards.
 ///
 /// Starts from libzmq's defaults; each method sets one option and returns
 /// the options, so they chain:

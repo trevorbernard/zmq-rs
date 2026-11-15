@@ -187,8 +187,9 @@ pub struct ConnectionConfig {
     /// and queue, from the start and across reconnections.
     pub immediate: bool,
     /// How long queued messages keep being delivered after the connection's
-    /// sender is dropped.
-    pub linger: Linger,
+    /// sender is dropped. Shared by every connection made with a clone of
+    /// this config, so that changing it reaches them all.
+    pub linger: SharedLinger,
     /// The security mechanism, NULL by default.
     pub security: Security,
     /// ZMTP 3.1 heartbeats, off by default.
@@ -320,6 +321,30 @@ impl Linger {
     }
 }
 
+/// A socket's [`Linger`], read when a connection's sender is dropped rather
+/// than when the connection is made, as libzmq reads `ZMQ_LINGER` when the
+/// socket closes. Clones share the one value.
+#[derive(Debug, Clone, Default)]
+pub struct SharedLinger(Arc<Mutex<Linger>>);
+
+impl SharedLinger {
+    /// The linger now.
+    pub fn get(&self) -> Linger {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Changes the linger for every holder of a clone.
+    pub fn set(&self, linger: Linger) {
+        *self.0.lock().unwrap_or_else(PoisonError::into_inner) = linger;
+    }
+}
+
+impl From<Linger> for SharedLinger {
+    fn from(linger: Linger) -> Self {
+        Self(Arc::new(Mutex::new(linger)))
+    }
+}
+
 /// [`Context::shutdown`] gave up on connections that were still delivering,
 /// or still disconnected, when its timeout ran out.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -434,8 +459,8 @@ impl Inbound {
         self.reader.is_drained() && self.farewell.is_none()
     }
 
-    pub(crate) fn raise_hwm(&mut self, hwm: Hwm) {
-        self.reader.raise_hwm(hwm);
+    pub(crate) fn set_hwm(&mut self, hwm: Hwm) {
+        self.reader.set_hwm(hwm);
     }
 
     #[inline(always)]
@@ -749,14 +774,6 @@ fn introduce(end: &InprocEnd) -> Established {
     }
 }
 
-/// The HWM of an `inproc` pipe whose ends have HWMs `a` and `b`.
-fn hwm_sum(a: Hwm, b: Hwm) -> Hwm {
-    match (a, b) {
-        (Hwm::Messages(a), Hwm::Messages(b)) => Hwm::Messages(a.saturating_add(b.get())),
-        _ => Hwm::Unlimited,
-    }
-}
-
 /// Passes a bind's result through, reporting a failure to the monitors.
 fn reported<T>(result: io::Result<T>, config: &ConnectionConfig, endpoint: &str) -> io::Result<T> {
     result.inspect_err(|err| {
@@ -781,7 +798,7 @@ impl ConnectionConfig {
             message_properties: MessageProperties::default(),
             reconnect: Reconnect::default(),
             immediate: false,
-            linger: Linger::default(),
+            linger: SharedLinger::default(),
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
@@ -953,12 +970,8 @@ impl Context {
             // Made before the bind, with only the connector's marks: each
             // direction now holds what both sides would have buffered, as
             // for a connect to a bound name.
-            server
-                .rx
-                .raise_hwm(hwm_sum(pending.end.send_hwm, end.recv_hwm));
-            server
-                .tx
-                .raise_hwm(hwm_sum(end.send_hwm, pending.end.recv_hwm));
+            server.rx.set_hwm(end.recv_hwm);
+            server.tx.set_hwm(end.send_hwm);
             if let Some(server) = pair(&end, &pending.end, server, &pending.client) {
                 let _ = writer.try_send(server);
             }
@@ -986,16 +999,6 @@ impl Context {
             .bound
             .get_mut(name)
             .filter(|binding| !binding.connections.is_closed());
-        // Bound: each direction holds what the sender and the receiver
-        // would each have buffered, as in libzmq. Otherwise only our side
-        // is known.
-        let (send_hwm, recv_hwm) = match &binding {
-            Some(binding) => (
-                hwm_sum(end.send_hwm, binding.end.recv_hwm),
-                hwm_sum(end.recv_hwm, binding.end.send_hwm),
-            ),
-            None => (end.send_hwm, end.recv_hwm),
-        };
         let (conflate_out, conflate_in) = match &binding {
             Some(binding) => (
                 end.conflate_outbound || binding.end.conflate_inbound,
@@ -1003,8 +1006,18 @@ impl Context {
             ),
             None => (end.conflate_outbound, end.conflate_inbound),
         };
-        let (tx, server_rx) = message_pipe(send_hwm, conflate_out);
-        let (server_tx, rx) = message_pipe(recv_hwm, conflate_in);
+        let (mut tx, mut server_rx) = message_pipe(end.send_hwm, conflate_out);
+        let (mut server_tx, mut rx) = message_pipe(end.recv_hwm, conflate_in);
+        // Each direction holds what the sender and the receiver would each
+        // have buffered, as in libzmq: each end sets its own mark, the
+        // binder's once there is one, and again whenever its socket's
+        // changes.
+        tx.set_hwm(end.send_hwm);
+        rx.set_hwm(end.recv_hwm);
+        if let Some(binding) = &binding {
+            server_rx.set_hwm(binding.end.recv_hwm);
+            server_tx.set_hwm(binding.end.send_hwm);
+        }
         let mut client = Connection {
             tx,
             rx: Inbound::new(rx),
@@ -1323,18 +1336,6 @@ mod tests {
         assert_eq!(context.inproc().pending["gone"].len(), 1);
     }
 
-    #[test]
-    fn unlimited_on_either_side_makes_the_inproc_pipe_unlimited() {
-        let two = Hwm::Messages(NonZeroUsize::new(2).unwrap());
-        let five = Hwm::Messages(NonZeroUsize::new(5).unwrap());
-        assert_eq!(
-            hwm_sum(two, Hwm::Messages(NonZeroUsize::new(3).unwrap())),
-            five
-        );
-        assert_eq!(hwm_sum(two, Hwm::Unlimited), Hwm::Unlimited);
-        assert_eq!(hwm_sum(Hwm::Unlimited, two), Hwm::Unlimited);
-    }
-
     /// Polls `poll` until it is ready, failing after five seconds.
     fn ready<T>(mut poll: impl FnMut(&mut std::task::Context<'_>) -> Poll<T>) -> T {
         let (_, waker) = crate::test_support::waker();
@@ -1562,7 +1563,7 @@ mod tests {
         let mut lingering = context.connect(
             unreachable,
             ConnectionConfig {
-                linger: Linger::For(Duration::from_secs(1)),
+                linger: Linger::For(Duration::from_secs(1)).into(),
                 ..config(SocketType::Push)
             },
         );
@@ -1592,7 +1593,7 @@ mod tests {
         let mut connection = context.connect(
             unreachable,
             ConnectionConfig {
-                linger: Linger::For(Duration::from_millis(100)),
+                linger: Linger::For(Duration::from_millis(100)).into(),
                 ..config(SocketType::Push)
             },
         );

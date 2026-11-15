@@ -307,6 +307,7 @@ impl EventLoop {
             let linger = session
                 .config
                 .linger
+                .get()
                 .deadline(now)
                 .filter(|&at| deadline.is_none_or(|deadline| at < deadline));
             let at = match session.closing {
@@ -510,11 +511,12 @@ impl EventLoop {
             // The socket dropped its sender: deliver what is queued, within
             // the linger, then close.
             if session.outbound.poll_closed(&mut cx).is_ready() {
-                if session.config.linger == Linger::For(Duration::ZERO) {
+                let linger = session.config.linger.get();
+                if linger == Linger::For(Duration::ZERO) {
                     self.close_session(id);
                     return;
                 }
-                let deadline = session.config.linger.deadline(now);
+                let deadline = linger.deadline(now);
                 if let Some(at) = deadline {
                     self.timers.push(Reverse((at, id)));
                 }

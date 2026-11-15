@@ -14,7 +14,7 @@ use std::sync::mpsc;
 use std::task::{Context as TaskContext, Poll, Waker};
 
 use atomic_waker::AtomicWaker;
-use zmq_pipe::{ReaderGone, TryRecvError, TrySendError};
+use zmq_pipe::{Hwm, ReaderGone, TryRecvError, TrySendError};
 use zmtp::Message;
 
 use crate::context::AcceptQueue;
@@ -369,6 +369,29 @@ impl Peers {
     /// The configuration new connections use.
     pub fn config_mut(&mut self) -> &mut ConnectionConfig {
         &mut self.config
+    }
+
+    /// Changes how many messages queue towards each peer, those the socket
+    /// has as well as those to come, as libzmq's `ZMQ_SNDHWM` does on a
+    /// live socket. Listeners already bound keep the mark they were bound
+    /// with for the peers they accept, as libzmq's do.
+    pub fn set_send_hwm(&mut self, hwm: Hwm) {
+        self.config.send_hwm = hwm;
+        self.accept(&mut noop_context());
+        for peer in self.list.iter_mut() {
+            peer.connection.tx.set_hwm(hwm);
+        }
+    }
+
+    /// Changes how many messages queue from each peer, as
+    /// [`set_send_hwm`](Self::set_send_hwm) does towards it
+    /// (`ZMQ_RCVHWM`).
+    pub fn set_recv_hwm(&mut self, hwm: Hwm) {
+        self.config.recv_hwm = hwm;
+        self.accept(&mut noop_context());
+        for peer in self.list.iter_mut() {
+            peer.connection.rx.set_hwm(hwm);
+        }
     }
 
     /// Connects to `addr`. The peer is usable at once: messages queue until

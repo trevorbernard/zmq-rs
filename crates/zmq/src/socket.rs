@@ -744,7 +744,7 @@ impl<T: SocketType> Socket<T> {
             recv_hwm: options.recv_hwm,
             // PEER's connect_peer names the peer at once.
             immediate: options.immediate && !is_peer(T::KIND),
-            linger: options.linger.unwrap_or_else(default_linger::<T>),
+            linger: options.linger.unwrap_or_else(default_linger::<T>).into(),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
             message_properties: options.message_properties,
@@ -779,6 +779,104 @@ impl<T: SocketType> Socket<T> {
     ) -> (&mut PeerList, &mut T::Routing) {
         self.peers.accept(cx);
         (self.peers.list_mut(), &mut self.routing)
+    }
+
+    /// Changes [`SocketOptions::linger`], as libzmq's `ZMQ_LINGER` does on a
+    /// live socket: for every connection the socket has or makes, since
+    /// the linger is read when the socket is dropped. Set it to zero just
+    /// before dropping the socket to abandon what is queued.
+    pub fn set_linger(&mut self, linger: Linger) {
+        self.peers.config_mut().linger.set(linger);
+    }
+
+    /// Changes [`SocketOptions::send_hwm`], as libzmq's `ZMQ_SNDHWM` does
+    /// on a live socket: for the connections the socket has, and for binds
+    /// and connects made from now on. A lower mark discards nothing: sends
+    /// wait, or drop, until the queue is below it. A listener already bound
+    /// gives the peers it accepts from now on the mark it was bound with,
+    /// as libzmq's does.
+    pub fn set_send_hwm(&mut self, hwm: impl Into<crate::Hwm>) {
+        self.peers.set_send_hwm(hwm.into());
+    }
+
+    /// Changes [`SocketOptions::recv_hwm`], as libzmq's `ZMQ_RCVHWM` does
+    /// on a live socket, as [`set_send_hwm`](Self::set_send_hwm) does for
+    /// the other direction.
+    pub fn set_recv_hwm(&mut self, hwm: impl Into<crate::Hwm>) {
+        self.peers.set_recv_hwm(hwm.into());
+    }
+
+    /// Changes [`SocketOptions::identity`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_identity(&mut self, identity: crate::Identity) {
+        self.peers.config_mut().identity = identity;
+    }
+
+    /// Changes [`SocketOptions::reconnect`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_reconnect(&mut self, reconnect: crate::Reconnect) {
+        self.peers.config_mut().reconnect = reconnect;
+    }
+
+    /// Changes [`SocketOptions::immediate`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_immediate(&mut self, immediate: bool) {
+        // PEER's connect_peer names the peer at once.
+        self.peers.config_mut().immediate = immediate && !is_peer(T::KIND);
+    }
+
+    /// Changes [`SocketOptions::max_message_size`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_max_message_size(&mut self, octets: u64) {
+        self.peers.config_mut().max_message_size = Some(octets);
+    }
+
+    /// Changes [`SocketOptions::message_properties`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_message_properties(&mut self, message_properties: crate::MessageProperties) {
+        self.peers.config_mut().message_properties = message_properties;
+    }
+
+    /// Changes [`SocketOptions::security`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_security(&mut self, security: crate::Security) {
+        self.peers.config_mut().security = security;
+    }
+
+    /// Changes [`SocketOptions::heartbeat`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_heartbeat(&mut self, heartbeat: crate::Heartbeat) {
+        self.peers.config_mut().heartbeat = Some(heartbeat);
+    }
+
+    /// Changes [`SocketOptions::tcp_keepalive`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_tcp_keepalive(&mut self, keepalive: crate::TcpKeepalive) {
+        self.peers.config_mut().tcp_keepalive = Some(keepalive);
+    }
+
+    /// Changes [`SocketOptions::type_of_service`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_type_of_service(&mut self, type_of_service: u8) {
+        self.peers.config_mut().tcp.type_of_service = type_of_service;
+    }
+
+    /// Changes [`SocketOptions::bind_to_device`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_bind_to_device(&mut self, device: impl Into<String>) {
+        self.peers.config_mut().tcp.bind_to_device = Some(device.into());
+    }
+
+    /// Changes [`SocketOptions::socks_proxy`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_socks_proxy(&mut self, proxy: crate::SocksProxy) {
+        self.peers.config_mut().socks_proxy = Some(proxy.0);
+    }
+
+    /// Changes [`SocketOptions::handshake_timeout`] for binds and connects made from
+    /// now on. Those already made keep what they had, as in libzmq.
+    pub fn set_handshake_timeout(&mut self, timeout: Duration) {
+        self.peers.config_mut().handshake_timeout = Some(timeout);
     }
 
     /// When connections made from now on give up instead of reconnecting,

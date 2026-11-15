@@ -39,7 +39,7 @@ Of 139 tests, these are left out.
 
 **libzmq's C API rather than behavior:** `msg_ffn`, `msg_flags`,
 `msg_init`, `ctx_options`, `ctx_destroy`, `setsockopt`,
-`getsockopt_memset`, `sockopt_hwm`, `socket_null`, `iov`, `atomics`,
+`getsockopt_memset`, `socket_null`, `iov`, `atomics`,
 `capabilities`, `ancillaries`, `system`, `sodium`, `fork`,
 `thread_safe`, `many_sockets`, `issue_566`.
 

@@ -33,6 +33,10 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         hwm: AtomicU64::new(hwm.unwrap_or(UNLIMITED)),
         ..Shared::default()
     });
+    shared
+        .progress
+        .lwm
+        .store(low_water_mark(hwm), Ordering::Relaxed);
     let writer = Writer {
         sender: Sender::Queue(producer),
         shared: shared.clone(),
@@ -40,20 +44,21 @@ pub fn pipe<T>(hwm: Hwm) -> (Writer<T>, Reader<T>) {
         peer_read: 0,
         wake_owed: false,
         hwm,
+        seen: 0,
     };
     let reader = Reader {
         receiver: Receiver::Queue(consumer),
         shared,
         read: 0,
-        lwm: low_water_mark(hwm),
     };
     (writer, reader)
 }
 
 /// How many items the reader takes between waking a waiting writer, from
-/// the high-water mark, as libzmq's `pipe_t::compute_lwm`.
-fn low_water_mark(hwm: Option<u64>) -> Option<u64> {
-    hwm.map(|hwm| hwm.div_ceil(2))
+/// the high-water mark, as libzmq's `pipe_t::compute_lwm`. [`UNLIMITED`]
+/// for never.
+fn low_water_mark(hwm: Option<u64>) -> u64 {
+    hwm.map_or(UNLIMITED, |hwm| hwm.div_ceil(2))
 }
 
 /// Creates a pipe that holds only the latest item, like libzmq's
@@ -69,12 +74,12 @@ pub fn pipe_conflated<T>() -> (Writer<T>, Reader<T>) {
         peer_read: 0,
         wake_owed: false,
         hwm: None,
+        seen: 0,
     };
     let reader = Reader {
         receiver: Receiver::Latest(latest),
         shared,
         read: 0,
-        lwm: None,
     };
     (writer, reader)
 }
@@ -114,18 +119,21 @@ fn lock<T>(slot: &Mutex<Option<T>>) -> MutexGuard<'_, Option<T>> {
 /// back and forth between the two cores (false sharing).
 #[derive(Debug, Default)]
 struct Shared {
-    /// Items the reader has taken, for the writer's high-water mark check.
-    read: CachePadded<AtomicU64>,
-    /// Set by the reader before it goes away.
-    reader_closed: AtomicBool,
+    progress: CachePadded<Progress>,
+    /// What the writer looks at on every send: [`READER_CLOSED`], set by
+    /// the reader before it goes away, and above it a count of the
+    /// changes to `hwm`, so the writer knows to load that again.
+    writer_notice: AtomicU64,
     /// Set by the writer before it goes away.
     writer_closed: AtomicBool,
     /// Items the writer sent in all, stored once as it goes away.
     final_written: AtomicU64,
-    /// The high-water mark, [`UNLIMITED`] for none. Only ever raised, by
-    /// [`Writer::raise_hwm`] or [`Reader::raise_hwm`]; the writer caches it
-    /// and reloads it only when the pipe looks full.
+    /// The high-water mark, [`UNLIMITED`] for none. Changed only by
+    /// [`Writer::set_hwm`] and [`Reader::set_hwm`]; the writer caches it
+    /// and loads it again when `writer_notice` changes.
     hwm: AtomicU64,
+    /// What each end has set, which `hwm` is the sum of.
+    marks: Mutex<Marks>,
     reader: CachePadded<ReaderWait>,
     writer_waker: CachePadded<AtomicWaker>,
 }
@@ -138,15 +146,50 @@ impl Shared {
         }
     }
 
-    fn raise_hwm(&self, hwm: Hwm) {
-        let new = limit(hwm).unwrap_or(UNLIMITED);
-        let _ = self
-            .hwm
-            .try_update(Ordering::AcqRel, Ordering::Acquire, |current| {
-                let higher = current != UNLIMITED && (new == UNLIMITED || new > current);
-                higher.then_some(new)
-            });
+    /// Records what one end sets and stores the mark that makes: the two
+    /// ends' added together, as libzmq sums the marks of an inproc
+    /// connection's two sockets, or the one's if only one has set any.
+    fn set_hwm(&self, set: impl FnOnce(&mut Marks)) {
+        let mut marks = self.marks.lock().unwrap_or_else(PoisonError::into_inner);
+        set(&mut marks);
+        let hwm = match (marks.writer, marks.reader) {
+            (Some(Hwm::Messages(a)), Some(Hwm::Messages(b))) => {
+                Hwm::Messages(a.saturating_add(b.get()))
+            }
+            (Some(_), Some(_)) => Hwm::Unlimited,
+            (Some(hwm), None) | (None, Some(hwm)) => hwm,
+            (None, None) => return,
+        };
+        let hwm = limit(hwm);
+        self.hwm.store(hwm.unwrap_or(UNLIMITED), Ordering::Release);
+        self.progress
+            .lwm
+            .store(low_water_mark(hwm), Ordering::Release);
+        self.writer_notice.fetch_add(HWM_CHANGED, Ordering::Release);
     }
+}
+
+/// In `Shared::writer_notice`: the reader is gone.
+const READER_CLOSED: u64 = 1;
+/// Added to `Shared::writer_notice` by each change to the mark.
+const HWM_CHANGED: u64 = 2;
+
+/// The reader's line: it stores `read` on every receive, and loads `lwm`
+/// there without touching a line the writer keeps.
+#[derive(Debug, Default)]
+struct Progress {
+    /// Items the reader has taken, for the writer's high-water mark check.
+    read: AtomicU64,
+    /// How many items the reader takes between waking a waiting writer,
+    /// [`UNLIMITED`] for never. Follows `Shared::hwm`.
+    lwm: AtomicU64,
+}
+
+/// What each end of a pipe has set its high-water mark to, if anything.
+#[derive(Debug, Default)]
+struct Marks {
+    writer: Option<Hwm>,
+    reader: Option<Hwm>,
 }
 
 /// How a waiting reader is woken. One line: a conflated pipe's writer reads
@@ -185,6 +228,8 @@ pub struct Writer<T> {
     /// writer exceed the high-water mark.
     peer_read: u64,
     hwm: Option<u64>,
+    /// `Shared::writer_notice` as last loaded.
+    seen: u64,
     /// Whether a waiting reader has yet to be woken for an item sent by
     /// [`try_send_unflushed`](Self::try_send_unflushed).
     wake_owed: bool,
@@ -196,7 +241,6 @@ pub struct Reader<T> {
     receiver: Receiver<T>,
     shared: Arc<Shared>,
     read: u64,
-    lwm: Option<u64>,
 }
 
 /// Why [`Writer::try_send`] did not queue the item, which it hands back.
@@ -237,17 +281,23 @@ pub enum RecvTimeoutError {
 }
 
 impl<T> Writer<T> {
-    /// Raises the high-water mark to `hwm` if that is higher, as libzmq's
-    /// `pipe_t::set_hwms` does when an inproc bind adds the binder's own to
-    /// a pipe made before it. Never lowers it.
-    pub fn raise_hwm(&mut self, hwm: Hwm) {
-        self.shared.raise_hwm(hwm);
-        self.hwm = self.shared.hwm();
+    /// Sets what this end adds to the high-water mark, as libzmq's
+    /// `pipe_t::set_hwms` does when `ZMQ_SNDHWM` or `ZMQ_RCVHWM` changes.
+    /// The pipe's mark becomes this plus what the reader has set, if
+    /// anything, in place of the one it was made with. A lower mark keeps
+    /// what is queued: the pipe is full until the reader has taken enough.
+    /// A conflated pipe has no mark to set.
+    pub fn set_hwm(&mut self, hwm: Hwm) {
+        if matches!(self.sender, Sender::Latest(_)) {
+            return;
+        }
+        self.shared.set_hwm(|marks| marks.writer = Some(hwm));
+        self.shared.writer_waker.wake();
     }
 
     /// Queues `item` if the pipe is below its high-water mark.
     pub fn try_send(&mut self, item: T) -> Result<(), TrySendError<T>> {
-        if self.is_closed() {
+        if self.notice() {
             return Err(TrySendError::Closed(item));
         }
         if self.is_full() {
@@ -273,7 +323,7 @@ impl<T> Writer<T> {
     /// once, as libzmq's `ypipe_t` shows its reader nothing until flushed.
     /// A reader that is not waiting takes the item at once.
     pub fn try_send_unflushed(&mut self, item: T) -> Result<(), TrySendError<T>> {
-        if self.is_closed() {
+        if self.notice() {
             return Err(TrySendError::Closed(item));
         }
         if self.is_full() {
@@ -360,7 +410,19 @@ impl<T> Writer<T> {
     /// Whether the reader is gone.
     #[must_use]
     pub fn is_closed(&self) -> bool {
-        self.shared.reader_closed.load(Ordering::Acquire)
+        self.shared.writer_notice.load(Ordering::Acquire) & READER_CLOSED != 0
+    }
+
+    /// Whether the reader is gone, as [`is_closed`](Self::is_closed), from
+    /// a load that also tells of a mark changed since the last: the one
+    /// load a send makes of anything the reader's end writes.
+    fn notice(&mut self) -> bool {
+        let notice = self.shared.writer_notice.load(Ordering::Acquire);
+        if notice != self.seen {
+            self.seen = notice;
+            self.hwm = self.shared.hwm();
+        }
+        notice & READER_CLOSED != 0
     }
 
     /// Checks the high-water mark against the cached reader progress, and
@@ -374,12 +436,12 @@ impl<T> Writer<T> {
         if self.written - self.peer_read < hwm {
             return false;
         }
-        self.peer_read = self.shared.read.load(Ordering::Acquire);
+        self.peer_read = self.shared.progress.read.load(Ordering::Acquire);
         if self.written - self.peer_read < hwm {
             return false;
         }
-        // The mark may have been raised since it was cached.
-        self.hwm = self.shared.hwm();
+        // Full unless the mark has changed since `notice` last looked.
+        self.notice();
         self.hwm
             .is_some_and(|hwm| self.written - self.peer_read >= hwm)
     }
@@ -387,7 +449,7 @@ impl<T> Writer<T> {
     /// As [`poll_ready`](Self::poll_ready), registering no waker: `Pending`
     /// means the pipe is full now.
     pub fn ready(&mut self) -> Poll<Result<(), ReaderGone>> {
-        if self.is_closed() {
+        if self.notice() {
             Poll::Ready(Err(ReaderGone))
         } else if self.is_full() {
             Poll::Pending
@@ -408,15 +470,14 @@ impl<T> Drop for Writer<T> {
 }
 
 impl<T> Reader<T> {
-    /// Raises the high-water mark to `hwm` if that is higher, as
-    /// [`Writer::raise_hwm`] does from this end, and wakes a writer waiting
+    /// Sets what this end adds to the high-water mark, as
+    /// [`Writer::set_hwm`] does from the other, and wakes a writer waiting
     /// for room.
-    pub fn raise_hwm(&mut self, hwm: Hwm) {
+    pub fn set_hwm(&mut self, hwm: Hwm) {
         if matches!(self.receiver, Receiver::Latest(_)) {
             return;
         }
-        self.shared.raise_hwm(hwm);
-        self.lwm = low_water_mark(self.shared.hwm());
+        self.shared.set_hwm(|marks| marks.reader = Some(hwm));
         self.shared.writer_waker.wake();
     }
 
@@ -449,11 +510,14 @@ impl<T> Reader<T> {
             }
         };
         self.read += 1;
-        self.shared.read.store(self.read, Ordering::Release);
-        if self.lwm.is_some_and(|lwm| self.read.is_multiple_of(lwm)) {
-            // The writer may have raised the mark since, which libzmq's
-            // set_hwms gives both ends at once: catch up here.
-            self.lwm = low_water_mark(self.shared.hwm());
+        self.shared
+            .progress
+            .read
+            .store(self.read, Ordering::Release);
+        // Loaded each time: a mark lowered since would otherwise leave a
+        // full writer waiting for a wake too far off.
+        let lwm = self.shared.progress.lwm.load(Ordering::Acquire);
+        if lwm != UNLIMITED && self.read.is_multiple_of(lwm) {
             self.shared.writer_waker.wake();
         }
         Ok(item)
@@ -549,7 +613,9 @@ impl<T> Reader<T> {
 
 impl<T> Drop for Reader<T> {
     fn drop(&mut self) {
-        self.shared.reader_closed.store(true, Ordering::Release);
+        self.shared
+            .writer_notice
+            .fetch_or(READER_CLOSED, Ordering::Release);
         self.shared.writer_waker.wake();
     }
 }
@@ -828,7 +894,7 @@ mod tests {
                 .poll_ready(&mut Context::from_waker(&waker))
                 .is_pending()
         );
-        reader.raise_hwm(hwm(3));
+        reader.set_hwm(hwm(3));
         assert!(wakes(&woken) > 0, "the waiting writer is woken");
         writer.try_send(1).unwrap();
         writer.try_send(2).unwrap();
@@ -845,55 +911,132 @@ mod tests {
         writer.try_send(100).unwrap();
         writer.try_send(101).unwrap();
         assert_eq!(writer.try_send(102), Err(TrySendError::Full(102)));
-        reader.raise_hwm(hwm(4));
+        reader.set_hwm(hwm(4));
         writer.try_send(102).unwrap();
         writer.try_send(103).unwrap();
         assert_eq!(writer.try_send(104), Err(TrySendError::Full(104)));
     }
 
     #[test]
-    fn the_writer_can_raise_its_own_mark() {
+    fn the_writer_can_set_its_own_mark() {
         let (mut writer, _reader) = pipe(hwm(1));
-        writer.raise_hwm(hwm(2));
+        writer.set_hwm(hwm(2));
         writer.try_send(0).unwrap();
         writer.try_send(1).unwrap();
         assert_eq!(writer.try_send(2), Err(TrySendError::Full(2)));
     }
 
     #[test]
-    fn the_reader_catches_up_with_a_mark_the_writer_raised() {
-        let (mut writer, mut reader) = pipe(hwm(2));
-        writer.raise_hwm(hwm(8));
-        for i in 0..8 {
-            writer.try_send(i).unwrap();
-        }
-        reader.try_recv().unwrap();
-        assert_eq!(reader.lwm, Some(4), "as libzmq's set_hwms recomputes it");
-    }
-
-    #[test]
-    fn raising_to_unlimited_lifts_the_mark() {
+    fn setting_unlimited_lifts_the_mark() {
         let (mut writer, mut reader) = pipe(hwm(1));
-        reader.raise_hwm(Hwm::Unlimited);
+        reader.set_hwm(Hwm::Unlimited);
         for i in 0..100 {
             writer.try_send(i).unwrap();
         }
     }
 
     #[test]
-    fn the_mark_is_never_lowered() {
-        let (mut writer, mut reader) = pipe(hwm(3));
-        reader.raise_hwm(hwm(1));
-        writer.raise_hwm(hwm(2));
-        for i in 0..3 {
+    fn an_unlimited_pipe_can_be_given_a_mark() {
+        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
+        reader.set_hwm(hwm(1));
+        writer.try_send(0).unwrap();
+        assert_eq!(writer.try_send(1), Err(TrySendError::Full(1)));
+    }
+
+    #[test]
+    fn a_lowered_mark_keeps_what_is_queued_and_holds_from_then_on() {
+        for from_writer in [true, false] {
+            let (mut writer, mut reader) = pipe(hwm(4));
+            for i in 0..3 {
+                writer.try_send(i).unwrap();
+            }
+            if from_writer {
+                writer.set_hwm(hwm(2));
+            } else {
+                reader.set_hwm(hwm(2));
+            }
+            assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+            assert_eq!(reader.try_recv(), Ok(0));
+            assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
+            assert_eq!(reader.try_recv(), Ok(1));
+            writer.try_send(3).unwrap();
+            assert_eq!(writer.try_send(4), Err(TrySendError::Full(4)));
+        }
+    }
+
+    #[test]
+    fn a_writer_full_at_a_lowered_mark_is_woken_at_its_low_water_mark() {
+        let (mut writer, mut reader) = pipe(hwm(100));
+        writer.set_hwm(hwm(2));
+        writer.try_send(0).unwrap();
+        writer.try_send(1).unwrap();
+        let (woken, waker) = counting_waker();
+        assert!(
+            writer
+                .poll_ready(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        reader.try_recv().unwrap();
+        assert!(wakes(&woken) > 0, "at 1, not the 50 of the mark it had");
+    }
+
+    #[test]
+    fn a_writer_waiting_is_woken_when_it_raises_its_own_mark() {
+        let (mut writer, _reader) = pipe(hwm(1));
+        writer.try_send(0).unwrap();
+        let (woken, waker) = counting_waker();
+        assert!(
+            writer
+                .poll_ready(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+        writer.set_hwm(hwm(2));
+        assert!(wakes(&woken) > 0);
+    }
+
+    #[test]
+    fn the_two_ends_marks_add_up() {
+        let (mut writer, mut reader) = pipe(hwm(1));
+        writer.set_hwm(hwm(2));
+        reader.set_hwm(hwm(3));
+        for i in 0..5 {
             writer.try_send(i).unwrap();
         }
-        assert_eq!(writer.try_send(3), Err(TrySendError::Full(3)));
-        let (mut writer, mut reader) = pipe(Hwm::Unlimited);
-        reader.raise_hwm(hwm(1));
+        assert_eq!(writer.try_send(5), Err(TrySendError::Full(5)));
+        // Each end replaces only its own.
+        writer.set_hwm(hwm(1));
+        for _ in 0..2 {
+            reader.try_recv().unwrap();
+        }
+        writer.try_send(5).unwrap();
+        assert_eq!(writer.try_send(6), Err(TrySendError::Full(6)));
+    }
+
+    #[test]
+    fn either_end_unlimited_makes_the_sum_unlimited() {
+        let (mut writer, mut reader) = pipe(hwm(1));
+        writer.set_hwm(hwm(1));
+        reader.set_hwm(Hwm::Unlimited);
+        for i in 0..100 {
+            writer.try_send(i).unwrap();
+        }
+        let (mut writer, mut reader) = pipe(hwm(1));
+        writer.set_hwm(Hwm::Unlimited);
+        reader.set_hwm(hwm(1));
+        for i in 0..100 {
+            writer.try_send(i).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_conflated_pipe_takes_no_mark() {
+        let (mut writer, mut reader) = pipe_conflated();
+        writer.set_hwm(hwm(1));
+        reader.set_hwm(hwm(1));
         for i in 0..10 {
             writer.try_send(i).unwrap();
         }
+        assert_eq!(reader.try_recv(), Ok(9));
     }
 
     #[test]
@@ -1167,7 +1310,7 @@ mod tests {
         const LINE: usize = 128;
         let shared = Shared::default();
         let lines = [
-            std::ptr::from_ref(&shared.read).addr() / LINE,
+            std::ptr::from_ref(&shared.progress).addr() / LINE,
             std::ptr::from_ref(&shared.reader).addr() / LINE,
             std::ptr::from_ref(&shared.writer_waker).addr() / LINE,
         ];

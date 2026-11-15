@@ -69,7 +69,7 @@ fn defaults_match_libzmq() {
     assert_eq!(config.recv_hwm, thousand);
     assert_eq!(config.identity, Identity::default());
     assert_eq!(config.max_message_size, None);
-    assert_eq!(config.linger, Linger::Forever);
+    assert_eq!(config.linger.get(), Linger::Forever);
 }
 
 #[test]
@@ -351,7 +351,7 @@ fn zero_linger_discards_queued_messages() {
     let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
-        linger: Linger::For(Duration::ZERO),
+        linger: Linger::For(Duration::ZERO).into(),
         ..eager("discard")
     };
     let mut connection = context.connect(addr, config);
@@ -370,7 +370,7 @@ fn linger_gives_up_at_its_deadline() {
     let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
-        linger: Linger::For(Duration::from_millis(100)),
+        linger: Linger::For(Duration::from_millis(100)).into(),
         ..eager("deadline")
     };
     let mut connection = context.connect(addr, config);

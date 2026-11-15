@@ -35,7 +35,8 @@ pub use context::IpcAbstractListener;
 pub use context::IpcListener;
 pub use context::{
     Connection, ConnectionConfig, Context, Heartbeat, Inbound, InprocListener, InvalidMetadata,
-    Linger, Listener, MessageProperties, RouterNotify, ShutdownTimedOut, TcpKeepalive,
+    Linger, Listener, MessageProperties, RouterNotify, SharedLinger, ShutdownTimedOut,
+    TcpKeepalive,
 };
 pub use fair_queue::FairQueue;
 pub use load_balancer::LoadBalancer;
