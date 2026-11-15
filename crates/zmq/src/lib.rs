@@ -105,6 +105,10 @@
 //! and a proxy's statistics. Match them with a wildcard arm, which for an
 //! authenticator should deny.
 //!
+//! The crates this one is built on, `zmq-core`, `zmq-pipe` and `zmtp`, are
+//! internals with no stability promise. A type of theirs re-exported here
+//! is stable under its name in this crate only.
+//!
 //! Everything behind the `draft` feature follows libzmq's draft API, whose
 //! RFCs are drafts, and may change in any release.
 
@@ -140,19 +144,24 @@ pub use socket::{
 };
 #[cfg(feature = "draft")]
 pub use socket::{HearsDisconnects, HearsHiccups, SendsHello};
+#[doc(inline)]
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
     Monitor, ProtocolError, Reconnect, RecvTimeoutError, RouteOutcome, Security, SendError,
     ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
 };
 #[cfg(feature = "draft")]
+#[doc(inline)]
 pub use zmq_core::{InvalidMetadata, ReconnectStop, RouterNotify};
+#[doc(inline)]
 pub use zmq_pipe::Hwm;
+#[doc(inline)]
 pub use zmtp::{
     Credential, Frame, Identity, InvalidIdentity, KeyError, Keypair, Message, MessageMetadata,
     Metadata, PlainCredentials, PublicKey, SecretKey, ZapCredentials, ZapReply, ZapRequest,
 };
 #[cfg(feature = "draft")]
+#[doc(inline)]
 pub use zmtp::{Group, InvalidGroup, InvalidName};
 
 /// Owns the I/O threads sockets run on. Cloning shares them.

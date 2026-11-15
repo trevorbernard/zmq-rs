@@ -26,9 +26,11 @@ proptest = { version = "1", default-features = false, features = ["std"] }
 # `all` for the TCP keepalive probe count.
 socket2 = { version = "0.6", features = ["all"] }
 zeroize = "1"
-zmtp = { path = "crates/zmtp" }
-zmq-pipe = { path = "crates/zmq-pipe" }
-zmq-core = { path = "crates/zmq-core" }
+# Internals of `zmq`, released with it at the same version: `zmq` takes
+# exactly the ones it was built with.
+zmtp = { path = "crates/zmtp", version = "=0.1.0-dev" }
+zmq-pipe = { path = "crates/zmq-pipe", version = "=0.1.0-dev" }
+zmq-core = { path = "crates/zmq-core", version = "=0.1.0-dev" }
 zmq-test-ports = { path = "tests/ports" }
 
 [workspace.lints.rust]

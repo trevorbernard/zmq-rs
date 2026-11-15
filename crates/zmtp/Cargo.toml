@@ -1,6 +1,7 @@
 [package]
 name = "zmtp"
-description = "ZeroMQ Message Transport Protocol (ZMTP 1.0-3.1) as a sans-IO state machine"
+description = "Internal to zmq: ZeroMQ Message Transport Protocol (ZMTP 1.0-3.1) as a sans-IO state machine"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

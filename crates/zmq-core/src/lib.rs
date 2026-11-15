@@ -5,6 +5,12 @@
 //! per-socket-type patterns from RFC 28-31, 41, 48, 49, 51 and 52.
 //!
 //! See `docs/architecture.md` for how the pieces fit together.
+//!
+//! # Stability
+//!
+//! This crate is an internal of [`zmq`](https://docs.rs/zmq) and makes no
+//! stability promise: any release may break its API. Depend on `zmq`, which
+//! re-exports what applications need.
 
 mod context;
 mod engine;

@@ -1,6 +1,7 @@
 [package]
 name = "zmq-core"
-description = "ZeroMQ engine: I/O threads, transports, sessions and socket patterns"
+description = "Internal to zmq: ZeroMQ engine: I/O threads, transports, sessions and socket patterns"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

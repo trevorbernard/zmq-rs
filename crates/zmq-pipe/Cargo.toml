@@ -1,6 +1,7 @@
 [package]
 name = "zmq-pipe"
-description = "Lock-free single-producer single-consumer message pipes with high-water marks"
+description = "Internal to zmq: lock-free single-producer single-consumer message pipes with high-water marks"
+readme = "README.md"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

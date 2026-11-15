@@ -23,6 +23,10 @@ Context ─ IoCommand ─▶ mailbox + mio::Waker
 | `zmq-pipe` | SPSC `Writer`/`Reader` with high-water marks and wakers | none |
 | `zmq-core` | Context, I/O threads, sessions, engines, transports, routing | mio |
 | `zmq` | Typed sockets for applications | via `zmq-core` |
+
+Only `zmq` has a stable API. The other three are its internals: `zmq`
+requires exactly the versions it was built with, all four are released
+together, and what applications need of them `zmq` re-exports.
 | `tests/interop` | Tests and benchmarks against the reference libzmq | libzmq |
 
 ## Pieces in `zmq-core`

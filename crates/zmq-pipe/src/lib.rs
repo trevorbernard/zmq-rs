@@ -7,6 +7,12 @@
 //! Like libzmq, a writer that has hit the high-water mark is woken once the
 //! reader has caught up to the low-water mark, half the high-water mark,
 //! rather than after every message.
+//!
+//! # Stability
+//!
+//! This crate is an internal of [`zmq`](https://docs.rs/zmq) and makes no
+//! stability promise: any release may break its API. Depend on `zmq`, which
+//! re-exports what applications need.
 
 mod pipe;
 mod queue;

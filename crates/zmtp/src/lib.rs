@@ -5,6 +5,12 @@
 //! mechanisms. No I/O: bytes in, events out.
 //!
 //! Specs: RFC 13, 15, 23, 24, 25, 26, 27, 32, 37. See `docs/rfc-compliance.md`.
+//!
+//! # Stability
+//!
+//! This crate is an internal of [`zmq`](https://docs.rs/zmq) and makes no
+//! stability promise: any release may break its API. Depend on `zmq`, which
+//! re-exports what applications need.
 
 mod codec;
 mod command;
