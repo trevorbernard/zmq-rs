@@ -526,6 +526,15 @@ pub enum XPub {}
 /// (RFC 29). Used with [`XPub`] to build proxies. Subscriptions are never
 /// dropped; other messages are, for a publisher at the send HWM, as in
 /// libzmq.
+///
+/// It delivers every message that arrives, so it has no matching to
+/// invert: that is its publishers' to do.
+///
+/// ```compile_fail,E0599
+/// # let context = zmq::Context::new().unwrap();
+/// let mut xsub = context.socket::<zmq::XSub>();
+/// xsub.set_invert_matching(true);
+/// ```
 #[derive(Debug)]
 pub enum XSub {}
 
@@ -1573,13 +1582,6 @@ impl fmt::Debug for SubscriptionRequest<'_> {
 }
 
 impl Socket<XSub> {
-    /// Does nothing: an XSUB delivers every message, as libzmq's does, so
-    /// there is nothing to invert. Invert the matching on its publishers.
-    #[deprecated(note = "an XSUB delivers every message, so there is nothing to invert")]
-    pub fn set_invert_matching(&mut self, on: bool) {
-        let _ = on;
-    }
-
     /// Whether every unsubscription goes to the publishers, as libzmq's
     /// `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE`, a draft option: even one of a topic
     /// subscribed more than once, or not at all. Off by default: only the
