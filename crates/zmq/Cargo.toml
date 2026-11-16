@@ -13,6 +13,10 @@ publish.workspace = true
 # SCATTER, GATHER, PEER and CHANNEL), as its --enable-drafts. Their RFCs
 # are drafts, so their API may change.
 draft = ["zmq-core/draft"]
+# Conversions between `Frame` and `bytes::Bytes`, both ways, that share a
+# payload's buffer instead of copying it. Off by default, so that `bytes`
+# is in this crate's API only for those who ask.
+bytes = ["zmtp/bytes"]
 
 [dependencies]
 zmq-core.workspace = true
@@ -20,6 +24,7 @@ zmq-pipe.workspace = true
 zmtp.workspace = true
 
 [dev-dependencies]
+bytes.workspace = true
 proptest.workspace = true
 zmq-test-ports.workspace = true
 

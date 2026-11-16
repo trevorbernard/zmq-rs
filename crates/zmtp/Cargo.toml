@@ -10,7 +10,7 @@ repository.workspace = true
 publish.workspace = true
 
 [features]
-# Public zero-copy conversions between `Frame` and `bytes::Bytes`.
+# Zero-copy conversions between `Frame` and `bytes::Bytes`, both ways.
 bytes = []
 
 [dependencies]

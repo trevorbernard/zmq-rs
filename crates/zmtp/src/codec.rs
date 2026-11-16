@@ -171,7 +171,7 @@ impl Encoder {
                 self.encode_frame(flags, &frame, out);
             } else {
                 self.encode_header(flags, frame.len() as u64, out);
-                shared(out.len(), frame.into_bytes());
+                shared(out.len(), frame.into_shared());
             }
         }
     }

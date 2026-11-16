@@ -12,6 +12,9 @@ use bytes::Bytes;
 /// routing ids, delimiters and short topics never allocate and never keep a
 /// larger buffer alive. Larger payloads are reference counted: cloning a frame
 /// or sending it to many peers never copies the data.
+///
+/// With the `bytes` feature a frame converts to and from [`bytes::Bytes`],
+/// sharing a larger payload's buffer instead of copying it.
 #[derive(Clone)]
 pub struct Frame(Repr);
 
@@ -54,7 +57,7 @@ impl Frame {
 
     /// The payload as `Bytes`: a larger payload's own buffer, not a copy;
     /// an inline one copied.
-    pub fn into_bytes(self) -> Bytes {
+    pub(crate) fn into_shared(self) -> Bytes {
         match self.0 {
             Repr::Inline { .. } => Bytes::copy_from_slice(self.as_slice()),
             Repr::Shared(bytes) => bytes,
@@ -150,6 +153,7 @@ impl From<&'static str> for Frame {
     }
 }
 
+/// Wraps `bytes` without copying, unless it is small enough to inline.
 #[cfg(feature = "bytes")]
 impl From<Bytes> for Frame {
     fn from(bytes: Bytes) -> Self {
@@ -157,10 +161,11 @@ impl From<Bytes> for Frame {
     }
 }
 
+/// A larger payload's own buffer, not a copy; an inline one copied.
 #[cfg(feature = "bytes")]
 impl From<Frame> for Bytes {
     fn from(frame: Frame) -> Self {
-        frame.into_bytes()
+        frame.into_shared()
     }
 }
 

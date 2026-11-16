@@ -96,6 +96,15 @@
 //! router.send("to nobody in particular");
 //! ```
 //!
+//! # Features
+//!
+//! Both are off by default.
+//!
+//! - `draft`: libzmq's draft socket types and options, as its
+//!   `--enable-drafts`.
+//! - `bytes`: [`Frame`] converts to and from `bytes::Bytes`, sharing a
+//!   payload's buffer instead of copying it.
+//!
 //! # Stability
 //!
 //! Types marked `#[non_exhaustive]` may gain variants or fields in a minor
