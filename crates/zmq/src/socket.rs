@@ -1245,11 +1245,29 @@ impl<T: HearsHiccups> Socket<T> {
 
 /// A socket type that publishes to subscribers: PUB, XPUB and
 /// [`ManualXPub`].
-pub trait Publishes: SocketType<Routing = Publisher> {}
+pub trait Publishes: SocketType {
+    /// The type's routing, as the publisher it is.
+    #[doc(hidden)]
+    fn publisher(routing: &mut Self::Routing) -> &mut Publisher;
+}
 
-impl Publishes for Pub {}
-impl Publishes for XPub {}
-impl Publishes for ManualXPub {}
+impl Publishes for Pub {
+    fn publisher(routing: &mut Publisher) -> &mut Publisher {
+        routing
+    }
+}
+
+impl Publishes for XPub {
+    fn publisher(routing: &mut Publisher) -> &mut Publisher {
+        routing
+    }
+}
+
+impl Publishes for ManualXPub {
+    fn publisher(routing: &mut Publisher) -> &mut Publisher {
+        routing
+    }
+}
 
 impl<T: Publishes> Socket<T> {
     /// Sends `message` to every subscriber that wants it and has room.
@@ -1259,7 +1277,7 @@ impl<T: Publishes> Socket<T> {
     pub fn send(&mut self, message: impl Into<Message>) -> Result<usize, Terminated> {
         self.alive()?;
         self.peers.accept(&mut noop());
-        Ok(self.routing.send(self.peers.list_mut(), message.into()))
+        Ok(T::publisher(&mut self.routing).send(self.peers.list_mut(), message.into()))
     }
 
     /// Sends `message` to every subscriber that wants it if all of them
@@ -1319,14 +1337,14 @@ impl<T: Publishes> Socket<T> {
         cx: &mut TaskContext<'_>,
     ) -> Poll<usize> {
         self.peers.accept(cx);
-        self.routing.poll_send_all(self.peers.list_mut(), slot, cx)
+        T::publisher(&mut self.routing).poll_send_all(self.peers.list_mut(), slot, cx)
     }
 
     /// Whether messages go to the subscribers that want none of their
     /// prefixes instead, as libzmq's `ZMQ_INVERT_MATCHING`. Its SUB peers
     /// should invert too, as they filter what arrives. Off by default.
     pub fn set_invert_matching(&mut self, on: bool) {
-        self.routing.set_invert_matching(on);
+        T::publisher(&mut self.routing).set_invert_matching(on);
     }
 
     /// How many distinct topics its subscribers hold between them, as
@@ -1335,8 +1353,9 @@ impl<T: Publishes> Socket<T> {
     #[cfg(feature = "draft")]
     pub fn topics_count(&mut self) -> usize {
         self.peers.accept(&mut noop());
-        self.routing.sync(self.peers.list_mut());
-        self.routing.topics_count()
+        let publisher = T::publisher(&mut self.routing);
+        publisher.sync(self.peers.list_mut());
+        publisher.topics_count()
     }
 }
 
