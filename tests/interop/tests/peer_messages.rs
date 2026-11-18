@@ -11,7 +11,7 @@ fn a_libzmq_dealer_receives_our_routers_hello_first() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Router>();
     ours.set_hello_message("H");
-    let endpoint = ours.bind(&free_endpoint()).unwrap();
+    let endpoint = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Dealer);
     theirs.connect(endpoint);
     assert_eq!(theirs.recv().unwrap(), [b"H".to_vec()]);
@@ -24,7 +24,7 @@ fn a_libzmq_router_receives_our_dealers_hello_first() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Dealer>();
     ours.set_hello_message("H");
-    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send("after").unwrap();
     let hello = theirs.recv().unwrap();
     assert_eq!(hello.len(), 2, "a routing id and the hello");

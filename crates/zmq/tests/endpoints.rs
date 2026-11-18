@@ -22,8 +22,8 @@ fn connections_spread_over_several_io_threads() {
     let mut pulls: Vec<_> = (0..3).map(|_| context.socket::<Pull>()).collect();
     let mut push = context.socket::<Push>();
     for pull in &mut pulls {
-        let bound = pull.bind(&free_endpoint()).unwrap();
-        push.connect(&bound.to_string()).unwrap();
+        let bound = pull.bind(free_endpoint()).unwrap();
+        push.connect(&bound).unwrap();
     }
     for i in 0..3 {
         push.send(format!("m{i}")).unwrap();
@@ -46,7 +46,7 @@ fn a_context_needs_an_io_thread() {
 fn an_unbound_port_can_be_bound_again_at_once() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
-    let bound = first.bind(&free_endpoint()).unwrap().to_string();
+    let bound = first.bind(free_endpoint()).unwrap().to_string();
     first.unbind(&bound).unwrap();
     let mut second = context.socket::<Pull>();
     second.bind(&bound).expect("the port is free");
@@ -56,7 +56,7 @@ fn an_unbound_port_can_be_bound_again_at_once() {
 fn unbinding_closes_accepted_connections() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
-    let bound = first.bind(&free_endpoint()).unwrap().to_string();
+    let bound = first.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(fast_reconnect());
     let mut monitor = push.monitor();
     push.connect(&bound).unwrap();
@@ -85,10 +85,10 @@ fn a_wildcard_host_names_the_same_bind() {
     let port = free_port().port();
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("tcp://*:{port}")).unwrap();
-    pull.unbind(&format!("tcp://0.0.0.0:{port}")).unwrap();
-    pull.bind(&format!("tcp://0.0.0.0:{port}")).unwrap();
-    pull.unbind(&format!("tcp://*:{port}")).unwrap();
+    pull.bind(format!("tcp://*:{port}")).unwrap();
+    pull.unbind(format!("tcp://0.0.0.0:{port}")).unwrap();
+    pull.bind(format!("tcp://0.0.0.0:{port}")).unwrap();
+    pull.unbind(format!("tcp://*:{port}")).unwrap();
 }
 
 #[test]
@@ -121,7 +121,7 @@ fn unbinding_ipc_removes_its_file() {
         panic!("an ipc endpoint");
     };
     assert!(path.exists());
-    pull.unbind(&bound.to_string()).unwrap();
+    pull.unbind(&bound).unwrap();
     assert!(!path.exists());
 }
 
@@ -139,9 +139,9 @@ fn an_unbound_inproc_name_is_free() {
 fn a_disconnected_peer_gets_no_more() {
     let context = Context::new().unwrap();
     let mut kept = context.socket::<Pull>();
-    let kept_at = kept.bind(&free_endpoint()).unwrap().to_string();
+    let kept_at = kept.bind(free_endpoint()).unwrap().to_string();
     let mut dropped = context.socket::<Pull>();
-    let dropped_at = dropped.bind(&free_endpoint()).unwrap().to_string();
+    let dropped_at = dropped.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&kept_at).unwrap();
     push.connect(&dropped_at).unwrap();
@@ -175,15 +175,15 @@ fn a_disconnected_endpoint_is_not_retried() {
 fn a_connection_can_be_named_by_its_address() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let port = match pull.bind(&free_endpoint()).unwrap() {
+    let port = match pull.bind(free_endpoint()).unwrap() {
         zmq::Endpoint::Tcp(addr) => addr.port(),
         other => panic!("a tcp endpoint, not {other}"),
     };
     let mut push = context.socket::<Push>();
-    push.connect(&format!("tcp://localhost:{port}")).unwrap();
-    push.disconnect(&format!("tcp://127.0.0.1:{port}")).unwrap();
+    push.connect(format!("tcp://localhost:{port}")).unwrap();
+    push.disconnect(format!("tcp://127.0.0.1:{port}")).unwrap();
     assert!(matches!(
-        push.disconnect(&format!("tcp://localhost:{port}")),
+        push.disconnect(format!("tcp://localhost:{port}")),
         Err(Error::UnknownEndpoint(_))
     ));
 }
@@ -192,7 +192,7 @@ fn a_connection_can_be_named_by_its_address() {
 fn an_immediate_connection_can_be_disconnected() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind(&free_endpoint()).unwrap().to_string();
+    let bound = pull.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(fast_reconnect().immediate(true));
     push.connect(&bound).unwrap();
     push.send("connected").unwrap();
@@ -240,7 +240,7 @@ fn a_socket_binds_an_interface_by_name() {
     let bound = pull.bind("tcp://lo:*").unwrap();
     assert!(bound.tcp_addr().unwrap().ip().is_loopback(), "{bound}");
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     push.send("over lo").unwrap();
     assert_eq!(
         pull.recv_timeout(FIVE).unwrap(),
@@ -255,8 +255,35 @@ fn a_connection_leaves_from_its_source() {
     let address = listener.local_addr().unwrap();
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("tcp://127.0.0.1:{source_port};{address}"))
+    push.connect(format!("tcp://127.0.0.1:{source_port};{address}"))
         .unwrap();
     let (_, peer) = listener.accept().unwrap();
     assert_eq!(peer.port(), source_port);
+}
+
+#[test]
+fn what_bind_returns_can_be_connected_to_and_unbound() {
+    let context = Context::new().unwrap();
+    let mut endpoints = vec![
+        "tcp://127.0.0.1:*".to_owned(),
+        "inproc://returned".to_owned(),
+    ];
+    #[cfg(unix)]
+    endpoints.push("ipc://*".to_owned());
+    #[cfg(target_os = "linux")]
+    endpoints.push(format!("ipc://@zmq-rs-returned-{}", std::process::id()));
+    for endpoint in endpoints {
+        let mut pull = context.socket::<Pull>();
+        let bound = pull.bind(&endpoint).unwrap();
+        let mut push = context.socket::<Push>();
+        push.connect(&bound).unwrap();
+        push.send("hi").unwrap();
+        assert_eq!(
+            pull.recv_timeout(FIVE).unwrap(),
+            Some("hi".into()),
+            "{endpoint}"
+        );
+        push.disconnect(&bound).unwrap();
+        pull.unbind(bound).unwrap();
+    }
 }

@@ -35,7 +35,7 @@ fn a_libzmq_client_talks_to_our_server() {
     }
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind(&free_endpoint()).unwrap();
+    let bound = server.bind(free_endpoint()).unwrap();
     let client = Socket::new(Kind::Client);
     client.set_receive_timeout(FIVE);
     client.connect(bound);
@@ -59,7 +59,7 @@ fn our_client_reaches_a_libzmq_server() {
     let addr = server.bind_loopback();
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
-    client.connect(&format!("tcp://{addr}")).unwrap();
+    client.connect(format!("tcp://{addr}")).unwrap();
     client.send("hello libzmq").unwrap();
     assert_eq!(server.recv().unwrap(), [b"hello libzmq"]);
 }
@@ -70,7 +70,7 @@ fn our_client_drops_multipart_messages() {
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
     client
-        .connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+        .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let mut peer = Peer::accept(
         &listener,
@@ -92,7 +92,7 @@ fn our_client_drops_multipart_messages() {
 fn our_server_drops_multipart_messages() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind(&free_endpoint()).unwrap();
+    let bound = server.bind(free_endpoint()).unwrap();
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Client, b"").unwrap();
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
     peer.send(&multipart).unwrap();
@@ -111,7 +111,7 @@ fn a_libzmq_server_replies_to_our_client() {
     let addr = server.bind_loopback();
     let context = Context::new().unwrap();
     let mut client = context.socket::<Client>();
-    client.connect(&format!("tcp://{addr}")).unwrap();
+    client.connect(format!("tcp://{addr}")).unwrap();
     client.send("question").unwrap();
     let (id, body) = server.recv_routed().unwrap();
     assert_eq!(body, b"question");

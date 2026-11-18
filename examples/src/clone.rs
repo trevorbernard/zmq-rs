@@ -102,9 +102,9 @@ impl Server {
     fn new(context: &Context, address: &str, port: u16, subtree: &str) -> Result<Self, zmq::Error> {
         log(&format!("I: adding server {address}:{port}..."));
         let mut snapshot = context.socket::<Dealer>();
-        snapshot.connect(&format!("{address}:{port}"))?;
+        snapshot.connect(format!("{address}:{port}"))?;
         let mut subscriber = context.socket::<Sub>();
-        subscriber.connect(&format!("{address}:{}", port + 1))?;
+        subscriber.connect(format!("{address}:{}", port + 1))?;
         subscriber.subscribe(subtree);
         subscriber.subscribe("HUGZ");
         Ok(Self {
@@ -250,7 +250,7 @@ impl Agent {
                         Err(err) => log(&format!("E: cannot connect to {address}: {err}")),
                     }
                     // We broadcast updates to all known servers
-                    if let Err(err) = self.publisher.connect(&format!("{address}:{}", port + 2)) {
+                    if let Err(err) = self.publisher.connect(format!("{address}:{}", port + 2)) {
                         log(&format!("E: cannot connect to {address}: {err}"));
                     }
                 } else {

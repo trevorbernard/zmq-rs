@@ -94,9 +94,9 @@ fn tiny() -> SocketOptions {
 fn a_pull_wakes_for_a_message_over_tcp() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
 
     let task = Task::new();
     let mut receiving = pin!(pull.recv_async());

@@ -55,9 +55,9 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     for i in 1..=100 {
         push.send(i.to_string()).unwrap();
     }
@@ -71,10 +71,10 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
 fn a_conflating_pull_that_connects_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    let bound = push.bind(&free_endpoint()).unwrap();
+    let bound = push.bind(free_endpoint()).unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
-    pull.connect(&bound.to_string()).unwrap();
+    pull.connect(&bound).unwrap();
     for i in 1..=100 {
         push.send(i.to_string()).unwrap();
     }

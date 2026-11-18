@@ -36,7 +36,7 @@ fn proxy_steerable() {
         control.bind("inproc://control").unwrap();
 
         let mut frontend = context.socket_with::<Router>(no_linger());
-        let endpoint = frontend.bind(&free_endpoint()).unwrap().to_string();
+        let endpoint = frontend.bind(free_endpoint()).unwrap().to_string();
         let mut backend = context.socket_with::<Dealer>(no_linger());
         backend.bind("inproc://backend").unwrap();
 

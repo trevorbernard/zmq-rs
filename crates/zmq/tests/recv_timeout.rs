@@ -273,7 +273,7 @@ fn a_monitor_times_out_then_sees_events_then_the_end() {
         Err(RecvTimeoutError::Timeout)
     );
     assert!(start.elapsed() >= SHORT);
-    pull.bind(&free_endpoint()).unwrap();
+    pull.bind(free_endpoint()).unwrap();
     assert_eq!(
         monitor.recv_timeout(FIVE).map(|e| e.kind),
         Ok(EventKind::Listening)

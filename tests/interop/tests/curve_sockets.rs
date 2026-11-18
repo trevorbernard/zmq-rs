@@ -42,7 +42,7 @@ fn our_curve_dealer_talks_to_a_libzmq_curve_router() {
             .security(Security::curve_client(Keypair::generate(), server.public()))
             .identity(zmq::Identity::new("ours").unwrap()),
     );
-    dealer.connect(&format!("tcp://{addr}")).unwrap();
+    dealer.connect(format!("tcp://{addr}")).unwrap();
     dealer.send("hello libzmq").unwrap();
     assert_eq!(router.recv().unwrap(), [&b"ours"[..], b"hello libzmq"]);
     router.send(&[b"ours", b"hello rust"]).unwrap();
@@ -71,7 +71,7 @@ fn a_libzmq_curve_dealer_is_authenticated_by_our_router() {
             }
         },
     )));
-    let bound = router.bind(&free_endpoint()).unwrap();
+    let bound = router.bind(free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_receive_timeout(FIVE);
     dealer.set_curve_client(
@@ -97,7 +97,7 @@ fn a_libzmq_curve_sub_subscribes_through_the_box() {
     let server_key = server.public();
     let context = Context::new().unwrap();
     let mut publisher = context.socket_with::<Pub>(secured(Security::curve_server(server)));
-    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let bound = publisher.bind(free_endpoint()).unwrap();
     let client = Keypair::generate();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.set_receive_timeout(FIVE);
@@ -135,7 +135,7 @@ fn libzmq_answers_our_boxed_pings() {
             // A dropped connection must fail the test, not quietly reconnect.
             .reconnect(Reconnect::Never),
     );
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(format!("tcp://{addr}")).unwrap();
     push.send("first").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"first"]);
     // Well past the heartbeat timeout: only boxed PONGs keep us connected.
@@ -159,7 +159,7 @@ fn libzmq_refuses_our_client_with_the_wrong_server_key() {
         ))
         .linger(Linger::For(Duration::ZERO)),
     );
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(format!("tcp://{addr}")).unwrap();
     push.send("never").unwrap();
     assert!(pull.recv().is_err());
 }

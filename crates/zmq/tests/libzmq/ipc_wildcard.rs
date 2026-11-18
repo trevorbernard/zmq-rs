@@ -14,7 +14,7 @@ fn ipc_wildcard() {
     let bound = server.bind("ipc://*").unwrap();
     assert!(matches!(bound, Endpoint::Ipc(_)));
     let mut client = context.socket::<Pair>();
-    client.connect(&bound.to_string()).unwrap();
+    client.connect(&bound).unwrap();
     within(FIVE, move || {
         let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");
         message.push("12345678ABCDEFGH12345678abcdefgh");

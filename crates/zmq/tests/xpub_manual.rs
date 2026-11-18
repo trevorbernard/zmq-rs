@@ -29,14 +29,14 @@ fn cancelled(topic: &str) -> XPubEvent {
 
 fn bound(context: &Context, name: &str) -> zmq::Socket<ManualXPub> {
     let mut xpub = context.socket::<ManualXPub>();
-    xpub.bind(&format!("inproc://{name}")).unwrap();
+    xpub.bind(format!("inproc://{name}")).unwrap();
     xpub
 }
 
 fn subscriber(context: &Context, name: &str, topic: &str) -> zmq::Socket<Sub> {
     let mut sub = context.socket::<Sub>();
     sub.subscribe(topic);
-    sub.connect(&format!("inproc://{name}")).unwrap();
+    sub.connect(format!("inproc://{name}")).unwrap();
     sub
 }
 

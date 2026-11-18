@@ -42,9 +42,9 @@ fn router_and_slow_dealer(
     name: &str,
 ) -> (zmq::Socket<Router>, zmq::Socket<Dealer>) {
     let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(one()));
-    router.bind(&format!("inproc://{name}")).unwrap();
+    router.bind(format!("inproc://{name}")).unwrap();
     let mut dealer = context.socket_with::<Dealer>(named("d").recv_hwm(one()));
-    dealer.connect(&format!("inproc://{name}")).unwrap();
+    dealer.connect(format!("inproc://{name}")).unwrap();
     (router, dealer)
 }
 

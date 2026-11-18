@@ -11,5 +11,5 @@ fn busy_poll() {
     let context = Context::new().unwrap();
     let mut socket = context.socket::<Dealer>();
     socket.set_busy_poll(Some(Duration::from_micros(1)));
-    socket.bind(&free_endpoint()).unwrap();
+    socket.bind(free_endpoint()).unwrap();
 }

@@ -26,9 +26,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn peers_address_each_other_by_id() {
     let context = Context::new().unwrap();
     let mut alice = context.socket::<Peer>();
-    let bound = alice.bind(&free_endpoint()).unwrap();
+    let bound = alice.bind(free_endpoint()).unwrap();
     let mut bob = context.socket::<Peer>();
-    let to_alice = bob.connect_peer(&bound.to_string()).unwrap();
+    let to_alice = bob.connect_peer(&bound).unwrap();
     bob.send(to_alice, "hello alice").unwrap();
 
     let (to_bob, greeting, mut alice) = within(FIVE, move || {
@@ -108,9 +108,9 @@ fn a_bad_endpoint_is_an_error() {
 fn a_channel_talks_both_ways() {
     let context = Context::new().unwrap();
     let mut left = context.socket::<Channel>();
-    let bound = left.bind(&free_endpoint()).unwrap();
+    let bound = left.bind(free_endpoint()).unwrap();
     let mut right = context.socket::<Channel>();
-    right.connect(&bound.to_string()).unwrap();
+    right.connect(&bound).unwrap();
     right.send("ping").unwrap();
     let (heard, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
     assert_eq!(heard, Frame::from("ping"));

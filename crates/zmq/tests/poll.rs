@@ -11,9 +11,9 @@ const BRIEFLY: Duration = Duration::from_millis(100);
 /// A PULL bound at `name` and a PUSH connected to it.
 fn pipeline(context: &Context, name: &str) -> (zmq::Socket<Push>, zmq::Socket<Pull>) {
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("inproc://{name}")).unwrap();
+    pull.bind(format!("inproc://{name}")).unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("inproc://{name}")).unwrap();
+    push.connect(format!("inproc://{name}")).unwrap();
     (push, pull)
 }
 

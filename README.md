@@ -40,7 +40,7 @@ use zmq::{Context, Message, Pull, Push};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let mut sink = context.socket::<Pull>();
-    let endpoint = sink.bind("tcp://127.0.0.1:*")?.to_string();
+    let endpoint = sink.bind("tcp://127.0.0.1:*")?;
 
     let mut source = context.socket::<Push>();
     source.connect(&endpoint)?;
@@ -71,7 +71,7 @@ use zmq::{Context, Rep, Req};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let mut rep = context.socket::<Rep>();
-    let endpoint = rep.bind("tcp://127.0.0.1:*")?.to_string();
+    let endpoint = rep.bind("tcp://127.0.0.1:*")?;
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
         let name = String::from_utf8_lossy(request.body().last()).into_owned();
@@ -123,7 +123,7 @@ use zmq::{Context, Dealer, Identity, Router, RoutingId, SocketOptions};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let mut broker = context.socket::<Router>();
-    let endpoint = broker.bind("tcp://127.0.0.1:*")?.to_string();
+    let endpoint = broker.bind("tcp://127.0.0.1:*")?;
 
     let options = SocketOptions::new().identity(Identity::new("worker-1")?);
     let mut worker = context.socket_with::<Dealer>(options);
@@ -204,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let security = Security::curve_server_authenticated(server_keys, "global", authenticator);
     let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security));
-    let endpoint = server.bind("tcp://127.0.0.1:*")?.to_string();
+    let endpoint = server.bind("tcp://127.0.0.1:*")?;
 
     let security = Security::curve_client(client_keys, server_public);
     let mut client = context.socket_with::<Push>(SocketOptions::new().security(security));

@@ -223,7 +223,7 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
 fn we_pull_from_an_old_push(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;
     };
@@ -278,7 +278,7 @@ fn our_req_asks_an_old_rep(libzmq: Libzmq) {
 fn an_old_req_asks_our_rep(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
     let Some(mut req) = Peer::start(libzmq, "REQ", "connect", &endpoint, &[]) else {
         return;
     };
@@ -293,7 +293,7 @@ fn an_old_req_asks_our_rep(libzmq: Libzmq) {
 fn our_router_answers_an_old_dealer_by_its_identity(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let Some(mut dealer) = Peer::start(
         libzmq,
         "DEALER",
@@ -339,7 +339,7 @@ fn an_old_router_answers_our_dealer_by_its_identity(libzmq: Libzmq) {
 fn an_old_sub_gets_only_its_topic_from_our_pub(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let endpoint = publisher.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = publisher.bind(free_endpoint()).unwrap().to_string();
     let Some(mut sub) = Peer::start(
         libzmq,
         "SUB",
@@ -402,7 +402,7 @@ fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
             metadata: zmq::Metadata::new(),
         }),
     ));
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;
     };

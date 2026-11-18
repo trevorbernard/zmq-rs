@@ -56,7 +56,7 @@ fn connect_before_bind_ctx_term() {
         let context = Context::new().unwrap();
         for i in 0..20 {
             let mut router = context.socket::<Router>();
-            router.connect(&format!("inproc://cbbrr{i}")).unwrap();
+            router.connect(format!("inproc://cbbrr{i}")).unwrap();
         }
     });
 }

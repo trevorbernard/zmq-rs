@@ -83,7 +83,7 @@ impl Fixture {
             Security::curve_server_authenticated(server_keys, DOMAIN, handler),
         ));
         let server_monitor = server.monitor();
-        let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+        let endpoint = server.bind(free_endpoint()).unwrap().to_string();
         Self {
             context,
             server,

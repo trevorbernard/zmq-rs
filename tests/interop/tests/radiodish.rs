@@ -54,7 +54,7 @@ fn our_dish_sends_join_and_leave_and_rejoins_after_reconnecting() {
     }));
     dish.join(&group("a"));
     dish.join(&group("b"));
-    dish.connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+    dish.connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let mut first = Peer::accept(
         &listener,
@@ -92,7 +92,7 @@ fn our_dish_sends_join_and_leave_and_rejoins_after_reconnecting() {
 fn our_radio_sends_group_and_body_to_a_dish_that_joined() {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let bound = radio.bind(&free_endpoint()).unwrap();
+    let bound = radio.bind(free_endpoint()).unwrap();
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Dish, b"").unwrap();
     peer.send_command(&Command::Join(group("news"))).unwrap();
     let started = Instant::now();
@@ -114,7 +114,7 @@ fn a_libzmq_radio_reaches_our_dish() {
     let context = Context::new().unwrap();
     let mut dish = context.socket::<Dish>();
     dish.join(&group("weather"));
-    dish.connect(&format!("tcp://{addr}")).unwrap();
+    dish.connect(format!("tcp://{addr}")).unwrap();
     let started = Instant::now();
     let (heard_group, body) = loop {
         radio.send_to_group("sports", b"not joined").unwrap();
@@ -136,7 +136,7 @@ fn our_radio_reaches_a_libzmq_dish() {
     }
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let bound = radio.bind(&free_endpoint()).unwrap();
+    let bound = radio.bind(free_endpoint()).unwrap();
     let dish = Socket::new(Kind::Dish);
     dish.set_receive_timeout(FIVE);
     dish.join("weather");

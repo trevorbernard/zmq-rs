@@ -115,7 +115,7 @@ fn of_two_properties_with_one_name_the_first_is_kept() {
 fn a_message_passed_on_drops_its_first_connections_metadata() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     push.send("passed on").unwrap();
@@ -138,7 +138,7 @@ fn a_conflated_message_carries_its_connections_metadata() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     for i in 0..100 {
@@ -189,7 +189,7 @@ fn application_properties_are_announced_under_every_mechanism() {
         let mut server =
             context.socket_with::<Dealer>(SocketOptions::new().security(server_security));
         server.add_metadata("X-Side", "server").unwrap();
-        let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+        let endpoint = server.bind(free_endpoint()).unwrap().to_string();
         let mut client =
             context.socket_with::<Dealer>(SocketOptions::new().security(client_security));
         client.add_metadata("X-Side", "client").unwrap();
@@ -219,7 +219,7 @@ fn application_properties_are_announced_under_every_mechanism() {
 fn a_property_added_after_connecting_is_not_announced_on_that_connection() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Dealer>();
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut client = context.socket::<Dealer>();
     client.connect(&endpoint).unwrap();
     client.add_metadata("X-Late", "yes").unwrap();
@@ -234,7 +234,7 @@ fn a_property_added_after_connecting_is_not_announced_on_that_connection() {
 fn a_request_and_its_reply_carry_their_connections_properties() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<zmq::Rep>();
-    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
     let mut req = context.socket::<zmq::Req>();
     req.connect(&endpoint).unwrap();
     let asking = std::thread::spawn(move || req.request("ping"));

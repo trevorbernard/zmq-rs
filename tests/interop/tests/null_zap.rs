@@ -41,7 +41,7 @@ fn we_authenticate_a_libzmq_null_peer() {
             }
         }),
     ));
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     push.send(&[b"from libzmq"]).unwrap();
@@ -63,7 +63,7 @@ fn we_refuse_a_libzmq_null_peer() {
         Security::null_authenticated("lan", |_: &ZapRequest| ZapReply::AuthenticationFailure),
     ));
     let mut monitor = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     push.send(&[b"keep out"]).unwrap();
@@ -86,7 +86,7 @@ fn libzmq_authenticates_our_null_peer_through_its_zap_handler() {
         let context = Context::new().unwrap();
         let mut push = context.socket::<Push>();
         let mut monitor = push.monitor();
-        push.connect(&format!("tcp://{addr}")).unwrap();
+        push.connect(format!("tcp://{addr}")).unwrap();
         push.send("hello").unwrap();
         let request = handler.join().unwrap();
         assert_eq!(

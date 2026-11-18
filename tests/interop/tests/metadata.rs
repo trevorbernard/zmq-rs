@@ -13,7 +13,7 @@ const FIVE: Duration = Duration::from_secs(5);
 fn we_read_what_a_libzmq_peer_announces() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Dealer>();
-    let endpoint = ours.bind(&free_endpoint()).unwrap();
+    let endpoint = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Dealer);
     theirs.set_routing_id(b"theirs");
     theirs.set_metadata("X-Hello", "World");
@@ -39,7 +39,7 @@ fn libzmq_reads_what_we_announce_as_we_would() {
     let context = Context::new().unwrap();
     let mut ours = context
         .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("ours").unwrap()));
-    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send_timeout("hi", FIVE).expect("sent");
 
     let mut msg = Msg::new();
@@ -64,7 +64,7 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
         context.socket_with::<zmq::Pull>(SocketOptions::new().reconnect(zmq::Reconnect::Fixed {
             interval: Duration::from_millis(10),
         }));
-    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.connect(format!("tcp://{addr}")).unwrap();
     first.send(&[b"one"]).unwrap();
     let message = ours
         .recv_timeout(FIVE)
@@ -96,7 +96,7 @@ fn libzmq_reads_the_application_properties_we_announce() {
     let mut ours = context.socket::<Dealer>();
     ours.add_metadata("X-Hello", "World").unwrap();
     ours.add_metadata("X-bin", "009c6").unwrap();
-    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send_timeout("hi", FIVE).expect("sent");
 
     let mut msg = Msg::new();

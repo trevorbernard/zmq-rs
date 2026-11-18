@@ -34,7 +34,7 @@ fn a_libzmq_peer_and_ours_address_each_other() {
     }
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Peer>();
-    let bound = ours.bind(&free_endpoint()).unwrap();
+    let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Peer);
     theirs.set_receive_timeout(FIVE);
     let to_ours = theirs.connect_peer(bound);
@@ -61,7 +61,7 @@ fn our_peer_connects_to_a_libzmq_peer() {
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Peer>();
-    let to_theirs = ours.connect_peer(&format!("tcp://{addr}")).unwrap();
+    let to_theirs = ours.connect_peer(format!("tcp://{addr}")).unwrap();
     ours.send(to_theirs, "queued before the connection is up")
         .unwrap();
     let (to_ours, body) = theirs.recv_routed().unwrap();
@@ -80,7 +80,7 @@ fn a_libzmq_channel_talks_to_ours() {
     }
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Channel>();
-    let bound = ours.bind(&free_endpoint()).unwrap();
+    let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Channel);
     theirs.set_receive_timeout(FIVE);
     theirs.connect(bound);
@@ -97,7 +97,7 @@ fn our_channel_drops_multipart_messages() {
     let context = Context::new().unwrap();
     let mut channel = context.socket::<Channel>();
     channel
-        .connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+        .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let mut peer = zmq_interop::Peer::accept(
         &listener,

@@ -6,9 +6,9 @@ use crate::support::{FIVE, bounce_pair, msg};
 
 fn pair(context: &Context, name: &str) -> (Socket<Pair>, Socket<Pair>) {
     let mut sb = context.socket::<Pair>();
-    sb.bind(&format!("inproc://{name}")).unwrap();
+    sb.bind(format!("inproc://{name}")).unwrap();
     let mut sc = context.socket::<Pair>();
-    sc.connect(&format!("inproc://{name}")).unwrap();
+    sc.connect(format!("inproc://{name}")).unwrap();
     (sb, sc)
 }
 

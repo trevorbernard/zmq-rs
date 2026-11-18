@@ -14,7 +14,7 @@ fn our_conflating_pull_keeps_the_latest_from_a_libzmq_push() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     pull.set_conflate(true);
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     for i in 1..=100 {
@@ -32,7 +32,7 @@ fn our_conflating_push_delivers_only_the_latest_to_a_libzmq_pull() {
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
     push.set_conflate(true);
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(format!("tcp://{addr}")).unwrap();
     for i in 1..=10 {
         push.try_send(i.to_string()).expect("never full");
     }
@@ -52,7 +52,7 @@ fn our_conflating_sub_keeps_every_subscription_with_a_libzmq_pub() {
     subscriber.set_conflate(true);
     subscriber.subscribe("a");
     subscriber.subscribe("b");
-    subscriber.connect(&format!("tcp://{addr}")).unwrap();
+    subscriber.connect(format!("tcp://{addr}")).unwrap();
     for topic in ["a", "b"] {
         let started = Instant::now();
         loop {

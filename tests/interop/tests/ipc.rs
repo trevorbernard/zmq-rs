@@ -42,7 +42,7 @@ fn our_push_reaches_a_libzmq_pull_over_ipc() {
     pull.bind(&format!("ipc://{}", path.display()));
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("ipc://{}", path.display())).unwrap();
+    push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("hello libzmq").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"hello libzmq"]);
 }
@@ -52,7 +52,7 @@ fn a_libzmq_push_reaches_our_pull_over_ipc() {
     let path = socket_path("from-libzmq");
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    let bound = pull.bind(format!("ipc://{}", path.display())).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
     push.send(&[b"hello us"]).unwrap();
@@ -91,13 +91,13 @@ fn plain_over_ipc_reports_an_empty_zap_address() {
         }));
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(server);
-    pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
     let client = SocketOptions::new().security(Security::PlainClient(PlainCredentials {
         username: Credential::new("user").unwrap(),
         password: Credential::new("secret").unwrap(),
     }));
     let mut push = context.socket_with::<Push>(client);
-    push.connect(&format!("ipc://{}", path.display())).unwrap();
+    push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("authenticated").unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),

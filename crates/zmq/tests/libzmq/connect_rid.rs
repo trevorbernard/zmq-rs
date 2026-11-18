@@ -25,7 +25,7 @@ fn router_2_router(named_: bool) {
         }
     };
     let mut rbind = context.socket_with::<Router>(options("X"));
-    let endpoint = rbind.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rbind.bind(free_endpoint()).unwrap().to_string();
     let mut rconn1 = context.socket_with::<Router>(options("Y"));
 
     let conn1 = RoutingId::new("conn1").unwrap();
@@ -67,9 +67,9 @@ fn router_2_router_named() {
 fn router_2_router_while_receiving() {
     let context = Context::new().unwrap();
     let mut xbind = context.socket_with::<Router>(named("X"));
-    let x_endpoint = xbind.bind(&free_endpoint()).unwrap().to_string();
+    let x_endpoint = xbind.bind(free_endpoint()).unwrap().to_string();
     let mut zbind = context.socket_with::<Router>(named("Z"));
-    let z_endpoint = zbind.bind(&free_endpoint()).unwrap().to_string();
+    let z_endpoint = zbind.bind(free_endpoint()).unwrap().to_string();
     let mut yconn = context.socket_with::<Router>(named("Y"));
 
     let x = RoutingId::new("X").unwrap();
@@ -98,7 +98,7 @@ fn router_2_router_while_receiving() {
 fn a_routing_id_in_use_is_refused() {
     let context = Context::new().unwrap();
     let mut rbind = context.socket::<Router>();
-    let endpoint = rbind.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rbind.bind(free_endpoint()).unwrap().to_string();
     let mut rconn1 = context.socket::<Router>();
     let conn1 = RoutingId::new("conn1").unwrap();
     rconn1

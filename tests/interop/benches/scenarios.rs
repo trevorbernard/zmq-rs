@@ -158,7 +158,7 @@ fn multipart(ours: bool, frames: usize, count: usize) -> f64 {
         let mut pull = recv_cx.socket::<Pull>();
         let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
         let mut push = send_cx.socket::<Push>();
-        push.connect(&bound.to_string()).unwrap();
+        push.connect(&bound).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {
                 push.send(ours_message(frames, 64)).unwrap();
@@ -431,7 +431,7 @@ fn curve(ours: bool, size: usize, count: usize) -> f64 {
         let mut push = send_cx.socket_with::<Push>(
             SocketOptions::new().security(Security::curve_client(client, server_key)),
         );
-        push.connect(&bound.to_string()).unwrap();
+        push.connect(&bound).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {
                 push.send(vec![0u8; size]).unwrap();

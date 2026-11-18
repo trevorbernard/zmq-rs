@@ -29,9 +29,9 @@ type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 /// socket for requests and also pushes statistics to the monitor socket.
 fn client_task(context: Context, me: String) -> TaskResult {
     let mut client = context.socket::<Req>();
-    client.connect(&format!("ipc://{me}-localfe.ipc"))?;
+    client.connect(format!("ipc://{me}-localfe.ipc"))?;
     let mut monitor = context.socket::<Push>();
-    monitor.connect(&format!("ipc://{me}-monitor.ipc"))?;
+    monitor.connect(format!("ipc://{me}-monitor.ipc"))?;
 
     loop {
         sleep_ms(randof(5) * 1000);
@@ -60,7 +60,7 @@ fn client_task(context: Context, me: String) -> TaskResult {
 /// worker in other examples, and echoes each request back.
 fn worker_task(context: Context, me: String) -> TaskResult {
     let mut worker = context.socket::<Req>();
-    worker.connect(&format!("ipc://{me}-localbe.ipc"))?;
+    worker.connect(format!("ipc://{me}-localbe.ipc"))?;
 
     // Tell broker we're ready for work
     let mut request = worker.request(WORKER_READY)?;
@@ -90,39 +90,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // messages from tasks
     let context = Context::new()?;
     let mut localfe = context.socket::<Router>();
-    localfe.bind(&format!("ipc://{me}-localfe.ipc"))?;
+    localfe.bind(format!("ipc://{me}-localfe.ipc"))?;
     let mut localbe = context.socket::<Router>();
-    localbe.bind(&format!("ipc://{me}-localbe.ipc"))?;
+    localbe.bind(format!("ipc://{me}-localbe.ipc"))?;
 
     let identity = Identity::new(me.clone())?;
     let named = || SocketOptions::new().identity(identity.clone());
 
     // Bind cloud frontend to endpoint
     let mut cloudfe = context.socket_with::<Router>(named());
-    cloudfe.bind(&format!("ipc://{me}-cloud.ipc"))?;
+    cloudfe.bind(format!("ipc://{me}-cloud.ipc"))?;
 
     // Connect cloud backend to all peers
     let mut cloudbe = context.socket_with::<Router>(named());
     for peer in peers {
         println!("I: connecting to cloud frontend at '{peer}'");
-        cloudbe.connect(&format!("ipc://{peer}-cloud.ipc"))?;
+        cloudbe.connect(format!("ipc://{peer}-cloud.ipc"))?;
     }
 
     // Bind state backend to endpoint
     let mut statebe = context.socket::<Pub>();
-    statebe.bind(&format!("ipc://{me}-state.ipc"))?;
+    statebe.bind(format!("ipc://{me}-state.ipc"))?;
 
     // Connect state frontend to all peers
     let mut statefe = context.socket::<Sub>();
     statefe.subscribe("");
     for peer in peers {
         println!("I: connecting to state backend at '{peer}'");
-        statefe.connect(&format!("ipc://{peer}-state.ipc"))?;
+        statefe.connect(format!("ipc://{peer}-state.ipc"))?;
     }
 
     // Prepare monitor socket
     let mut monitor = context.socket::<Pull>();
-    monitor.bind(&format!("ipc://{me}-monitor.ipc"))?;
+    monitor.bind(format!("ipc://{me}-monitor.ipc"))?;
 
     // After binding and connecting all our sockets, we start our child
     // tasks - workers and clients

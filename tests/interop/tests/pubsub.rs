@@ -43,7 +43,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
     let context = Context::new().unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("news");
-    subscriber.connect(&format!("tcp://{addr}")).unwrap();
+    subscriber.connect(format!("tcp://{addr}")).unwrap();
 
     // libzmq drops what it publishes before our subscription arrives.
     let started = Instant::now();
@@ -76,7 +76,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
 fn a_libzmq_sub_receives_its_topics_from_our_pub() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let bound = publisher.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.set_receive_timeout(FIVE);
     subscriber.subscribe(b"news");
@@ -93,7 +93,7 @@ fn a_libzmq_sub_receives_its_topics_from_our_pub() {
 fn a_libzmq_sub_unsubscribing_stops_our_pub() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let bound = publisher.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
     subscriber.connect(bound);
@@ -113,7 +113,7 @@ fn our_sub_filters_what_a_careless_publisher_sends() {
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("news");
     subscriber
-        .connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+        .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let mut publisher = Peer::accept(
         &listener,
@@ -137,11 +137,7 @@ fn a_zmtp_1_0_subscriber_gets_everything() {
     // ZMTP 1.0 SUBs filter for themselves and never send subscriptions.
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let addr = publisher
-        .bind(&free_endpoint())
-        .unwrap()
-        .tcp_addr()
-        .unwrap();
+    let addr = publisher.bind(free_endpoint()).unwrap().tcp_addr().unwrap();
     let mut stream = TcpStream::connect(addr).unwrap();
     stream.set_read_timeout(Some(FIVE)).unwrap();
     // A ZMTP 1.0 greeting is the identity as a frame: here, empty.

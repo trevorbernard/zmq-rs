@@ -55,13 +55,13 @@ fn binding_reports_listening_or_bind_failed() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
     let mut monitor = first.monitor();
-    let bound = first.bind(&free_endpoint()).unwrap();
+    let bound = first.bind(free_endpoint()).unwrap();
     let event = expect(&mut monitor, |kind| *kind == EventKind::Listening);
     assert_eq!(event.endpoint, bound.to_string());
 
     let mut second = context.socket::<Pull>();
     let mut second_monitor = second.monitor();
-    assert!(second.bind(&bound.to_string()).is_err());
+    assert!(second.bind(&bound).is_err());
     let event = expect(&mut second_monitor, |kind| {
         *kind == EventKind::BindFailed(std::io::ErrorKind::AddrInUse)
     });
@@ -73,10 +73,10 @@ fn both_ends_report_a_connection_and_its_handshake() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut server = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
     let mut client = push.monitor();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
 
     let connected = expect(&mut client, |kind| *kind == EventKind::Connected);
     assert_eq!(connected.endpoint, bound.to_string());
@@ -90,12 +90,12 @@ fn both_ends_report_a_connection_and_its_handshake() {
 fn a_lost_peer_is_reported_and_retried() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(Reconnect::Fixed {
         interval: Duration::from_millis(30),
     }));
     let mut client = push.monitor();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     expect(&mut client, |kind| *kind == EventKind::HandshakeSucceeded);
     drop(pull);
     expect(&mut client, |kind| *kind == EventKind::Disconnected);
@@ -113,7 +113,7 @@ fn closing_a_listener_reports_closed() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     drop(pull);
     let event = expect(&mut monitor, |kind| *kind == EventKind::Closed);
     assert_eq!(event.endpoint, bound.to_string());
@@ -124,10 +124,10 @@ fn an_incompatible_peer_fails_the_handshake_on_both_sides() {
     let context = Context::new().unwrap();
     let mut server_socket = context.socket::<Push>();
     let mut server = server_socket.monitor();
-    let bound = server_socket.bind(&free_endpoint()).unwrap();
+    let bound = server_socket.bind(free_endpoint()).unwrap();
     let mut client_socket = context.socket::<Push>();
     let mut client = client_socket.monitor();
-    client_socket.connect(&bound.to_string()).unwrap();
+    client_socket.connect(&bound).unwrap();
 
     let failed = expect(&mut server, |kind| {
         matches!(kind, EventKind::HandshakeFailed(_))
@@ -156,7 +156,7 @@ fn a_denied_client_is_reported_as_an_authentication_failure() {
         Security::plain_server("", |_: &ZapRequest| ZapReply::AuthenticationFailure),
     ));
     let mut server = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().security(
         Security::PlainClient(PlainCredentials {
             username: Credential::new("who").unwrap(),
@@ -164,7 +164,7 @@ fn a_denied_client_is_reported_as_an_authentication_failure() {
         }),
     ));
     let mut client = push.monitor();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     let denied = EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 });
     expect(&mut server, |kind| *kind == denied);
     expect(&mut client, |kind| *kind == denied);
@@ -180,7 +180,7 @@ fn a_silent_server_fails_the_handshake_without_detail() {
             .reconnect(Reconnect::Never),
     );
     let mut client = push.monitor();
-    push.connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+    push.connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let (_silent, _) = listener.accept().unwrap();
     expect(&mut client, |kind| *kind == EventKind::Connected);
@@ -208,7 +208,7 @@ fn backoff_starts_over_once_a_connection_is_made() {
             max: Duration::from_secs(1),
         }));
     let mut monitor = push.monitor();
-    push.connect(&format!("tcp://{address}")).unwrap();
+    push.connect(format!("tcp://{address}")).unwrap();
     for _ in 0..4 {
         let event = expect(&mut monitor, |kind| {
             matches!(kind, EventKind::ConnectRetried { .. })
@@ -225,10 +225,10 @@ fn a_zero_handshake_timeout_means_none() {
     let no_limit = || SocketOptions::new().handshake_timeout(Duration::ZERO);
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(no_limit());
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(no_limit());
     let mut client = push.monitor();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     expect(&mut client, |kind| *kind == EventKind::HandshakeSucceeded);
     push.send("through").unwrap();
     assert_eq!(
@@ -243,7 +243,7 @@ fn every_monitor_hears_every_event() {
     let mut pull = context.socket::<Pull>();
     let mut first = pull.monitor();
     let mut second = pull.monitor();
-    pull.bind(&free_endpoint()).unwrap();
+    pull.bind(free_endpoint()).unwrap();
     expect(&mut first, |kind| *kind == EventKind::Listening);
     expect(&mut second, |kind| *kind == EventKind::Listening);
 }
@@ -256,7 +256,7 @@ fn ipc_endpoints_are_reported_too() {
     let mut monitor = pull.monitor();
     let bound = pull.bind("ipc://*").unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     let accepted = expect(&mut monitor, |kind| *kind == EventKind::Accepted);
     assert_eq!(accepted.endpoint, bound.to_string());
 }
@@ -266,9 +266,9 @@ fn an_accepted_connection_is_not_also_reported_as_connected() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut server = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     let seen = events_until(&mut server, |kind| *kind == EventKind::HandshakeSucceeded);
     assert_eq!(
         seen,
@@ -287,7 +287,7 @@ fn an_attempt_that_never_connects_only_retries() {
         interval: Duration::from_millis(10),
     }));
     let mut monitor = push.monitor();
-    push.connect(&free_endpoint()).unwrap();
+    push.connect(free_endpoint()).unwrap();
     let mut seen = Vec::new();
     for _ in 0..3 {
         seen.extend(events_until(&mut monitor, |kind| {

@@ -51,7 +51,7 @@ fn lingering_messages_survive_concurrent_drops(address: fn() -> String) {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut pull = context.socket::<Pull>();
-            let endpoint = pull.bind(&address()).unwrap().to_string();
+            let endpoint = pull.bind(address()).unwrap().to_string();
             let senders: Vec<_> = (0..SENDERS)
                 .map(|sender| {
                     let context = context.clone();
@@ -94,7 +94,7 @@ fn the_last_handle_ends_the_context_on_any_thread(address: fn() -> String) {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut router = context.socket::<Router>();
-            let endpoint = router.bind(&address()).unwrap().to_string();
+            let endpoint = router.bind(address()).unwrap().to_string();
             let workers: Vec<_> = (0..WORKERS)
                 .map(|worker| {
                     let context = context.clone();
@@ -129,7 +129,7 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
             let mut publisher = context.socket::<Pub>();
-            let endpoint = publisher.bind(&address()).unwrap().to_string();
+            let endpoint = publisher.bind(address()).unwrap().to_string();
             let stop = Arc::new(AtomicBool::new(false));
             let publishing = {
                 let stop = stop.clone();

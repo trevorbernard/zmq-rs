@@ -54,7 +54,7 @@ fn join_too_long_fails() {
 fn long_group() {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
-    let endpoint = radio.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = radio.bind(free_endpoint()).unwrap().to_string();
 
     let mut dish = context.socket::<Dish>();
     let long = "0123456789ABCDEFGH";
@@ -78,7 +78,7 @@ fn radio_dish_tcp_poll(loopback: &str) {
     let context = Context::new().unwrap();
     let mut radio = context.socket::<Radio>();
     let endpoint = radio
-        .bind(&format!("tcp://{loopback}:{}", free_port().port()))
+        .bind(format!("tcp://{loopback}:{}", free_port().port()))
         .unwrap()
         .to_string();
 

@@ -1,6 +1,7 @@
 //! Endpoint strings, as libzmq writes them: `tcp://host:port`,
 //! `ipc://path`, `ipc://@name` (Linux, Android) and `inproc://name`.
 
+use std::borrow::Cow;
 use std::fmt;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -76,6 +77,47 @@ impl fmt::Display for Endpoint {
             Self::IpcAbstract(name) => write!(f, "ipc://@{name}"),
             Self::Inproc(name) => write!(f, "inproc://{name}"),
         }
+    }
+}
+
+mod sealed {
+    pub trait Sealed {}
+}
+
+/// An endpoint to bind or connect: a string as libzmq writes it, such as
+/// `tcp://127.0.0.1:5555`, or the [`Endpoint`] a bind returned.
+pub trait ToEndpoint: sealed::Sealed {
+    /// The endpoint as libzmq writes it.
+    #[doc(hidden)]
+    fn written(&self) -> Cow<'_, str>;
+}
+
+impl sealed::Sealed for str {}
+impl sealed::Sealed for String {}
+impl sealed::Sealed for Endpoint {}
+impl<T: sealed::Sealed + ?Sized> sealed::Sealed for &T {}
+
+impl ToEndpoint for str {
+    fn written(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl ToEndpoint for String {
+    fn written(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self)
+    }
+}
+
+impl ToEndpoint for Endpoint {
+    fn written(&self) -> Cow<'_, str> {
+        Cow::Owned(self.to_string())
+    }
+}
+
+impl<T: ToEndpoint + ?Sized> ToEndpoint for &T {
+    fn written(&self) -> Cow<'_, str> {
+        (**self).written()
     }
 }
 

@@ -118,9 +118,9 @@ fn xsub_sending_a_subscription_subscribes() {
 fn a_proxy_forwards_subscriptions_up_and_messages_down() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let upstream = publisher.bind(&free_endpoint()).unwrap();
+    let upstream = publisher.bind(free_endpoint()).unwrap();
     let mut frontend = context.socket::<XSub>();
-    frontend.connect(&upstream.to_string()).unwrap();
+    frontend.connect(&upstream).unwrap();
     let mut backend = context.socket::<XPub>();
     backend.bind("inproc://proxy").unwrap();
 
@@ -201,10 +201,10 @@ fn forwarding_a_message_sends_it_upstream() {
 fn xsub_waits_for_a_message() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let bound = publisher.bind(free_endpoint()).unwrap();
     let mut xsub = context.socket::<XSub>();
     xsub.subscribe("a");
-    xsub.connect(&bound.to_string()).unwrap();
+    xsub.connect(&bound).unwrap();
     let receiving = thread::spawn(move || xsub.recv().unwrap());
     let started = Instant::now();
     while publisher.send("a1").unwrap() == 0 {

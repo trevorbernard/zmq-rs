@@ -18,8 +18,8 @@ fn our_immediate_push_sends_only_to_the_libzmq_pull_that_is_up() {
             interval: Duration::from_millis(10),
         },
     ));
-    push.connect(&format!("tcp://{dead}")).unwrap();
-    push.connect(&format!("tcp://{alive}")).unwrap();
+    push.connect(format!("tcp://{dead}")).unwrap();
+    push.connect(format!("tcp://{alive}")).unwrap();
     let started = Instant::now();
     while push.try_send("0").is_err() {
         assert!(

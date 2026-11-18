@@ -18,7 +18,7 @@ fn test(address: fn() -> String) {
         for _ in 0..10 {
             let context = Context::with_io_threads(7).unwrap();
             let mut socket = context.socket::<Pub>();
-            let endpoint = socket.bind(&address()).unwrap().to_string();
+            let endpoint = socket.bind(address()).unwrap().to_string();
             let workers: Vec<_> = (0..THREAD_COUNT)
                 .map(|_| {
                     let context = context.clone();

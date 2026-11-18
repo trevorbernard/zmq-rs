@@ -36,7 +36,7 @@ fn router_mandatory_hwm() {
             .send_hwm(ONE)
             .linger(Linger::For(Duration::from_millis(1))),
     );
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(
         SocketOptions::new()

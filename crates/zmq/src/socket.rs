@@ -16,7 +16,7 @@ use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
 use crate::polling::{PollItem, PollReadable, PollWritable};
-use crate::{Endpoint, Error, RoutingId, SocketOptions, endpoint, wait};
+use crate::{Endpoint, Error, RoutingId, SocketOptions, ToEndpoint, endpoint, wait};
 
 pub(crate) mod sealed {
     pub trait Sealed {}
@@ -948,7 +948,9 @@ impl<T: SocketType> Socket<T> {
     /// Connections already waiting for an `inproc` name join the socket in
     /// the bind, as in libzmq, so a SUB that binds subscribes on them at
     /// once.
-    pub fn bind(&mut self, endpoint: &str) -> Result<Endpoint, Error> {
+    pub fn bind(&mut self, endpoint: impl ToEndpoint) -> Result<Endpoint, Error> {
+        let endpoint = endpoint.written();
+        let endpoint = &*endpoint;
         self.alive()?;
         let (id, bound) = match endpoint::bind_target(endpoint)? {
             Target::Tcp(addr) => self
@@ -998,7 +1000,9 @@ impl<T: SocketType> Socket<T> {
     /// wildcard port or `ipc://*` must be given as bound. Returns once the
     /// address can be bound again. Fails with [`Error::UnknownEndpoint`] if
     /// the socket is not bound there.
-    pub fn unbind(&mut self, endpoint: &str) -> Result<(), Error> {
+    pub fn unbind(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
+        let endpoint = endpoint.written();
+        let endpoint = &*endpoint;
         let wanted = endpoint::bind_target(endpoint)?.into_endpoint();
         let mut found = Vec::new();
         self.bound.retain(|(bound, id)| {
@@ -1020,13 +1024,14 @@ impl<T: SocketType> Socket<T> {
     /// Connects to `endpoint`, such as `tcp://localhost:5555`,
     /// `tcp://eth0:*;localhost:5555` (from an interface or address),
     /// `ipc:///tmp/feed`, `ipc://@name` (Linux, Android) or
-    /// `inproc://name`. Returns at once; messages queue until the connection
+    /// `inproc://name`, or to the [`Endpoint`] a [`bind`](Self::bind)
+    /// returned. Returns at once; messages queue until the connection
     /// is up, and a TCP or IPC connection retries until something listens
     /// and reconnects if it breaks. An `inproc`
     /// connection waits for its name to be bound in this socket's context,
     /// and ends for good when the bound socket is dropped.
-    pub fn connect(&mut self, endpoint: &str) -> Result<(), Error> {
-        self.connect_key(endpoint).map(drop)
+    pub fn connect(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
+        self.connect_key(&endpoint.written()).map(drop)
     }
 
     /// Connects to `endpoint` and returns the new peer, unless
@@ -1065,7 +1070,9 @@ impl<T: SocketType> Socket<T> {
     /// `endpoint` is as [`connect`](Self::connect) took it, or resolves to
     /// the same address. Fails with [`Error::UnknownEndpoint`] if the socket
     /// has no connection to it.
-    pub fn disconnect(&mut self, endpoint: &str) -> Result<(), Error> {
+    pub fn disconnect(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
+        let endpoint = endpoint.written();
+        let endpoint = &*endpoint;
         let as_written = self
             .connected
             .iter()
@@ -2111,7 +2118,7 @@ impl Socket<Router> {
     /// ```
     pub fn connect_with_routing_id(
         &mut self,
-        endpoint: &str,
+        endpoint: impl ToEndpoint,
         peer: RoutingId,
     ) -> Result<(), Error> {
         self.alive()?;
@@ -2124,7 +2131,7 @@ impl Socket<Router> {
         if taken {
             return Err(Error::RoutingIdInUse);
         }
-        self.connect_key(endpoint)?;
+        self.connect_key(&endpoint.written())?;
         let &(_, _, id) = self.connected.last().expect("just connected");
         self.routing
             .table

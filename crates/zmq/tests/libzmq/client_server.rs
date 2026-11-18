@@ -11,9 +11,9 @@ use crate::support::{FIVE, within};
 
 fn inproc_client_server_pair(context: &Context, name: &str) -> (Socket<Server>, Socket<Client>) {
     let mut server = context.socket::<Server>();
-    server.bind(&format!("inproc://{name}")).unwrap();
+    server.bind(format!("inproc://{name}")).unwrap();
     let mut client = context.socket::<Client>();
-    client.connect(&format!("inproc://{name}")).unwrap();
+    client.connect(format!("inproc://{name}")).unwrap();
     (server, client)
 }
 

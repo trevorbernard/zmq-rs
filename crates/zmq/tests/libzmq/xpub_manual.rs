@@ -138,9 +138,9 @@ pub(crate) mod cases {
         let context = Context::new().unwrap();
         // Proxy frontend and backend
         let mut xsub_proxy = context.socket::<XSub>();
-        let frontend = xsub_proxy.bind(&free_endpoint()).unwrap().to_string();
+        let frontend = xsub_proxy.bind(free_endpoint()).unwrap().to_string();
         let mut xpub_proxy = context.socket::<ManualXPub>();
-        let backend = xpub_proxy.bind(&free_endpoint()).unwrap().to_string();
+        let backend = xpub_proxy.bind(free_endpoint()).unwrap().to_string();
 
         let mut publisher = context.socket::<Pub>();
         publisher.connect(&frontend).unwrap();
@@ -209,9 +209,9 @@ pub(crate) mod cases {
     pub(crate) fn missing_subscriptions() {
         let context = Context::new().unwrap();
         let mut xsub_proxy = context.socket::<XSub>();
-        let frontend = xsub_proxy.bind(&free_endpoint()).unwrap().to_string();
+        let frontend = xsub_proxy.bind(free_endpoint()).unwrap().to_string();
         let mut xpub_proxy = context.socket::<ManualXPub>();
-        let backend = xpub_proxy.bind(&free_endpoint()).unwrap().to_string();
+        let backend = xpub_proxy.bind(free_endpoint()).unwrap().to_string();
 
         let mut publisher = context.socket::<Pub>();
         publisher.connect(&frontend).unwrap();
@@ -255,7 +255,7 @@ pub(crate) mod cases {
     pub(crate) fn unsubscribe_cleanup() {
         let context = Context::new().unwrap();
         let mut publisher = context.socket::<ManualXPub>();
-        let endpoint = publisher.bind(&free_endpoint()).unwrap().to_string();
+        let endpoint = publisher.bind(free_endpoint()).unwrap().to_string();
         let mut subscriber = context.socket::<XSub>();
         subscriber.connect(&endpoint).unwrap();
 

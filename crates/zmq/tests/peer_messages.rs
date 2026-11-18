@@ -24,7 +24,7 @@ fn frames(message: Message) -> Vec<Frame> {
 fn hello_is_sent_again_after_each_reconnection_and_a_hiccup_heard_between() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let mut dealer = context.socket_with::<Dealer>(quick());
     dealer.set_hello_message("hello");
     dealer.set_hiccup_message("hiccup");
@@ -66,7 +66,7 @@ fn a_router_hears_which_peer_left() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.set_disconnect_message("left");
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let mut dealer = context.socket::<Dealer>();
     dealer.connect(&endpoint).unwrap();
     dealer.send("last words").unwrap();
@@ -86,7 +86,7 @@ fn each_message_is_for_one_side_only() {
     let context = Context::new().unwrap();
     let mut accepting = context.socket::<zmq::Peer>();
     accepting.set_hiccup_message("hiccup");
-    let endpoint = accepting.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = accepting.bind(free_endpoint()).unwrap().to_string();
     let mut connecting = context.socket_with::<zmq::Peer>(quick());
     connecting.set_disconnect_message("disconnect");
     connecting.set_hello_message("hello");
@@ -123,7 +123,7 @@ fn hello_and_disconnect_messages_over_curve() {
         context.socket_with::<Router>(SocketOptions::new().security(Security::curve_server(keys)));
     router.set_hello_message("welcome");
     router.set_disconnect_message("left");
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let mut dealer = context.socket_with::<Dealer>(
         SocketOptions::new().security(Security::curve_client(Keypair::generate(), server_key)),
     );
@@ -161,7 +161,7 @@ fn an_empty_message_turns_each_off() {
     router.set_hello_message("");
     router.set_disconnect_message("left");
     router.set_disconnect_message("");
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let mut dealer = context.socket::<Dealer>();
     dealer.connect(&endpoint).unwrap();
     dealer.send("only").unwrap();

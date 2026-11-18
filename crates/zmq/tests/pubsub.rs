@@ -40,10 +40,10 @@ fn publish_until(publisher: &mut zmq::Socket<Pub>, message: &str, subscribers: u
 fn subscribers_receive_only_their_topics_over_tcp() {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    let bound = publisher.bind(&free_endpoint()).unwrap();
+    let bound = publisher.bind(free_endpoint()).unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("news");
-    subscriber.connect(&bound.to_string()).unwrap();
+    subscriber.connect(&bound).unwrap();
 
     publish_until(&mut publisher, "news: first", 1);
     assert_eq!(publisher.send("sports").unwrap(), 0, "nobody wants sports");
@@ -181,9 +181,9 @@ fn a_bound_subscriber_tells_publishers_that_connect() {
     let context = Context::new().unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("x");
-    let bound = subscriber.bind(&free_endpoint()).unwrap();
+    let bound = subscriber.bind(free_endpoint()).unwrap();
     let mut publisher = context.socket::<Pub>();
-    publisher.connect(&bound.to_string()).unwrap();
+    publisher.connect(&bound).unwrap();
     let (done, received) = mpsc::channel();
     thread::spawn(move || done.send(subscriber.recv().unwrap()));
     publish_until(&mut publisher, "x marks the spot", 1);

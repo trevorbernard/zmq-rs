@@ -54,7 +54,7 @@ fn set_up(context: &Context) -> (Socket<Dealer>, String, mpsc::Receiver<ZapReque
                 },
             )),
     );
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
 

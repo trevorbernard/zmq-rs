@@ -27,9 +27,9 @@ fn forever() -> SocketOptions {
 /// message.
 fn exchange(context: &Context, options: &SocketOptions) {
     let mut pull = context.socket_with::<Pull>(options.clone());
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(options.clone());
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     push.send("through").unwrap();
     assert_eq!(
         pull.recv_timeout(FIVE).unwrap(),
@@ -42,7 +42,7 @@ fn durations_too_long_to_reach_mean_never() {
     let context = Context::new().unwrap();
     // Refused, so it waits out a backoff too long to reach.
     let mut refused = context.socket_with::<Push>(forever());
-    refused.connect(&free_endpoint()).unwrap();
+    refused.connect(free_endpoint()).unwrap();
     // Connected: it heartbeats, times its handshake and lingers.
     exchange(&context, &forever());
     // The I/O thread is still there for everyone else.

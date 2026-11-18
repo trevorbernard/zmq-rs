@@ -28,11 +28,11 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn a_server_answers_each_client_by_its_id() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let bound = server.bind(&free_endpoint()).unwrap();
+    let bound = server.bind(free_endpoint()).unwrap();
     let mut clients: Vec<_> = (0..3)
         .map(|n| {
             let mut client = context.socket::<Client>();
-            client.connect(&bound.to_string()).unwrap();
+            client.connect(&bound).unwrap();
             client.send(format!("hello from {n}")).unwrap();
             client
         })
@@ -150,13 +150,13 @@ fn a_client_load_balances_across_servers() {
     let mut servers: Vec<_> = (0..2)
         .map(|n| {
             let mut server = context.socket::<Server>();
-            server.bind(&format!("inproc://balanced-{n}")).unwrap();
+            server.bind(format!("inproc://balanced-{n}")).unwrap();
             server
         })
         .collect();
     let mut client = context.socket::<Client>();
     for n in 0..2 {
-        client.connect(&format!("inproc://balanced-{n}")).unwrap();
+        client.connect(format!("inproc://balanced-{n}")).unwrap();
     }
     for i in 0..4 {
         client.send(format!("{i}")).unwrap();

@@ -59,9 +59,9 @@ fn publisher(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error>
 // zthread_fork makes.
 fn pipe(context: &Context, name: &str) -> Result<(Socket<Pair>, Socket<Pair>), zmq::Error> {
     let mut parent = context.socket::<Pair>();
-    parent.bind(&format!("inproc://{name}"))?;
+    parent.bind(format!("inproc://{name}"))?;
     let mut child = context.socket::<Pair>();
-    child.connect(&format!("inproc://{name}"))?;
+    child.connect(format!("inproc://{name}"))?;
     Ok((parent, child))
 }
 

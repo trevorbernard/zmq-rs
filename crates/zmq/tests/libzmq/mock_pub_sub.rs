@@ -81,7 +81,7 @@ fn mock_sub(sub_command: bool) {
     let context = Context::new().unwrap();
     let mut server = context.socket::<XPub>();
     let mut monitor = server.monitor();
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut stream = TcpStream::connect(endpoint.trim_start_matches("tcp://")).unwrap();
     stream.set_read_timeout(Some(FIVE)).unwrap();
 
@@ -104,7 +104,7 @@ fn mock_pub(sub_command: bool) {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Sub>();
     let mut monitor = server.monitor();
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut stream = TcpStream::connect(endpoint.trim_start_matches("tcp://")).unwrap();
     stream.set_read_timeout(Some(FIVE)).unwrap();
 

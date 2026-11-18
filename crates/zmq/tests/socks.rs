@@ -52,7 +52,7 @@ fn a_connection_the_proxy_refuses_is_tried_again() {
     let (address, clients) = refusing_proxy(5);
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    let endpoint = push.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = push.bind(free_endpoint()).unwrap().to_string();
     let mut pull = context.socket_with::<Pull>(proxied(&address));
     pull.connect(&endpoint).unwrap();
 
@@ -85,7 +85,7 @@ fn binds_do_not_go_through_the_proxy() {
     let (address, clients) = refusing_proxy(5);
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(proxied(&address));
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket::<Push>();
     push.connect(&endpoint).unwrap();
     push.send_timeout("direct", FIVE).unwrap();

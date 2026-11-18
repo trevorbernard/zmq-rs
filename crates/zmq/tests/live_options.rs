@@ -54,7 +54,7 @@ fn a_linger_set_to_zero_before_the_drop_abandons_what_is_queued() {
         let context = Context::new().unwrap();
         let mut push = context.socket::<Push>();
         // Nothing listens there: the message would linger forever.
-        push.connect(&free_endpoint()).unwrap();
+        push.connect(free_endpoint()).unwrap();
         push.send("never delivered").unwrap();
         push.set_linger(Linger::For(Duration::ZERO));
     });
@@ -65,7 +65,7 @@ fn a_linger_raised_before_the_drop_delivers_what_is_queued() {
     const COUNT: usize = 20_000;
     let receiving = Context::new().unwrap();
     let mut pull = receiving.socket::<Pull>();
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let receiver = thread::spawn(move || {
         let mut count = 0;
         while pull.recv().unwrap() != "END".into() {
@@ -96,7 +96,7 @@ fn a_send_mark_changed_on_a_connected_socket_is_the_connections() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)));
     // Nothing listens there, so everything sent stays queued.
-    push.connect(&free_endpoint()).unwrap();
+    push.connect(free_endpoint()).unwrap();
     assert_eq!(fill(&mut push), 2);
     push.set_send_hwm(hwm(5));
     assert_eq!(fill(&mut push), 3);
@@ -113,7 +113,7 @@ fn a_send_mark_changed_is_that_of_later_connects() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)));
     push.set_send_hwm(hwm(4));
-    push.connect(&free_endpoint()).unwrap();
+    push.connect(free_endpoint()).unwrap();
     assert_eq!(fill(&mut push), 4);
 }
 
@@ -164,8 +164,8 @@ fn an_identity_changed_between_connects_is_that_of_the_later_one() {
     let context = Context::new().unwrap();
     let mut first = context.socket::<Router>();
     let mut second = context.socket::<Router>();
-    let first_endpoint = first.bind(&free_endpoint()).unwrap().to_string();
-    let second_endpoint = second.bind(&free_endpoint()).unwrap().to_string();
+    let first_endpoint = first.bind(free_endpoint()).unwrap().to_string();
+    let second_endpoint = second.bind(free_endpoint()).unwrap().to_string();
 
     let named = |name: &str| Identity::new(name.to_owned()).unwrap();
     let mut dealer = context.socket_with::<Dealer>(SocketOptions::new().identity(named("one")));

@@ -21,7 +21,7 @@ fn bound_to_device() -> SocketOptions {
 fn pair_tcp_bind_to_device() {
     let context = Context::new().unwrap();
     let mut sb = context.socket_with::<Pair>(bound_to_device());
-    let my_endpoint = match sb.bind(&free_endpoint()) {
+    let my_endpoint = match sb.bind(free_endpoint()) {
         Ok(endpoint) => endpoint.to_string(),
         Err(Error::Io(err)) if err.kind() == io::ErrorKind::PermissionDenied => {
             eprintln!("SO_BINDTODEVICE not permitted");

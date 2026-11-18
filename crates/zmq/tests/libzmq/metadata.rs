@@ -47,7 +47,7 @@ fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receive
             ))
             .linger(Linger::For(Duration::ZERO)),
     );
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
 

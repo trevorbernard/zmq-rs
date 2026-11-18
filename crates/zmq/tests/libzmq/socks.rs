@@ -155,7 +155,7 @@ fn zero_linger() -> SocketOptions {
 /// A PUSH bound to a loopback port, and the endpoint to reach it at.
 fn setup_push_server(context: &Context) -> (Socket<Push>, String) {
     let mut push = context.socket_with::<Push>(zero_linger());
-    let connect_address = push.bind(&free_endpoint()).unwrap().to_string();
+    let connect_address = push.bind(free_endpoint()).unwrap().to_string();
     (push, connect_address)
 }
 

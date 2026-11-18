@@ -25,9 +25,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn a_pair_talks_both_ways_over_tcp() {
     let context = Context::new().unwrap();
     let mut left = context.socket::<Pair>();
-    let bound = left.bind(&free_endpoint()).unwrap();
+    let bound = left.bind(free_endpoint()).unwrap();
     let mut right = context.socket::<Pair>();
-    right.connect(&bound.to_string()).unwrap();
+    right.connect(&bound).unwrap();
     right.send("ping").unwrap();
     let (received, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
     assert_eq!(received, Message::from("ping"));

@@ -27,7 +27,7 @@ fn with_handover() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.set_handover(true);
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer_one = dealer_called_x(&context, &endpoint);
     hello_from_x(&mut dealer_one, &mut router);
@@ -49,7 +49,7 @@ fn with_handover() {
 fn without_handover() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer_one = dealer_called_x(&context, &endpoint);
     hello_from_x(&mut dealer_one, &mut router);

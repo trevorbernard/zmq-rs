@@ -48,7 +48,7 @@ fn finish<T: Send + 'static>(asking: JoinHandle<(Socket<Req>, T)>) -> (Socket<Re
 fn set_up(context: &Context) -> (Socket<Req>, [Socket<Rep>; SERVICES]) {
     let mut req = context.socket::<Req>();
     req.set_correlation(true);
-    let endpoint = req.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = req.bind(free_endpoint()).unwrap().to_string();
     let rep = [(); SERVICES].map(|()| {
         let mut rep = context.socket::<Rep>();
         rep.connect(&endpoint).unwrap();

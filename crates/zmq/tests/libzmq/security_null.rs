@@ -49,7 +49,7 @@ fn server_in_domain(
 }
 
 fn connected_client(context: &Context, server: &mut Socket<Dealer>) -> Socket<Dealer> {
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut client = context.socket_with::<Dealer>(zero_linger());
     client.connect(&endpoint).unwrap();
     client
@@ -92,7 +92,7 @@ fn success() {
 fn vanilla_socket() {
     let context = Context::new().unwrap();
     let (mut server, _requests) = server_in_domain(&context, "WRONG");
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut stream = TcpStream::connect(endpoint.trim_start_matches("tcp://")).unwrap();
     // An anonymous ZMTP 1.0 greeting, then a sneaky message.
     stream.write_all(b"\x01\x00").unwrap();

@@ -11,7 +11,7 @@ use crate::support::{FIVE, within};
 fn peer() {
     let context = Context::new().unwrap();
     let mut peer1 = context.socket::<Peer>();
-    let endpoint = peer1.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = peer1.bind(free_endpoint()).unwrap().to_string();
 
     let mut peer2 = context.socket::<Peer>();
     let peer1_id = peer2.connect_peer(&endpoint).unwrap();

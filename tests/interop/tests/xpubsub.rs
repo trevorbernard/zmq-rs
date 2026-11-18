@@ -26,7 +26,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn our_xpub_hears_a_libzmq_sub() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind(&free_endpoint()).unwrap();
+    let bound = xpub.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
     subscriber.subscribe(b"b");
@@ -58,7 +58,7 @@ fn our_xpub_hears_a_libzmq_sub() {
 fn our_xpub_hears_what_a_libzmq_xsub_sends_upstream() {
     let context = Context::new().unwrap();
     let mut xpub = context.socket::<XPub>();
-    let bound = xpub.bind(&free_endpoint()).unwrap();
+    let bound = xpub.bind(free_endpoint()).unwrap();
     let xsub = Socket::new(Kind::XSub);
     xsub.connect(bound);
     xsub.send(&[b"hello", b"upstream"]).unwrap();
@@ -76,7 +76,7 @@ fn our_xsub_talks_to_a_libzmq_xpub() {
     let addr = xpub.bind_loopback();
     let context = Context::new().unwrap();
     let mut xsub = context.socket::<XSub>();
-    xsub.connect(&format!("tcp://{addr}")).unwrap();
+    xsub.connect(format!("tcp://{addr}")).unwrap();
     xsub.subscribe("a");
     xsub.send("hello").unwrap();
     // libzmq hands XPUB applications subscriptions in the message form.

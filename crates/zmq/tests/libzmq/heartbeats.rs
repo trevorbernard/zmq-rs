@@ -73,7 +73,7 @@ fn server<T: SocketType>(
     }
     let mut server = context.socket_with::<T>(options);
     let monitor = server.monitor();
-    let endpoint = server.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, monitor, endpoint)
 }
 

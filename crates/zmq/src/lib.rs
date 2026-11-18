@@ -11,7 +11,7 @@
 //! let mut pull = context.socket::<Pull>();
 //! let bound = pull.bind("tcp://127.0.0.1:*")?;
 //! let mut push = context.socket::<Push>();
-//! push.connect(&bound.to_string())?;
+//! push.connect(&bound)?;
 //! push.send("hello")?;
 //! assert_eq!(pull.recv()?, "hello".into());
 //! # Ok::<(), Box<dyn std::error::Error>>(())
@@ -140,7 +140,7 @@ use std::time::Duration;
 
 #[cfg(feature = "draft")]
 pub use draft::{Channel, Client, ClientId, Dish, Gather, Peer, PeerId, Radio, Scatter, Server};
-pub use endpoint::{Endpoint, Error};
+pub use endpoint::{Endpoint, Error, ToEndpoint};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions, SocksProxy};
 pub use polling::{PollItem, poll, poll_timeout};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};

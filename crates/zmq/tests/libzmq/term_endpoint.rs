@@ -56,8 +56,8 @@ fn unbind_via_last_endpoint() {
     let ipc = pull.bind("ipc://*").unwrap();
     assert!(matches!(ipc, Endpoint::Ipc(_)));
 
-    push.unbind(&tcp.to_string()).unwrap();
-    pull.unbind(&ipc.to_string()).unwrap();
+    push.unbind(&tcp).unwrap();
+    pull.unbind(&ipc).unwrap();
 }
 
 #[cfg(unix)]

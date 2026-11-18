@@ -27,7 +27,7 @@ fn dropping_the_context_delivers_what_was_queued() {
     const COUNT: usize = 100_000;
     let receiving = Context::new().unwrap();
     let mut pull = receiving.socket::<Pull>();
-    let endpoint = pull.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
 
     let receiver = thread::spawn(move || {
         let mut count = 0;
@@ -60,7 +60,7 @@ fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
     for _ in 0..1000 {
         let context = Context::new().unwrap();
         let mut rep = context.socket::<Rep>();
-        let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+        let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
         let replier = thread::spawn(move || rep.recv().unwrap().reply("answer"));
         let mut req = context.socket::<Req>();
         req.connect(&endpoint).unwrap();
@@ -75,9 +75,9 @@ fn an_unconnected_socket_with_nothing_queued_does_not_hold_up_the_drop() {
     within(FIVE, || {
         let context = Context::new().unwrap();
         let mut push = context.socket::<Push>();
-        push.connect(&free_endpoint()).unwrap();
+        push.connect(free_endpoint()).unwrap();
         let mut pull = context.socket::<Pull>();
-        pull.connect(&free_endpoint()).unwrap();
+        pull.connect(free_endpoint()).unwrap();
     });
 }
 
@@ -87,11 +87,11 @@ fn subscriptions_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
         let context = Context::new().unwrap();
         let mut sub = context.socket::<Sub>();
         sub.subscribe("a");
-        sub.connect(&free_endpoint()).unwrap();
+        sub.connect(free_endpoint()).unwrap();
         let mut xsub = context.socket::<XSub>();
         xsub.subscribe("a");
         xsub.send("upstream").unwrap();
-        xsub.connect(&free_endpoint()).unwrap();
+        xsub.connect(free_endpoint()).unwrap();
     });
 }
 
@@ -102,7 +102,7 @@ fn joins_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
         let context = Context::new().unwrap();
         let mut dish = context.socket::<zmq::Dish>();
         dish.join(&zmq::Group::new("group").unwrap());
-        dish.connect(&free_endpoint()).unwrap();
+        dish.connect(free_endpoint()).unwrap();
     });
 }
 
@@ -129,7 +129,7 @@ fn a_bounded_linger_gives_up_on_an_unreachable_peer() {
         let mut push = context.socket_with::<Push>(
             SocketOptions::new().linger(Linger::For(Duration::from_millis(100))),
         );
-        push.connect(&free_endpoint()).unwrap();
+        push.connect(free_endpoint()).unwrap();
         push.send("never delivered").unwrap();
     });
 }

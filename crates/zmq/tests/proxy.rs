@@ -255,13 +255,13 @@ fn captured_by(
     tap: impl FnOnce() -> Message + Send + 'static,
 ) -> Message {
     let mut frontend = context.socket::<Pull>();
-    frontend.bind(&format!("inproc://{name}-in")).unwrap();
+    frontend.bind(format!("inproc://{name}-in")).unwrap();
     let mut backend = context.socket::<Push>();
-    backend.bind(&format!("inproc://{name}-out")).unwrap();
+    backend.bind(format!("inproc://{name}-out")).unwrap();
     let mut source = context.socket::<Push>();
-    source.connect(&format!("inproc://{name}-in")).unwrap();
+    source.connect(format!("inproc://{name}-in")).unwrap();
     let mut sink = context.socket::<Pull>();
-    sink.connect(&format!("inproc://{name}-out")).unwrap();
+    sink.connect(format!("inproc://{name}-out")).unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend).capture(capture);
     let control = proxy.control();
@@ -345,22 +345,18 @@ fn a_capture_with_no_room_does_not_hold_up_the_proxy() {
 fn forwards_from_a_sub_to_a_pub(name: &str, no_drop: bool) {
     let context = Context::new().unwrap();
     let mut publisher = context.socket::<Pub>();
-    publisher
-        .bind(&format!("inproc://{name}-upstream"))
-        .unwrap();
+    publisher.bind(format!("inproc://{name}-upstream")).unwrap();
     let mut frontend = context.socket::<Sub>();
     frontend.subscribe("");
     frontend
-        .connect(&format!("inproc://{name}-upstream"))
+        .connect(format!("inproc://{name}-upstream"))
         .unwrap();
     let mut backend = context.socket::<Pub>();
-    backend
-        .bind(&format!("inproc://{name}-downstream"))
-        .unwrap();
+    backend.bind(format!("inproc://{name}-downstream")).unwrap();
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("");
     subscriber
-        .connect(&format!("inproc://{name}-downstream"))
+        .connect(format!("inproc://{name}-downstream"))
         .unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend);

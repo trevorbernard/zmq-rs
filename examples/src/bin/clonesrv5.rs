@@ -35,11 +35,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up our clone server sockets
     let mut snapshot = context.socket::<Router>();
-    snapshot.bind(&format!("tcp://*:{port}"))?;
+    snapshot.bind(format!("tcp://*:{port}"))?;
     let mut publisher = context.socket::<Pub>();
-    publisher.bind(&format!("tcp://*:{}", port + 1))?;
+    publisher.bind(format!("tcp://*:{}", port + 1))?;
     let mut collector = context.socket::<Pull>();
-    collector.bind(&format!("tcp://*:{}", port + 2))?;
+    collector.bind(format!("tcp://*:{}", port + 2))?;
 
     let mut server = CloneServer {
         kvmap: HashMap::new(),

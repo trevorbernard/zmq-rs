@@ -46,7 +46,7 @@ fn a_libzmq_denial_is_reported_with_its_zap_status() {
         },
     )));
     let mut monitor = push.monitor();
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(format!("tcp://{addr}")).unwrap();
     expect(&mut monitor, |kind| {
         *kind == EventKind::HandshakeFailed(HandshakeFailure::Authentication { status: 400 })
     });
@@ -67,7 +67,7 @@ fn a_libzmq_server_dropping_a_bad_hello_fails_without_detail() {
             .reconnect(Reconnect::Never),
     );
     let mut monitor = push.monitor();
-    push.connect(&format!("tcp://{addr}")).unwrap();
+    push.connect(format!("tcp://{addr}")).unwrap();
     expect(&mut monitor, |kind| *kind == EventKind::Connected);
     expect(&mut monitor, |kind| {
         *kind == EventKind::HandshakeFailed(HandshakeFailure::NoDetail)
@@ -80,7 +80,7 @@ fn a_libzmq_client_is_accepted_then_disconnects() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound.clone());
     let accepted = expect(&mut monitor, |kind| *kind == EventKind::Accepted);

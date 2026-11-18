@@ -48,11 +48,11 @@ fn push_and_pull_over_ipc() {
     let path = socket_path("pipeline");
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    let bound = pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    let bound = pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert_eq!(bound, Endpoint::Ipc(path.clone()));
     assert_eq!(bound.to_string(), format!("ipc://{}", path.display()));
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     push.send("over a unix socket").unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),
@@ -65,7 +65,7 @@ fn the_socket_file_goes_when_the_socket_does() {
     let path = socket_path("tidy");
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert!(path.exists());
     drop(pull);
     let started = std::time::Instant::now();
@@ -85,7 +85,7 @@ fn a_wildcard_binds_a_fresh_path() {
     };
     assert!(path.exists(), "{path:?}");
     let mut push = context.socket::<Push>();
-    push.connect(&bound.to_string()).unwrap();
+    push.connect(&bound).unwrap();
     push.send("found it").unwrap();
     let pull = within(FIVE, move || {
         assert_eq!(pull.recv().unwrap(), Message::from("found it"));
@@ -108,10 +108,10 @@ fn a_path_in_use_cannot_be_bound() {
     let path = socket_path("in-use");
     let context = Context::new().unwrap();
     let mut first = context.socket::<Pull>();
-    first.bind(&format!("ipc://{}", path.display())).unwrap();
+    first.bind(format!("ipc://{}", path.display())).unwrap();
     let mut second = context.socket::<Pull>();
     assert!(matches!(
-        second.bind(&format!("ipc://{}", path.display())),
+        second.bind(format!("ipc://{}", path.display())),
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
     ));
 }
@@ -124,9 +124,9 @@ fn a_stale_socket_file_is_replaced() {
     assert!(path.exists());
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("ipc://{}", path.display())).unwrap();
+    push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("fresh").unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),
@@ -141,7 +141,7 @@ fn an_ordinary_file_is_never_replaced() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     assert!(matches!(
-        pull.bind(&format!("ipc://{}", path.display())),
+        pull.bind(format!("ipc://{}", path.display())),
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
     ));
     assert_eq!(std::fs::read_to_string(&path).unwrap(), "keep me");
@@ -152,11 +152,11 @@ fn connecting_before_binding_retries_until_it_works() {
     let path = socket_path("later");
     let context = Context::new().unwrap();
     let mut push = context.socket::<Push>();
-    push.connect(&format!("ipc://{}", path.display())).unwrap();
+    push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("queued").unwrap();
     thread::sleep(Duration::from_millis(50));
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),
         Message::from("queued")
@@ -206,7 +206,7 @@ fn a_replaced_socket_file_is_left_alone() {
     let path = socket_path("replaced");
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    pull.bind(&format!("ipc://{}", path.display())).unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
     // Someone else takes the path over while we are still bound.
     std::fs::remove_file(&path).unwrap();
     let _theirs = UnixListener::bind(&path).unwrap();
@@ -230,11 +230,11 @@ mod abstract_names {
         let name = unique("pipeline");
         let context = Context::new().unwrap();
         let mut pull = context.socket::<Pull>();
-        let bound = pull.bind(&format!("ipc://@{name}")).unwrap();
+        let bound = pull.bind(format!("ipc://@{name}")).unwrap();
         assert_eq!(bound, Endpoint::IpcAbstract(name.clone()));
         assert_eq!(bound.to_string(), format!("ipc://@{name}"));
         let mut push = context.socket::<Push>();
-        push.connect(&bound.to_string()).unwrap();
+        push.connect(&bound).unwrap();
         push.send("no file at all").unwrap();
         assert_eq!(
             within(FIVE, move || pull.recv().unwrap()),
@@ -278,10 +278,10 @@ mod abstract_names {
         let context = Context::new().unwrap();
         let mut pull = context.socket::<Pull>();
         let longest = "x".repeat(107);
-        assert!(pull.bind(&format!("ipc://@{longest}")).is_ok());
+        assert!(pull.bind(format!("ipc://@{longest}")).is_ok());
         let mut pull = context.socket::<Pull>();
         assert!(matches!(
-            pull.bind(&format!("ipc://@{longest}y")),
+            pull.bind(format!("ipc://@{longest}y")),
             Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::InvalidInput
         ));
     }

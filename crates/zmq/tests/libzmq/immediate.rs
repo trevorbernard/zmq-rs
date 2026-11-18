@@ -38,10 +38,10 @@ fn count_received(socket: &mut Socket<Pull>) -> usize {
 fn immediate_1() {
     let context = Context::new().unwrap();
     let mut to = context.socket_with::<Pull>(options(false));
-    let endpoint = to.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = to.bind(free_endpoint()).unwrap().to_string();
 
     let mut from = context.socket_with::<Push>(options(false));
-    from.connect(&free_endpoint()).unwrap();
+    from.connect(free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
     settle();
 
@@ -57,10 +57,10 @@ fn immediate_1() {
 fn immediate_2() {
     let context = Context::new().unwrap();
     let mut to = context.socket_with::<Pull>(options(false));
-    let endpoint = to.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = to.bind(free_endpoint()).unwrap().to_string();
 
     let mut from = context.socket_with::<Push>(options(true));
-    from.connect(&free_endpoint()).unwrap();
+    from.connect(free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
 
     for _ in 0..10 {
@@ -75,7 +75,7 @@ fn immediate_3() {
     let context = Context::new().unwrap();
     let mut backend = context.socket_with::<Dealer>(options(false));
     let mut frontend = context.socket_with::<Dealer>(options(true));
-    let endpoint = backend.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = backend.bind(free_endpoint()).unwrap().to_string();
     frontend.connect(&endpoint).unwrap();
 
     // Ping backend to frontend so we know when the connection is up

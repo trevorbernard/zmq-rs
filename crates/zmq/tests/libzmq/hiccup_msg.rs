@@ -10,7 +10,7 @@ use crate::support::FIVE;
 fn test() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
-    let address = server.bind(&free_endpoint()).unwrap().to_string();
+    let address = server.bind(free_endpoint()).unwrap().to_string();
 
     let mut client = context.socket::<Client>();
     client.set_hello_message("HELLO");

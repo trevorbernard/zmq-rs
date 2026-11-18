@@ -119,7 +119,7 @@ fn reset_hwm() {
     let hwm_value = hwm(11024);
     let context = Context::new().unwrap();
     let mut pub_socket = context.socket_with::<Pub>(SocketOptions::new().send_hwm(hwm_value));
-    let endpoint = pub_socket.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = pub_socket.bind(free_endpoint()).unwrap().to_string();
     let mut sub_socket = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(hwm_value));
     sub_socket.connect(&endpoint).unwrap();
     sub_socket.subscribe("");

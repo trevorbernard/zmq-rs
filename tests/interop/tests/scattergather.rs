@@ -34,7 +34,7 @@ fn a_libzmq_scatter_feeds_our_gather() {
     }
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
-    let bound = gather.bind(&free_endpoint()).unwrap();
+    let bound = gather.bind(free_endpoint()).unwrap();
     let scatter = Socket::new(Kind::Scatter);
     scatter.connect(bound);
     for i in 0..3 {
@@ -60,7 +60,7 @@ fn our_scatter_feeds_a_libzmq_gather() {
     let addr = gather.bind_loopback();
     let context = Context::new().unwrap();
     let mut scatter = context.socket::<Scatter>();
-    scatter.connect(&format!("tcp://{addr}")).unwrap();
+    scatter.connect(format!("tcp://{addr}")).unwrap();
     scatter.send("to libzmq").unwrap();
     assert_eq!(gather.recv().unwrap(), [b"to libzmq"]);
 }
@@ -71,7 +71,7 @@ fn our_gather_drops_multipart_messages() {
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
     gather
-        .connect(&format!("tcp://{}", listener.local_addr().unwrap()))
+        .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
     let mut peer = Peer::accept(
         &listener,

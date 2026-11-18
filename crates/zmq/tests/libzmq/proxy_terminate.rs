@@ -24,10 +24,10 @@ fn proxy_terminate() {
         move || {
             let mut frontend = context.socket::<Sub>();
             frontend.subscribe("");
-            let bound = frontend.bind(&free_endpoint()).unwrap();
+            let bound = frontend.bind(free_endpoint()).unwrap();
             // A PUSH that is never read
             let mut backend = context.socket::<Push>();
-            backend.bind(&free_endpoint()).unwrap();
+            backend.bind(free_endpoint()).unwrap();
             endpoints.send(bound.to_string()).unwrap();
 
             let mut proxy = Proxy::new(&mut frontend, &mut backend);

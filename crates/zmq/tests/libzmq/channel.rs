@@ -9,9 +9,9 @@ use crate::support::{FIVE, within};
 
 fn bound_and_connected(context: &Context, name: &str) -> (Socket<Channel>, Socket<Channel>) {
     let mut sb = context.socket::<Channel>();
-    sb.bind(&format!("inproc://{name}")).unwrap();
+    sb.bind(format!("inproc://{name}")).unwrap();
     let mut sc = context.socket::<Channel>();
-    sc.connect(&format!("inproc://{name}")).unwrap();
+    sc.connect(format!("inproc://{name}")).unwrap();
     (sb, sc)
 }
 

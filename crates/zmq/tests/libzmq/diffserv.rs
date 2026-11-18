@@ -18,7 +18,7 @@ fn serviced(type_of_service: u8) -> SocketOptions {
 fn diffserv() {
     let context = Context::new().unwrap();
     let mut sb = context.socket_with::<Pair>(serviced(0x28));
-    let my_endpoint = sb.bind(&free_endpoint()).unwrap().to_string();
+    let my_endpoint = sb.bind(free_endpoint()).unwrap().to_string();
 
     let mut sc = context.socket_with::<Pair>(serviced(0x58));
     sc.connect(&my_endpoint).unwrap();

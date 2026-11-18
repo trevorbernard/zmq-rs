@@ -27,9 +27,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn scatter_and_gather_over_tcp() {
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
-    let bound = gather.bind(&free_endpoint()).unwrap();
+    let bound = gather.bind(free_endpoint()).unwrap();
     let mut scatter = context.socket::<Scatter>();
-    scatter.connect(&bound.to_string()).unwrap();
+    scatter.connect(&bound).unwrap();
     for i in 0..10 {
         scatter.send(format!("{i}")).unwrap();
     }
@@ -46,13 +46,13 @@ fn scatter_round_robins_across_gathers() {
     let mut gathers: Vec<_> = (0..2)
         .map(|n| {
             let mut gather = context.socket::<Gather>();
-            gather.bind(&format!("inproc://gather-{n}")).unwrap();
+            gather.bind(format!("inproc://gather-{n}")).unwrap();
             gather
         })
         .collect();
     let mut scatter = context.socket::<Scatter>();
     for n in 0..2 {
-        scatter.connect(&format!("inproc://gather-{n}")).unwrap();
+        scatter.connect(format!("inproc://gather-{n}")).unwrap();
     }
     for i in 0..4 {
         scatter.send(format!("{i}")).unwrap();

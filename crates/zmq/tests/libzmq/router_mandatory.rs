@@ -25,7 +25,7 @@ fn dealer_called(
 fn basic() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     // libzmq's default silently drops a message for an unknown peer;
     // zmq-rs reports it, as libzmq does with mandatory routing.

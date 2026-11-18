@@ -29,7 +29,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
-    ours.connect(&format!("tcp://{addr}")).unwrap();
+    ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send("ping").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"ping"]);
     theirs.send(&[b"pong", b"two frames"]).unwrap();
@@ -42,7 +42,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
 fn a_libzmq_pair_talks_to_ours() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
-    let bound = ours.bind(&free_endpoint()).unwrap();
+    let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Pair);
     theirs.set_receive_timeout(FIVE);
     theirs.connect(bound);
@@ -57,7 +57,7 @@ fn a_libzmq_pair_talks_to_ours() {
 fn a_second_libzmq_pair_waits_its_turn() {
     let context = Context::new().unwrap();
     let mut ours = context.socket::<Pair>();
-    let bound = ours.bind(&free_endpoint()).unwrap();
+    let bound = ours.bind(free_endpoint()).unwrap();
     let first = Socket::new(Kind::Pair);
     first.connect(bound.clone());
     first.send(&[b"first"]).unwrap();

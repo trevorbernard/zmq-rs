@@ -23,7 +23,7 @@ fn loopback(ipv6: bool) -> String {
 fn single_connect(ipv6: bool) {
     let context = Context::new().unwrap();
     let mut sb = context.socket::<Rep>();
-    let my_endpoint = sb.bind(&loopback(ipv6)).unwrap().to_string();
+    let my_endpoint = sb.bind(loopback(ipv6)).unwrap().to_string();
     let mut sc = context.socket::<Req>();
     sc.connect(&my_endpoint).unwrap();
     let mut sc = bounce_req_rep(&mut sb, sc);
@@ -56,9 +56,9 @@ fn connect_address(source: SocketAddr, endpoint: &str) -> String {
 fn multi_connect_same_port(ipv6: bool) {
     let context = Context::new().unwrap();
     let mut sb0 = context.socket::<Rep>();
-    let my_endpoint_0 = sb0.bind(&loopback(ipv6)).unwrap().to_string();
+    let my_endpoint_0 = sb0.bind(loopback(ipv6)).unwrap().to_string();
     let mut sb1 = context.socket::<Rep>();
-    let my_endpoint_1 = sb1.bind(&loopback(ipv6)).unwrap().to_string();
+    let my_endpoint_1 = sb1.bind(loopback(ipv6)).unwrap().to_string();
     let (first, second) = (source(ipv6), source(ipv6));
 
     let mut sc0 = context.socket::<Req>();
@@ -95,7 +95,7 @@ fn multi_connect(ipv6: bool) {
     let mut sbs: Vec<_> = (0..3).map(|_| context.socket::<Rep>()).collect();
     let endpoints: Vec<_> = sbs
         .iter_mut()
-        .map(|sb| sb.bind(&loopback(ipv6)).unwrap().to_string())
+        .map(|sb| sb.bind(loopback(ipv6)).unwrap().to_string())
         .collect();
     let mut sc = context.socket::<Req>();
     sc.connect(&endpoints[0]).unwrap();

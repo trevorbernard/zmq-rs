@@ -59,7 +59,7 @@ fn a_listener_out_of_file_descriptors_accepts_once_some_are_free() {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
-    let bound = pull.bind(&free_endpoint()).unwrap();
+    let bound = pull.bind(free_endpoint()).unwrap();
     let address = bound.tcp_addr().unwrap();
     // Once listening, the I/O thread opens nothing more until it accepts.
     expect(&mut monitor, |kind| *kind == EventKind::Listening);

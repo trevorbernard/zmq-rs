@@ -16,7 +16,7 @@ fn connections_with_keepalive_carry_messages_both_ways_of_connecting() {
     });
     let context = Context::new().unwrap();
     let mut pull = context.socket_with::<Pull>(keepalive.clone());
-    let bound = pull.bind(&free_endpoint()).unwrap().to_string();
+    let bound = pull.bind(free_endpoint()).unwrap().to_string();
     let mut push = context.socket_with::<Push>(keepalive);
     push.connect(&bound).unwrap();
     push.send("probed").unwrap();

@@ -71,15 +71,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Set up our clone server sockets
     let mut publisher = context.socket::<Pub>();
-    publisher.bind(&format!("tcp://*:{}", port + 1))?;
+    publisher.bind(format!("tcp://*:{}", port + 1))?;
     let mut collector = context.socket::<Sub>();
     collector.subscribe("");
-    collector.bind(&format!("tcp://*:{}", port + 2))?;
+    collector.bind(format!("tcp://*:{}", port + 2))?;
 
     // Set up our own clone client interface to peer
     let mut subscriber = context.socket::<Sub>();
     subscriber.subscribe("");
-    subscriber.connect(&format!("tcp://localhost:{}", peer + 1))?;
+    subscriber.connect(format!("tcp://localhost:{}", peer + 1))?;
 
     let mut server = CloneServer {
         context,

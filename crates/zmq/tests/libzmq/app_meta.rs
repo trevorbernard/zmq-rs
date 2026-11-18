@@ -37,7 +37,7 @@ fn app_meta_reqrep() {
         assert_eq!(rep.add_metadata(name, value), Err(error), "{name}:{value}");
     }
 
-    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
 
     req.add_metadata("X-hello", "hello").unwrap();
     req.add_metadata("X-connection", "primary").unwrap();
@@ -74,7 +74,7 @@ fn app_meta_reqrep() {
 fn a_name_added_twice_keeps_its_first_value() {
     let context = Context::new().unwrap();
     let mut rep = context.socket::<Rep>();
-    let endpoint = rep.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
     let mut req = context.socket::<Req>();
     req.add_metadata("X-hello", "first").unwrap();
     req.add_metadata("X-hello", "second").unwrap();

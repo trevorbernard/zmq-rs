@@ -15,7 +15,7 @@ use crate::socket::routed;
 use crate::socket::{
     DealerRouting, Receives, Routing, SocketType, WaitsForRoom, noop, poll_load_balanced, sealed,
 };
-use crate::{Socket, Terminated, TrySendError, wait};
+use crate::{Socket, Terminated, ToEndpoint, TrySendError, wait};
 
 /// Sends single-part messages round robin to its SERVER peers, and
 /// receives from them fairly (RFC 41). Waits while no peer has room.
@@ -436,9 +436,9 @@ impl PeerId {
 impl Socket<Peer> {
     /// Connects to the PEER at `endpoint` and returns its id. Messages to
     /// it queue until the connection is up.
-    pub fn connect_peer(&mut self, endpoint: &str) -> Result<PeerId, crate::Error> {
+    pub fn connect_peer(&mut self, endpoint: impl ToEndpoint) -> Result<PeerId, crate::Error> {
         let key = self
-            .connect_key(endpoint)?
+            .connect_key(&endpoint.written())?
             .expect("PEER never connects with ZMQ_IMMEDIATE");
         let mut cx = noop();
         let (peers, table) = self.parts_accepting(&mut cx);

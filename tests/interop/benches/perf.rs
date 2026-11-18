@@ -543,7 +543,7 @@ fn connect<T: zmq::SocketType>(
 ) -> End<T> {
     if ours {
         let mut socket = context.socket::<T>();
-        socket.connect(&endpoint.to_string()).expect("connect");
+        socket.connect(endpoint).expect("connect");
         End::Ours(socket)
     } else {
         let socket = libzmq::Socket::in_context(libzmq_context, kind);

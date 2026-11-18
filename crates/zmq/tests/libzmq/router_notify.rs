@@ -33,7 +33,7 @@ fn router_notify(connect: bool, disconnect: bool) {
             .connect(connect)
             .disconnect(disconnect),
     );
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(named("X"));
     dealer.connect(&endpoint).unwrap();
@@ -84,7 +84,7 @@ fn handshake_fail() {
     let context = Context::new().unwrap();
     let mut router = context.socket::<Router>();
     router.set_notify(RouterNotify::default().connect(true).disconnect(true));
-    let endpoint = router.bind(&free_endpoint()).unwrap();
+    let endpoint = router.bind(free_endpoint()).unwrap();
 
     let mut stream = TcpStream::connect(endpoint.tcp_addr().unwrap()).unwrap();
     stream.write_all(b"not-a-handshake").unwrap();
@@ -106,7 +106,7 @@ fn error_during_multipart() {
             .max_message_size(64),
     );
     router.set_notify(RouterNotify::default().connect(false).disconnect(true));
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer = context.socket_with::<Dealer>(named("X"));
     dealer.connect(&endpoint).unwrap();

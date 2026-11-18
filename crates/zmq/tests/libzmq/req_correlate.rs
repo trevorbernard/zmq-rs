@@ -25,7 +25,7 @@ fn req_correlate() {
     let mut req = context.socket::<Req>();
     let mut router = context.socket::<Router>();
     req.set_correlation(true);
-    let endpoint = router.bind(&free_endpoint()).unwrap().to_string();
+    let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     req.connect(&endpoint).unwrap();
 
     // A multipart request.

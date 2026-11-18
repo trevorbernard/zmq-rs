@@ -14,7 +14,7 @@ use zmq::{Context, Pub, Sub};
 fn listener_task(context: Context, network: String) -> Result<(), zmq::Error> {
     let mut listener = context.socket::<Sub>();
     for address in 1..255 {
-        listener.connect(&format!("tcp://{network}{address}:9000"))?;
+        listener.connect(format!("tcp://{network}{address}:9000"))?;
     }
     listener.subscribe("");
     loop {
@@ -43,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let mut broadcaster = context.socket::<Pub>();
-    broadcaster.bind(&format!("tcp://{interface}:9000"))?;
+    broadcaster.bind(format!("tcp://{interface}:9000"))?;
     let mut message = String::new();
     while io::stdin().read_line(&mut message)? > 0 {
         broadcaster.send(format!("{username}: {message}"))?;
