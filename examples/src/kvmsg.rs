@@ -115,7 +115,7 @@ impl KvMsg {
             .collect();
         Some(Self {
             key: Some(text(key)),
-            sequence: i64::from_be_bytes(sequence.as_slice().try_into().ok()?),
+            sequence: i64::from_be_bytes(sequence.as_bytes().try_into().ok()?),
             uuid: Some(uuid.clone()),
             props,
             body: Some(body.clone()),

@@ -119,7 +119,7 @@ impl PlainClient {
         match (self.state, parse_from_server(incoming)?) {
             (_, Command::Error(reason)) => Err(HandshakeError::PeerError(reason)),
             (ClientState::WaitingForWelcome, Command::Other { name, data })
-                if name.as_slice() == WELCOME.as_bytes() =>
+                if name.as_bytes() == WELCOME.as_bytes() =>
             {
                 if !data.is_empty() {
                     return Err(malformed(WELCOME));
@@ -171,7 +171,7 @@ impl PlainServer {
         match (self.state, parse(incoming)?) {
             (_, Command::Error(reason)) => Err(HandshakeError::PeerError(reason)),
             (ServerState::WaitingForHello, Command::Other { name, data })
-                if name.as_slice() == HELLO.as_bytes() =>
+                if name.as_bytes() == HELLO.as_bytes() =>
             {
                 let credentials = parse_hello(&data)?;
                 let request = self.config.zap_request(ZapCredentials::Plain(credentials));
@@ -182,7 +182,7 @@ impl PlainServer {
                 Ok(PlainServerStep::Authenticate(pending, request))
             }
             (ServerState::WaitingForInitiate(authenticated), Command::Other { name, data })
-                if name.as_slice() == INITIATE.as_bytes() =>
+                if name.as_bytes() == INITIATE.as_bytes() =>
             {
                 let metadata =
                     parse_metadata(&data, INITIATE).map_err(HandshakeError::MalformedCommand)?;

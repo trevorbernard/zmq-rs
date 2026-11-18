@@ -36,7 +36,7 @@ impl Membership {
             Self::Join(_) => 1,
             Self::Leave(_) => 0,
         };
-        let name = self.group().as_slice();
+        let name = self.group().as_bytes();
         let mut frame = Vec::with_capacity(1 + name.len());
         frame.push(kind);
         frame.extend_from_slice(name);

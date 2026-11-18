@@ -510,7 +510,7 @@ impl Publisher {
 
     /// Whether the peer with `key` should get `message`.
     fn wants(&self, key: PeerKey, message: &Message) -> bool {
-        let topic = message.split_first().0.as_slice();
+        let topic = message.split_first().0.as_bytes();
         self.subscribers
             .get(&key)
             .is_some_and(|entry| entry.topics.matches(topic) != self.invert)
@@ -526,7 +526,7 @@ impl Publisher {
         } else {
             self.matched.clear();
         }
-        let topic = message.split_first().0.as_slice();
+        let topic = message.split_first().0.as_bytes();
         for peers in self.index.prefixes_of(topic) {
             self.matched.extend(peers);
         }

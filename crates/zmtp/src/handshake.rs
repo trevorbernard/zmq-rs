@@ -436,7 +436,7 @@ impl fmt::Display for HandshakeError {
             Self::PeerError(reason) => write!(
                 f,
                 "peer rejected the handshake: {}",
-                reason.as_slice().escape_ascii()
+                reason.as_bytes().escape_ascii()
             ),
             Self::UnexpectedCommand(name) => write!(
                 f,

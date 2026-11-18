@@ -52,8 +52,8 @@ impl MessageMetadata {
         let exact = |name: &str| {
             self.0
                 .iter()
-                .find(|(property, _)| property.as_slice() == name.as_bytes())
-                .map(|(_, value)| value.as_slice())
+                .find(|(property, _)| property.as_bytes() == name.as_bytes())
+                .map(|(_, value)| value.as_bytes())
         };
         exact(name).or_else(|| (name == "Identity").then(|| exact("Routing-Id")).flatten())
     }
@@ -68,7 +68,7 @@ impl MessageMetadata {
     pub fn iter(&self) -> impl ExactSizeIterator<Item = (&[u8], &[u8])> {
         self.0
             .iter()
-            .map(|(name, value)| (name.as_slice(), value.as_slice()))
+            .map(|(name, value)| (name.as_bytes(), value.as_bytes()))
     }
 
     /// Whether `self` and `other` are the same connection's metadata.

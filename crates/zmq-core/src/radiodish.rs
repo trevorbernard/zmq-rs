@@ -75,7 +75,7 @@ impl Radio {
             return 0;
         };
         // On the wire: the group, then the body (RFC 48).
-        let mut message = Message::new(Frame::copy_from_slice(group.as_slice()));
+        let mut message = Message::new(Frame::copy_from_slice(group.as_bytes()));
         message.push(body);
         let mut sent = 0;
         for &key in members {

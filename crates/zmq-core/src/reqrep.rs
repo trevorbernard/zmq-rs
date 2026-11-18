@@ -216,7 +216,7 @@ fn unwrap_reply(reply: Message, id: Option<[u8; 4]>) -> Option<Message> {
     let metadata = reply.metadata().cloned();
     let mut frames = reply.into_iter();
     if let Some(id) = id
-        && frames.next()?.as_slice() != id
+        && frames.next()?.as_bytes() != id
     {
         return None;
     }

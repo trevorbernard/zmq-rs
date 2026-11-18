@@ -106,7 +106,7 @@ impl RouterTable {
             || self
                 .assigned
                 .values()
-                .any(|assigned| assigned.as_slice() == routing_id)
+                .any(|assigned| assigned.as_bytes() == routing_id)
     }
 
     /// Identifies peers whose handshake has completed and forgets peers that
@@ -148,7 +148,7 @@ impl RouterTable {
         } else {
             announced
         };
-        if let Some(&holder) = self.by_identity.get(routing_id.as_slice()) {
+        if let Some(&holder) = self.by_identity.get(routing_id.as_bytes()) {
             if !self.handover {
                 self.by_peer.insert(key, Route::Ignored);
                 return;
@@ -156,7 +156,7 @@ impl RouterTable {
             self.by_peer.remove(&holder);
             peers.remove_key(holder);
         }
-        self.by_identity.insert(routing_id.as_slice().into(), key);
+        self.by_identity.insert(routing_id.as_bytes().into(), key);
         self.by_peer.insert(key, Route::Routable(routing_id));
     }
 

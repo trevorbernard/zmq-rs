@@ -61,7 +61,7 @@ fn our_curve_client_talks_to_a_libzmq_curve_server() {
 
     router.send(&[b"me", b"back", &[0x5a; 70_000]]).unwrap();
     let reply = peer.recv_message().unwrap();
-    assert_eq!(reply.get(0).unwrap().as_slice(), b"back");
+    assert_eq!(reply.get(0).unwrap().as_bytes(), b"back");
     assert_eq!(reply.get(1).unwrap().len(), 70_000);
 }
 
@@ -110,7 +110,7 @@ fn a_libzmq_curve_client_talks_to_our_curve_server() {
 
     dealer.send(&[b"hi", &[1; 50_000]]).unwrap();
     let message = peer.recv_message().unwrap();
-    assert_eq!(message.get(0).unwrap().as_slice(), b"hi");
+    assert_eq!(message.get(0).unwrap().as_bytes(), b"hi");
     assert_eq!(message.get(1).unwrap().len(), 50_000);
     peer.send(&multipart()).unwrap();
     let received = dealer.recv().unwrap();

@@ -180,7 +180,7 @@ impl Agent {
     /// Processes one message from the frontend: CONNECT or REQUEST.
     fn control_message(&mut self) -> Result<(), zmq::Error> {
         let (command, rest) = self.pipe.recv()?.into_parts();
-        match command.as_slice() {
+        match command.as_bytes() {
             b"CONNECT" => {
                 let Some(endpoint) = rest.first().map(|frame| text(frame)) else {
                     return Ok(());

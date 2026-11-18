@@ -29,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Frame 1: PING, or client control frame
         // Frame 2: request body
         let (control, _) = request.split_first();
-        let reply = if control.as_slice() == b"PING" {
+        let reply = if control.as_bytes() == b"PING" {
             Message::new("PONG")
         } else {
             let mut reply = Message::new(control.clone());

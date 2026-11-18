@@ -66,7 +66,7 @@ impl KvMsg {
         };
         Some(Self {
             key: Some(String::from_utf8_lossy(key).into_owned()),
-            sequence: i64::from_be_bytes(sequence.as_slice().try_into().ok()?),
+            sequence: i64::from_be_bytes(sequence.as_bytes().try_into().ok()?),
             body: Some(body.clone()),
         })
     }

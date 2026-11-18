@@ -1223,7 +1223,7 @@ impl ConnectionConfig {
         }
         let name =
             PropertyName::new(Frame::copy_from_slice(name)).map_err(InvalidMetadata::Name)?;
-        if self.metadata.get(name.as_slice()).is_some() {
+        if self.metadata.get(name.as_bytes()).is_some() {
             return Ok(());
         }
         self.metadata

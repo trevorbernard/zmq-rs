@@ -297,7 +297,7 @@ fn normalized(mut events: Vec<(PeerKey, XPubEvent)>) -> Vec<(PeerKey, XPubEvent)
                 .take_while(|e| cancel_from(e, key))
                 .count();
         events[start..end].sort_by(|a, b| match (&a.1, &b.1) {
-            (XPubEvent::Cancel(a), XPubEvent::Cancel(b)) => a.as_slice().cmp(b.as_slice()),
+            (XPubEvent::Cancel(a), XPubEvent::Cancel(b)) => a.as_bytes().cmp(b.as_bytes()),
             _ => unreachable!("a run of cancels"),
         });
         start = end.max(start + 1);

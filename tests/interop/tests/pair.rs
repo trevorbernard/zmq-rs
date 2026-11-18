@@ -35,7 +35,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
     theirs.send(&[b"pong", b"two frames"]).unwrap();
     let received = within(FIVE, move || ours.recv().unwrap());
     assert_eq!(received.iter().count(), 2);
-    assert_eq!(received.get(0).unwrap().as_slice(), b"pong");
+    assert_eq!(received.get(0).unwrap().as_bytes(), b"pong");
 }
 
 #[test]

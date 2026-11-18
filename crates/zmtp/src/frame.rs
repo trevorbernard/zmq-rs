@@ -48,7 +48,7 @@ impl Frame {
     }
 
     /// The payload.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         match &self.0 {
             Repr::Inline { len, buf } => &buf[..usize::from(*len)],
             Repr::Shared(bytes) => bytes,
@@ -59,7 +59,7 @@ impl Frame {
     /// an inline one copied.
     pub(crate) fn into_shared(self) -> Bytes {
         match self.0 {
-            Repr::Inline { .. } => Bytes::copy_from_slice(self.as_slice()),
+            Repr::Inline { .. } => Bytes::copy_from_slice(self.as_bytes()),
             Repr::Shared(bytes) => bytes,
         }
     }
@@ -87,19 +87,19 @@ impl Deref for Frame {
     type Target = [u8];
 
     fn deref(&self) -> &[u8] {
-        self.as_slice()
+        self.as_bytes()
     }
 }
 
 impl AsRef<[u8]> for Frame {
     fn as_ref(&self) -> &[u8] {
-        self.as_slice()
+        self.as_bytes()
     }
 }
 
 impl PartialEq for Frame {
     fn eq(&self, other: &Self) -> bool {
-        self.as_slice() == other.as_slice()
+        self.as_bytes() == other.as_bytes()
     }
 }
 
@@ -107,19 +107,19 @@ impl Eq for Frame {}
 
 impl PartialEq<[u8]> for Frame {
     fn eq(&self, other: &[u8]) -> bool {
-        self.as_slice() == other
+        self.as_bytes() == other
     }
 }
 
 impl Hash for Frame {
     fn hash<H: Hasher>(&self, state: &mut H) {
-        self.as_slice().hash(state);
+        self.as_bytes().hash(state);
     }
 }
 
 impl fmt::Debug for Frame {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "Frame(b\"{}\")", self.as_slice().escape_ascii())
+        write!(f, "Frame(b\"{}\")", self.as_bytes().escape_ascii())
     }
 }
 
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn a_frame_is_its_octets_to_what_takes_them() {
         let frame = Frame::from(Box::<[u8]>::from(&b"boxed"[..]));
-        assert_eq!(frame.as_slice(), b"boxed");
+        assert_eq!(frame.as_bytes(), b"boxed");
         assert_eq!(AsRef::<[u8]>::as_ref(&frame), b"boxed");
         assert!(frame == b"boxed"[..]);
         assert!(frame != b"other"[..]);

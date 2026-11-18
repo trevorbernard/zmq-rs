@@ -201,7 +201,7 @@ impl EngineError {
         // A client learns why from the server's ERROR, whose reason is the
         // ZAP status when authentication refused it.
         if let Self::Handshake(HandshakeError::PeerError(reason)) = self
-            && let Some(status) = zap_status(reason.as_slice())
+            && let Some(status) = zap_status(reason.as_bytes())
         {
             return HandshakeFailure::Authentication { status };
         }
@@ -1185,12 +1185,12 @@ fn remember(subscriptions: &mut Topics, subscription: &Subscription) {
 fn remember_membership(groups: &mut Topics, change: &Membership) {
     match change {
         Membership::Join(group) => {
-            if !groups.contains(group.as_slice()) {
-                groups.add(group.as_slice());
+            if !groups.contains(group.as_bytes()) {
+                groups.add(group.as_bytes());
             }
         }
         Membership::Leave(group) => {
-            groups.remove(group.as_slice());
+            groups.remove(group.as_bytes());
         }
     }
 }
@@ -1240,11 +1240,11 @@ fn connection_metadata(stream: &Stream, established: &Established) -> MessageMet
     if let Some(authenticated) = &established.authenticated {
         properties.push((Frame::from("User-Id"), authenticated.user_id.clone()));
         for (name, value) in authenticated.metadata.iter() {
-            properties.push((Frame::copy_from_slice(name.as_slice()), value.clone()));
+            properties.push((Frame::copy_from_slice(name.as_bytes()), value.clone()));
         }
     }
     for (name, value) in established.metadata.iter() {
-        properties.push((Frame::copy_from_slice(name.as_slice()), value.clone()));
+        properties.push((Frame::copy_from_slice(name.as_bytes()), value.clone()));
     }
     MessageMetadata::new(properties)
 }

@@ -181,7 +181,7 @@ impl Command {
             Self::Cancel(_) => b"CANCEL",
             Self::Join(_) => b"JOIN",
             Self::Leave(_) => b"LEAVE",
-            Self::Other { name, .. } => name.as_slice(),
+            Self::Other { name, .. } => name.as_bytes(),
         }
     }
 
@@ -191,14 +191,14 @@ impl Command {
         put_name(out, self.name());
         match self {
             Self::Ready(metadata) => encode_metadata(metadata, out),
-            Self::Error(reason) => put_name(out, reason.as_slice()),
+            Self::Error(reason) => put_name(out, reason.as_bytes()),
             Self::Ping(ping) => {
                 out.extend_from_slice(&ping.ttl.deciseconds().to_be_bytes());
-                out.extend_from_slice(ping.context.as_slice());
+                out.extend_from_slice(ping.context.as_bytes());
             }
-            Self::Pong(context) => out.extend_from_slice(context.as_slice()),
+            Self::Pong(context) => out.extend_from_slice(context.as_bytes()),
             Self::Subscribe(topic) | Self::Cancel(topic) => out.extend_from_slice(topic),
-            Self::Join(group) | Self::Leave(group) => out.extend_from_slice(group.as_slice()),
+            Self::Join(group) | Self::Leave(group) => out.extend_from_slice(group.as_bytes()),
             Self::Other { data, .. } => out.extend_from_slice(data),
         }
     }
@@ -208,7 +208,7 @@ impl Command {
 /// the data of READY and INITIATE.
 pub(crate) fn encode_metadata(metadata: &Metadata, out: &mut Vec<u8>) {
     for (name, value) in metadata.iter() {
-        put_name(out, name.as_slice());
+        put_name(out, name.as_bytes());
         out.extend_from_slice(&(value.len() as u32).to_be_bytes());
         out.extend_from_slice(value);
     }
@@ -306,7 +306,7 @@ impl PingContext {
     }
 
     /// The context octets.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -327,7 +327,7 @@ impl ErrorReason {
     }
 
     /// The reason octets.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -352,7 +352,7 @@ impl Group {
     }
 
     /// The group octets.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 }
@@ -366,7 +366,7 @@ impl CommandName {
     }
 
     /// The name octets.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 }
@@ -380,7 +380,7 @@ impl PropertyName {
     }
 
     /// The name octets, as sent.
-    pub fn as_slice(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         &self.0
     }
 
@@ -433,7 +433,7 @@ impl Metadata {
         let name = name.as_ref();
         self.properties
             .iter()
-            .find(|(n, _)| n.as_slice().eq_ignore_ascii_case(name))
+            .find(|(n, _)| n.as_bytes().eq_ignore_ascii_case(name))
             .map(|(_, value)| value)
     }
 
@@ -696,7 +696,7 @@ mod tests {
         let Command::Ping(parsed) = Command::parse(&ping).unwrap() else {
             panic!("expected PING");
         };
-        assert_eq!(parsed.context.as_slice(), &[7; 16]);
+        assert_eq!(parsed.context.as_bytes(), &[7; 16]);
         assert_eq!(parsed.ttl, Ttl::from_deciseconds(10));
 
         let mut pong = b"\x04PONG".to_vec();
@@ -803,7 +803,7 @@ mod tests {
         assert_eq!(a, b);
         let hasher = std::hash::RandomState::new();
         assert_eq!(hasher.hash_one(&a), hasher.hash_one(&b));
-        assert_eq!(a.as_slice(), b"Socket-Type", "original case is kept");
+        assert_eq!(a.as_bytes(), b"Socket-Type", "original case is kept");
     }
 
     #[test]
