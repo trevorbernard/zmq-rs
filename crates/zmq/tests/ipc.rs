@@ -333,7 +333,7 @@ mod abstract_names {
 
 #[test]
 fn sending_to_a_peer_that_left_does_not_lose_what_it_sent() {
-    let one = zmq::Hwm::Messages(std::num::NonZeroUsize::MIN);
+    let one = zmq::Hwm::from(1);
     let context = Context::new().unwrap();
     let mut sender = context.socket::<zmq::Pair>();
     let bound = sender.bind("ipc://*").unwrap().to_string();

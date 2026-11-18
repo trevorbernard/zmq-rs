@@ -1,9 +1,7 @@
 //! Synchronized publisher: waits for ten subscribers to check in over
 //! REQ-REP before publishing a million updates.
 
-use std::num::NonZeroUsize;
-
-use zmq::{Context, Hwm, Pub, Rep, SocketOptions};
+use zmq::{Context, Pub, Rep, SocketOptions};
 
 const SUBSCRIBERS_EXPECTED: usize = 10;
 
@@ -11,9 +9,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // Socket to talk to clients
-    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(Hwm::Messages(
-        NonZeroUsize::new(1_100_000).expect("nonzero"),
-    )));
+    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(1_100_000));
     publisher.bind("tcp://*:5561")?;
 
     // Socket to receive signals

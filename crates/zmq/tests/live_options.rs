@@ -2,7 +2,6 @@
 //! on a live socket: the linger and the high-water marks reach the
 //! connections it has, the rest the binds and connects made afterwards.
 
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -25,7 +24,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 }
 
 fn hwm(messages: usize) -> Hwm {
-    Hwm::Messages(NonZeroUsize::new(messages).unwrap())
+    Hwm::from(messages)
 }
 
 fn marks(send: usize, recv: usize) -> SocketOptions {

@@ -1,7 +1,6 @@
 //! libzmq's `tests/test_spec_pushpull.cpp`: PUSH and PULL against RFC 30.
 
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use zmq::{Context, Frame, Hwm, Linger, Message, Pull, Push, SocketOptions};
@@ -16,7 +15,7 @@ fn inproc(name: &str) -> String {
 /// A high-water mark of one message both ways, and no linger, as the
 /// cases below set with `ZMQ_SNDHWM`, `ZMQ_RCVHWM` and `ZMQ_LINGER`.
 fn tight() -> SocketOptions {
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     SocketOptions::new()
         .send_hwm(one)
         .recv_hwm(one)

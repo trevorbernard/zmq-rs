@@ -1,7 +1,6 @@
 //! Per-socket options, given when the socket is created.
 
 use std::fmt;
-use std::num::NonZeroUsize;
 
 use std::time::Duration;
 
@@ -61,7 +60,7 @@ pub struct SocketOptions {
 impl Default for SocketOptions {
     /// libzmq's defaults.
     fn default() -> Self {
-        let hwm = Hwm::Messages(NonZeroUsize::new(1000).unwrap_or(NonZeroUsize::MIN));
+        let hwm = Hwm::from(1000);
         Self {
             identity: Identity::default(),
             send_hwm: hwm,
@@ -97,14 +96,16 @@ impl SocketOptions {
         self
     }
 
-    /// Messages queued per peer towards it (`ZMQ_SNDHWM`, default 1000).
+    /// Messages queued per peer towards it (`ZMQ_SNDHWM`, default 1000): a
+    /// number, zero for no limit, or an [`Hwm`].
     #[must_use]
     pub fn send_hwm(mut self, hwm: impl Into<Hwm>) -> Self {
         self.send_hwm = hwm.into();
         self
     }
 
-    /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000).
+    /// Messages queued per peer from it (`ZMQ_RCVHWM`, default 1000), as
+    /// [`send_hwm`](Self::send_hwm) takes it.
     #[must_use]
     pub fn recv_hwm(mut self, hwm: impl Into<Hwm>) -> Self {
         self.recv_hwm = hwm.into();
@@ -338,7 +339,7 @@ mod tests {
     #[test]
     fn defaults_match_libzmq() {
         let options = SocketOptions::default();
-        let thousand = Hwm::Messages(NonZeroUsize::new(1000).unwrap());
+        let thousand = Hwm::from(1000);
         assert_eq!(options.send_hwm, thousand);
         assert_eq!(options.recv_hwm, thousand);
         assert_eq!(options.linger, None);

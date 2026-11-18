@@ -1,16 +1,15 @@
 //! Shows how a non-blocking send fails once a DEALER's queue to a peer
 //! that is not there is full.
 
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Hwm, Linger, SocketOptions};
+use zmq::{Context, Dealer, Linger, SocketOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
     let mut mailbox = context.socket_with::<Dealer>(
         SocketOptions::new()
-            .send_hwm(Hwm::Messages(NonZeroUsize::new(4).expect("nonzero")))
+            .send_hwm(4)
             .linger(Linger::For(Duration::ZERO)),
     );
     mailbox.connect("tcp://localhost:9876")?;

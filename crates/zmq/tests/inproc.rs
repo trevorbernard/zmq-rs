@@ -1,7 +1,6 @@
 //! In-process transport: sockets of one context talking through pipes,
 //! with no TCP and no I/O thread in between.
 
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -206,7 +205,7 @@ fn large_frames_cross_without_copying() {
 #[test]
 fn the_high_water_mark_is_the_sum_of_both_sides() {
     let context = Context::new().unwrap();
-    let hwm = |n| Hwm::Messages(NonZeroUsize::new(n).unwrap());
+    let hwm = |n| Hwm::from(n);
     let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));
     pull.bind("inproc://bounded").unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
@@ -230,7 +229,7 @@ fn empty_inproc_names_are_invalid() {
 #[test]
 fn the_sum_holds_towards_the_connecting_side_too() {
     let context = Context::new().unwrap();
-    let hwm = |n| Hwm::Messages(NonZeroUsize::new(n).unwrap());
+    let hwm = |n| Hwm::from(n);
     let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
     push.bind("inproc://outbound").unwrap();
     let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));

@@ -5,11 +5,10 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::num::NonZeroUsize;
 use std::thread;
 
 use zguide::text;
-use zmq::{Context, Dealer, Hwm, Message, Router, SocketOptions};
+use zmq::{Context, Dealer, Message, Router, SocketOptions};
 
 const CHUNK_SIZE: usize = 250_000;
 const PIPELINE: usize = 10;
@@ -53,7 +52,7 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
 fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open("testdata")?;
 
-    let hwm = Hwm::Messages(NonZeroUsize::new(PIPELINE * 2).expect("nonzero"));
+    let hwm = PIPELINE * 2;
     let mut router =
         context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm).recv_hwm(hwm));
     router.bind("tcp://*:6000")?;

@@ -18,7 +18,6 @@
 //! libzmq stops `zmq_proxy` by terminating its context; here it is stopped
 //! through its `ProxyControl`.
 
-use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
@@ -35,7 +34,7 @@ const NUM_BYTES_PER_MSG: usize = 50_000;
 const UNBLOCKED: u64 = 10_000;
 
 fn lower_hwm() -> SocketOptions {
-    let hwm = Hwm::Messages(NonZeroUsize::new(HWM).unwrap());
+    let hwm = Hwm::from(HWM);
     SocketOptions::new().send_hwm(hwm).recv_hwm(hwm)
 }
 

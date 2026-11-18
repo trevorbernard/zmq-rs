@@ -6,8 +6,6 @@
 //! fails and hands the message back (README, "Differences from libzmq").
 //! Whether a peer has room is what `try_send` reports, as `Full`.
 
-use std::num::NonZeroUsize;
-
 use zmq::{
     Context, Dealer, Hwm, Identity, Message, Router, RoutingId, SendError, Socket, SocketOptions,
 };
@@ -54,7 +52,7 @@ fn basic() {
 
 #[test]
 fn get_peer_state() {
-    let hwm = Hwm::Messages(NonZeroUsize::new(100).unwrap());
+    let hwm = Hwm::from(100);
     let context = Context::new().unwrap();
     let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm));
     router.bind("inproc://test_get_peer_state").unwrap();

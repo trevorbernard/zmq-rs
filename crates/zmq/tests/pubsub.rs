@@ -1,7 +1,6 @@
 //! PUB and SUB (RFC 29): topics, filtering, fan-out, and a publisher that
 //! never blocks.
 
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -141,7 +140,7 @@ fn messages_queued_before_unsubscribing_are_filtered_out() {
 #[test]
 fn a_publisher_drops_for_slow_subscribers_instead_of_blocking() {
     let context = Context::new().unwrap();
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(one));
     publisher.bind("inproc://slow").unwrap();
     let mut subscriber = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one));

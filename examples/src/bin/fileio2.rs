@@ -5,17 +5,15 @@
 
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
-use std::num::NonZeroUsize;
 use std::thread;
 
 use zguide::text;
-use zmq::{Context, Dealer, Hwm, Message, Router, SocketOptions};
+use zmq::{Context, Dealer, Message, Router, SocketOptions};
 
 const CHUNK_SIZE: usize = 250_000;
 
 fn one() -> SocketOptions {
-    let hwm = Hwm::Messages(NonZeroUsize::MIN);
-    SocketOptions::new().send_hwm(hwm).recv_hwm(hwm)
+    SocketOptions::new().send_hwm(1).recv_hwm(1)
 }
 
 fn client_thread(context: Context) -> Result<(), zmq::Error> {

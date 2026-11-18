@@ -3,7 +3,6 @@
 #![cfg(feature = "draft")]
 
 use std::collections::HashSet;
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
@@ -92,7 +91,7 @@ fn sending_to_an_unknown_or_departed_client_fails() {
 #[test]
 fn a_full_client_makes_try_send_hand_the_frame_back() {
     let context = Context::new().unwrap();
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     let mut server = context.socket_with::<Server>(SocketOptions::new().send_hwm(one));
     server.bind("inproc://full").unwrap();
     let mut client = context.socket_with::<Client>(SocketOptions::new().recv_hwm(one));

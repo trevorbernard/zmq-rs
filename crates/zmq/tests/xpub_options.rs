@@ -2,7 +2,6 @@
 //! `ZMQ_XPUB_VERBOSE`, `ZMQ_XPUB_VERBOSER`, `ZMQ_XPUB_NODROP` and
 //! `ZMQ_INVERT_MATCHING`.
 
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -167,7 +166,7 @@ fn an_inverted_xpub_skips_matching_subscribers() {
 }
 
 fn one() -> Hwm {
-    Hwm::Messages(NonZeroUsize::MIN)
+    Hwm::from(1)
 }
 
 /// A PUB with one slow subscriber to "a" and one to "b", both of which

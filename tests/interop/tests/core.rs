@@ -64,7 +64,7 @@ fn wait_for_send_pipe_to_close(connection: &Connection) {
 #[test]
 fn defaults_match_libzmq() {
     let config = ConnectionConfig::new(SocketType::Dealer);
-    let thousand = Hwm::Messages(NonZeroUsize::new(1000).unwrap());
+    let thousand = Hwm::from(1000);
     assert_eq!(config.send_hwm, thousand);
     assert_eq!(config.recv_hwm, thousand);
     assert_eq!(config.identity, Identity::default());
@@ -132,7 +132,7 @@ fn a_full_receive_pipe_applies_backpressure_without_loss() {
     let addr = libzmq.bind_loopback();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
-        recv_hwm: Hwm::Messages(NonZeroUsize::new(4).unwrap()),
+        recv_hwm: Hwm::from(4),
         ..dealer("slow")
     };
     let mut connection = context.connect(addr, config);

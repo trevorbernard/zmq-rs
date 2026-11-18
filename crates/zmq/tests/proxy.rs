@@ -529,7 +529,7 @@ fn terminating_an_idle_proxy_returns_at_once() {
 fn a_slow_backend_holds_up_only_its_own_direction() {
     // Replies keep flowing frontwards while the backend cannot take more.
     let context = Context::new().unwrap();
-    let one = zmq::Hwm::Messages(std::num::NonZeroUsize::MIN);
+    let one = zmq::Hwm::from(1);
     let mut frontend = context.socket::<Pair>();
     frontend.bind("inproc://busy-left").unwrap();
     let mut backend = context.socket_with::<Pair>(zmq::SocketOptions::new().send_hwm(one));

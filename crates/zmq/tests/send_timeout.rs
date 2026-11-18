@@ -2,7 +2,6 @@
 //! block gives up after the timeout and hands the message back, sends at
 //! once when there is room, and returns early once room appears.
 
-use std::num::NonZeroUsize;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,7 +18,7 @@ const FIVE: Duration = Duration::from_secs(5);
 /// Queues of one message each way, so a peer that does not read soon
 /// leaves no room.
 fn tiny() -> SocketOptions {
-    let one = Hwm::Messages(NonZeroUsize::new(1).unwrap());
+    let one = Hwm::from(1);
     SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 

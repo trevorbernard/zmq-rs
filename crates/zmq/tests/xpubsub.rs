@@ -292,8 +292,8 @@ fn a_flooding_subscriber_cannot_keep_xpub_from_returning() {
 fn xsub_drops_messages_at_the_hwm_but_never_subscriptions() {
     let marks = |n| {
         zmq::SocketOptions::new()
-            .send_hwm(zmq::Hwm::Messages(std::num::NonZeroUsize::new(n).unwrap()))
-            .recv_hwm(zmq::Hwm::Messages(std::num::NonZeroUsize::new(n).unwrap()))
+            .send_hwm(zmq::Hwm::from(n))
+            .recv_hwm(zmq::Hwm::from(n))
     };
     let context = Context::new().unwrap();
     let mut xpub = context.socket_with::<XPub>(marks(1));

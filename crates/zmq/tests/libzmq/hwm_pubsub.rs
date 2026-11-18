@@ -6,7 +6,6 @@
 //! libzmq sets the XPUB's HWM after the subscriber connects; zmq-rs fixes
 //! options when a socket is made, so the HWM is set then.
 
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use zmq::{Context, Hwm, Message, Pub, Socket, SocketOptions, Sub, XPub, XPubEvent};
@@ -15,7 +14,7 @@ use zmq_test_ports::free_endpoint;
 use crate::support::{FIVE, settle};
 
 fn hwm(messages: usize) -> Hwm {
-    Hwm::Messages(NonZeroUsize::new(messages).unwrap())
+    Hwm::from(messages)
 }
 
 /// An XPUB with `send_hwm` bound at `endpoint` and a SUB connected to it,

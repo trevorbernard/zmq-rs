@@ -2,7 +2,6 @@
 //! exactly. Draft sockets.
 #![cfg(feature = "draft")]
 
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -110,7 +109,7 @@ fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
 #[test]
 fn a_radio_drops_for_a_slow_dish_instead_of_blocking() {
     let context = Context::new().unwrap();
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     let mut radio = context.socket_with::<Radio>(SocketOptions::new().send_hwm(one));
     radio.bind("inproc://slow-dish").unwrap();
     let mut dish = context.socket_with::<Dish>(SocketOptions::new().recv_hwm(one));

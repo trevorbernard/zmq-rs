@@ -3,7 +3,6 @@
 //! needed, so these tests poll the futures by hand.
 
 use std::future::Future;
-use std::num::NonZeroUsize;
 use std::pin::{Pin, pin};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -87,7 +86,7 @@ fn run<F: Future>(future: F) -> F::Output {
 /// Queues of one message each way, so a peer that does not read soon
 /// leaves no room.
 fn tiny() -> SocketOptions {
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 

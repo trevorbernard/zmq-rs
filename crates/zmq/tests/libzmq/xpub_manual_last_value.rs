@@ -9,8 +9,6 @@
 //! `docs/rfc-compliance.md` says of `ManualXPub`. The cases the two
 //! libzmq tests share run as `xpub_manual` runs them.
 
-use std::num::NonZeroUsize;
-
 use zmq::{Context, Hwm, ManualXPub, Message, SocketOptions, Sub};
 
 use crate::support::SETTLE;
@@ -47,9 +45,8 @@ fn unsubscribe_cleanup() {
 #[test]
 fn manual_last_value() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<ManualXPub>(
-        SocketOptions::new().send_hwm(Hwm::Messages(NonZeroUsize::new(2000).unwrap())),
-    );
+    let mut publisher =
+        context.socket_with::<ManualXPub>(SocketOptions::new().send_hwm(Hwm::from(2000)));
     publisher
         .bind("inproc://libzmq-xpub-manual-last-value")
         .unwrap();

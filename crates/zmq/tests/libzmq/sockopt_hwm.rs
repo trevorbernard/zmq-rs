@@ -4,8 +4,6 @@
 //! libzmq also reads each option back. zmq-rs has no getsockopt, so the
 //! mark is known here by how many messages the PUSH takes.
 
-use std::num::NonZeroUsize;
-
 use zmq::{Context, Hwm, Message, Pull, Push, Socket};
 
 use crate::support::settle;
@@ -13,7 +11,7 @@ use crate::support::settle;
 const MAX_SENDS: usize = 10000;
 
 fn hwm(messages: usize) -> Hwm {
-    Hwm::Messages(NonZeroUsize::new(messages).unwrap())
+    Hwm::from(messages)
 }
 
 #[test]

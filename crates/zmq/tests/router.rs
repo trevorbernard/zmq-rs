@@ -2,7 +2,6 @@
 //! `ZMQ_ROUTER_MANDATORY`, `ZMQ_ROUTER_HANDOVER` and `ZMQ_PROBE_ROUTER`.
 
 use std::future::Future;
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::task::{Context as TaskContext, Poll, Waker};
 use std::thread;
@@ -25,7 +24,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 }
 
 fn one() -> Hwm {
-    Hwm::Messages(NonZeroUsize::MIN)
+    Hwm::from(1)
 }
 
 fn named(id: &str) -> SocketOptions {

@@ -16,6 +16,9 @@ use atomic_waker::AtomicWaker;
 use crate::queue;
 
 /// How many messages a pipe holds before the writer must wait.
+///
+/// Made from a number of messages, zero for no limit as in libzmq:
+/// `Hwm::from(4)`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum Hwm {
     /// No limit, like a libzmq HWM of zero.
@@ -23,6 +26,12 @@ pub enum Hwm {
     Unlimited,
     /// At most this many queued messages.
     Messages(NonZeroUsize),
+}
+
+impl From<usize> for Hwm {
+    fn from(messages: usize) -> Self {
+        NonZeroUsize::new(messages).map_or(Self::Unlimited, Self::Messages)
+    }
 }
 
 /// Creates a pipe.
@@ -734,6 +743,12 @@ mod tests {
 
     fn hwm(n: usize) -> Hwm {
         Hwm::Messages(NonZeroUsize::new(n).unwrap())
+    }
+
+    #[test]
+    fn a_mark_is_made_from_a_number_with_zero_for_no_limit() {
+        assert_eq!(Hwm::from(0), Hwm::Unlimited);
+        assert_eq!(Hwm::from(4), hwm(4));
     }
 
     /// A waker that counts how often it was woken.

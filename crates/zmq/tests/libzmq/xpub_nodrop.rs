@@ -7,7 +7,6 @@
 //! [`try_send_all`](zmq::Socket::try_send_all) hands the message back,
 //! where libzmq sets an option and a send timeout.
 
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 use zmq::{Context, Hwm, Message, SocketOptions, Sub, XPub, XPubEvent};
@@ -19,9 +18,7 @@ const HWM: usize = 2000;
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<XPub>(
-        SocketOptions::new().send_hwm(Hwm::Messages(NonZeroUsize::new(HWM).unwrap())),
-    );
+    let mut publisher = context.socket_with::<XPub>(SocketOptions::new().send_hwm(Hwm::from(HWM)));
     publisher.bind("inproc://libzmq-xpub-nodrop").unwrap();
 
     let mut subscriber = context.socket::<Sub>();

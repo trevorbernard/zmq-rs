@@ -3,8 +3,6 @@
 //! As in libzmq, an `inproc` pipe holds what the sender and the receiver
 //! would each buffer, and an HWM of 0, here [`Hwm::Unlimited`], is none.
 
-use std::num::NonZeroUsize;
-
 use zmq::{Context, Hwm, Pull, Push, Socket, SocketOptions};
 
 use crate::support::{FIVE, settle};
@@ -17,7 +15,7 @@ enum TestType {
 }
 
 fn hwm(messages: usize) -> Hwm {
-    NonZeroUsize::new(messages).map_or(Hwm::Unlimited, Hwm::Messages)
+    Hwm::from(messages)
 }
 
 fn sender(context: &Context, send_hwm: usize) -> Socket<Push> {

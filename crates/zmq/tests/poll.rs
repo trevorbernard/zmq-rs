@@ -1,6 +1,5 @@
 //! Waiting on several sockets at once, as libzmq's `zmq_poll`.
 
-use std::num::NonZeroUsize;
 use std::thread;
 use std::time::Duration;
 
@@ -84,7 +83,7 @@ fn a_poll_times_out_with_nothing_ready() {
 
 #[test]
 fn a_push_is_writable_only_with_room() {
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(one));
     assert_eq!(
@@ -112,7 +111,7 @@ fn a_push_is_writable_only_with_room() {
 
 /// Queues of one message each way.
 fn tiny() -> SocketOptions {
-    let one = Hwm::Messages(NonZeroUsize::MIN);
+    let one = Hwm::from(1);
     SocketOptions::new().send_hwm(one).recv_hwm(one)
 }
 
