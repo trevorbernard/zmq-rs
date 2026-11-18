@@ -10,7 +10,7 @@ use std::time::Duration;
 use zmq_core::{
     ConnectionConfig, EndpointId, FairQueue, Linger, LoadBalancer, Outstanding,
     Pair as PairRouting, PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester,
-    RouteOutcome, RouterTable, SendError, Subscriber, Verbosity, XPubEvent,
+    RouteOutcome, RouterTable, SendError, SharedLinger, Subscriber, Verbosity, XPubEvent,
 };
 use zmtp::{Frame, Message, Subscription};
 
@@ -753,7 +753,7 @@ impl<T: SocketType> Socket<T> {
             recv_hwm: options.recv_hwm,
             // PEER's connect_peer names the peer at once.
             immediate: options.immediate && !is_peer(T::KIND),
-            linger: options.linger.unwrap_or_else(default_linger::<T>).into(),
+            linger: SharedLinger::new(options.linger.unwrap_or_else(default_linger::<T>)),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
             message_properties: options.message_properties,

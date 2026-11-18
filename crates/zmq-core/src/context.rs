@@ -344,6 +344,11 @@ impl Linger {
 pub struct SharedLinger(Arc<Mutex<Linger>>);
 
 impl SharedLinger {
+    /// A linger to share, starting as `linger`.
+    pub fn new(linger: Linger) -> Self {
+        Self(Arc::new(Mutex::new(linger)))
+    }
+
     /// The linger now.
     pub fn get(&self) -> Linger {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner)
@@ -352,12 +357,6 @@ impl SharedLinger {
     /// Changes the linger for every holder of a clone.
     pub fn set(&self, linger: Linger) {
         *self.0.lock().unwrap_or_else(PoisonError::into_inner) = linger;
-    }
-}
-
-impl From<Linger> for SharedLinger {
-    fn from(linger: Linger) -> Self {
-        Self(Arc::new(Mutex::new(linger)))
     }
 }
 
@@ -1581,7 +1580,7 @@ mod tests {
         let mut lingering = context.connect(
             unreachable,
             ConnectionConfig {
-                linger: Linger::For(Duration::from_secs(1)).into(),
+                linger: SharedLinger::new(Linger::For(Duration::from_secs(1))),
                 ..config(SocketType::Push)
             },
         );
@@ -1611,7 +1610,7 @@ mod tests {
         let mut connection = context.connect(
             unreachable,
             ConnectionConfig {
-                linger: Linger::For(Duration::from_millis(100)).into(),
+                linger: SharedLinger::new(Linger::For(Duration::from_millis(100))),
                 ..config(SocketType::Push)
             },
         );

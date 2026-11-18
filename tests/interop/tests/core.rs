@@ -6,7 +6,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect};
+use zmq_core::{Connection, ConnectionConfig, Context, Linger, Reconnect, SharedLinger};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_interop::{ConnectError, Peer, Security};
 use zmq_pipe::Hwm;
@@ -351,7 +351,7 @@ fn zero_linger_discards_queued_messages() {
     let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
-        linger: Linger::For(Duration::ZERO).into(),
+        linger: SharedLinger::new(Linger::For(Duration::ZERO)),
         ..eager("discard")
     };
     let mut connection = context.connect(addr, config);
@@ -370,7 +370,7 @@ fn linger_gives_up_at_its_deadline() {
     let addr = free_port();
     let context = Context::new().unwrap();
     let config = ConnectionConfig {
-        linger: Linger::For(Duration::from_millis(100)).into(),
+        linger: SharedLinger::new(Linger::For(Duration::from_millis(100))),
         ..eager("deadline")
     };
     let mut connection = context.connect(addr, config);
