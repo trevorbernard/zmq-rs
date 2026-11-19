@@ -35,7 +35,7 @@ fn round_robin_out(bind_address: &str) {
         let requesting = Requesting::start(req, msg(&["ABC"]));
         let request = rep.recv_timeout(FIVE).unwrap().expect("this REP's turn");
         assert_eq!(request.body(), &msg(&["ABC"]));
-        request.reply("DEF");
+        request.reply("DEF").unwrap();
         let reply;
         (req, reply) = requesting.finish();
         assert_eq!(reply, msg(&["DEF"]));

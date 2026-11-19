@@ -23,6 +23,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (sequence, _) = request.body().split_first();
         let mut reply = Message::new(sequence.clone());
         reply.push("OK");
-        request.reply(reply);
+        // A requester that has left gets no reply: that is no reason to stop.
+        let _ = request.reply(reply);
     }
 }

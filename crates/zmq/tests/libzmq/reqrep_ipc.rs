@@ -4,7 +4,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Rep, Req};
+use zmq::{Context, Rep, ReplyError, Req};
 
 use crate::support::{FIVE, bounce_req_rep, msg, settle};
 
@@ -37,5 +37,5 @@ fn leak() {
     requester.join().unwrap();
     settle();
 
-    request.reply("leakymsg");
+    assert_eq!(request.reply("leakymsg"), Err(ReplyError::PeerGone));
 }

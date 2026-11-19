@@ -30,7 +30,7 @@ fn fair_queue_in(bind_address: &str) {
         let requesting = Requesting::start(reqs[0].take().unwrap(), msg(&["A"]));
         let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
         assert_eq!(request.body(), &msg(&["A"]));
-        request.reply("A");
+        request.reply("A").unwrap();
         let (req, reply) = requesting.finish();
         assert_eq!(reply, msg(&["A"]));
         reqs[0] = Some(req);
@@ -51,7 +51,7 @@ fn fair_queue_in(bind_address: &str) {
         let request = rep.recv_timeout(FIVE).unwrap().expect("every request");
         let body = request.body().clone();
         assert!(seen.insert(body.clone()), "{body:?} arrived twice");
-        request.reply(body);
+        request.reply(body).unwrap();
     }
     for (requesting, name) in requesting.into_iter().zip(names) {
         let (_req, reply) = requesting.finish();
@@ -85,14 +85,14 @@ fn envelope(bind_address: &str) {
     dealer.send(msg(&["", "A"])).unwrap();
     let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &msg(&["A"]));
-    request.reply("A");
+    request.reply("A").unwrap();
     assert_eq!(dealer.recv_timeout(FIVE).unwrap(), Some(msg(&["", "A"])));
 
     // big envelope
     dealer.send(msg(&["X", "Y", "", "A"])).unwrap();
     let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &msg(&["A"]));
-    request.reply("A");
+    request.reply("A").unwrap();
     assert_eq!(
         dealer.recv_timeout(FIVE).unwrap(),
         Some(msg(&["X", "Y", "", "A"]))

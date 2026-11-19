@@ -75,8 +75,8 @@ fn case_1(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
     assert_eq!(expected.body(), &message(&["C", "D"]));
 
     // The reply to the first request is discarded; the expected one comes.
-    unanswered.reply("WRONG");
-    expected.reply("OK");
+    unanswered.reply("WRONG").unwrap();
+    expected.reply("OK").unwrap();
     let (req, reply) = finish(asking);
     assert_eq!(reply.unwrap(), Message::from("OK"));
 
@@ -84,7 +84,7 @@ fn case_1(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
     let asking = in_background(req, |req| req.request("E"));
     let request = rep2.recv_timeout(FIVE).unwrap().expect("E");
     assert_eq!(request.body(), &Message::from("E"));
-    request.reply(message(&["F", "G"]));
+    request.reply(message(&["F", "G"])).unwrap();
     let (req, reply) = finish(asking);
     assert_eq!(reply.unwrap(), message(&["F", "G"]));
     req
@@ -102,14 +102,14 @@ fn case_2(req: Socket<Req>, rep: &mut [Socket<Rep>; SERVICES]) -> Socket<Req> {
     assert_eq!(late.body(), &Message::from("H"));
     let (req, abandoned) = finish(asking);
     assert!(matches!(abandoned, Err(RequestError::TimedOut)));
-    late.reply("BAD");
+    late.reply("BAD").unwrap();
     settle();
 
     // Without receiving that reply, send another request.
     let asking = in_background(req, |req| req.request("I"));
     let request = rep4.recv_timeout(FIVE).unwrap().expect("I");
     assert_eq!(request.body(), &Message::from("I"));
-    request.reply("GOOD");
+    request.reply("GOOD").unwrap();
     let (req, reply) = finish(asking);
     assert_eq!(reply.unwrap(), Message::from("GOOD"));
     req
@@ -139,7 +139,7 @@ fn case_3_abandoned_peers_stay_in_turn() {
     let asking = in_background(req, |req| req.request("J"));
     let request = rep[0].recv_timeout(FIVE).unwrap().expect("J at rep0");
     assert_eq!(request.body(), &Message::from("J"));
-    request.reply("K");
+    request.reply("K").unwrap();
     finish(asking).1.unwrap();
 }
 

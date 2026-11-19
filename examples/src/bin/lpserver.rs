@@ -25,6 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let text = body(request.body());
         println!("I: normal request ({text})");
         sleep_ms(1000); // Do some heavy work
-        request.reply(text);
+        // A requester that has left gets no reply: that is no reason to stop.
+        let _ = request.reply(text);
     }
 }

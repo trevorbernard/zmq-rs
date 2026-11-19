@@ -5,9 +5,7 @@ use std::task::{Context as TaskContext, Waker};
 use std::thread;
 use std::time::Duration;
 
-use zmq::{
-    Context, Frame, Message, Reconnect, Rep, Req, RequestError, RouteOutcome, SocketOptions,
-};
+use zmq::{Context, Frame, Message, Reconnect, Rep, Req, RequestError, SocketOptions};
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_test_ports::free_endpoint;
 
@@ -71,7 +69,7 @@ fn our_rep_answers_a_libzmq_req() {
         assert_eq!(*request.body(), Message::from("question"));
         request.reply("answer")
     });
-    assert_eq!(outcome, RouteOutcome::Sent);
+    assert_eq!(outcome, Ok(()));
     assert_eq!(req.recv().unwrap(), [b"answer".to_vec()]);
 }
 
@@ -84,7 +82,7 @@ fn our_req_and_rep_talk_to_each_other() {
         for _ in 0..3 {
             let request = rep.recv().unwrap();
             let text = String::from_utf8(request.body().get(0).unwrap().to_vec()).unwrap();
-            request.reply(text.to_uppercase());
+            request.reply(text.to_uppercase()).unwrap();
         }
     });
     let mut req = context.socket::<Req>();
@@ -123,7 +121,7 @@ fn rep_returns_the_whole_envelope_for_multi_hop_requests() {
     within(FIVE, move || {
         let request = rep.recv().unwrap();
         assert_eq!(*request.body(), message(&[b"q1", b"q2"]));
-        request.reply(message(&[b"a1", b"a2"]));
+        request.reply(message(&[b"a1", b"a2"])).unwrap();
     });
     assert_eq!(
         dealer.recv().unwrap(),
@@ -203,8 +201,8 @@ fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Sender<()>, mpsc
     let done = spawn(move || {
         let first = rep.recv().unwrap();
         heard.recv().unwrap();
-        first.reply("stale");
-        rep.recv().unwrap().reply("fresh");
+        first.reply("stale").unwrap();
+        rep.recv().unwrap().reply("fresh").unwrap();
     });
     (addr.to_string(), abandoned, done)
 }

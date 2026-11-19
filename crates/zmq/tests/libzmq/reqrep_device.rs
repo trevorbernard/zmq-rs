@@ -40,7 +40,7 @@ fn roundtrip() {
     assert_eq!(request.body(), &msg(&["ABC", "DEF"]));
 
     // Send the reply.
-    request.reply(msg(&["GHI", "JKL"]));
+    request.reply(msg(&["GHI", "JKL"])).unwrap();
 
     // Pass the reply through the device.
     let reply = dealer.recv_timeout(FIVE).unwrap().expect("the reply");

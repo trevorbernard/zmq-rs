@@ -17,16 +17,29 @@ use zmtp::{Frame, Message, MessageMetadata};
 use crate::peers::{PeerKey, PeerList, random_u32};
 use crate::{FairQueue, LoadBalancer};
 
-/// What happened to a reply REP was asked to send.
+/// Why a reply REP was asked to send was dropped instead.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
-pub enum RouteOutcome {
-    Sent,
-    /// The requester is gone. The reply was dropped.
-    UnknownPeer,
-    /// The requester's queue is full. The reply was dropped.
+pub enum ReplyError {
+    /// The requester is gone.
+    PeerGone,
+    /// The requester's queue is full.
     PeerFull,
+    /// The context was shut down (libzmq's `ETERM`).
+    Terminated,
 }
+
+impl fmt::Display for ReplyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::PeerGone => "the requester is gone",
+            Self::PeerFull => "the requester's queue is full",
+            Self::Terminated => "the context was shut down",
+        })
+    }
+}
+
+impl std::error::Error for ReplyError {}
 
 /// REQ's side: sends each request to the next peer with room and accepts a
 /// reply only from that peer.
@@ -193,9 +206,9 @@ impl Replier {
         peer: PeerKey,
         envelope: Envelope,
         reply: Message,
-    ) -> RouteOutcome {
+    ) -> Result<(), ReplyError> {
         let Some(peer) = peers.get_mut(peer) else {
-            return RouteOutcome::UnknownPeer;
+            return Err(ReplyError::PeerGone);
         };
         let mut message = match Message::try_from(envelope.frames) {
             Ok(message) => message,
@@ -203,9 +216,9 @@ impl Replier {
         };
         message.extend(reply);
         match peer.connection.tx.try_send(message) {
-            Ok(()) => RouteOutcome::Sent,
-            Err(TrySendError::Full(_)) => RouteOutcome::PeerFull,
-            Err(TrySendError::Closed(_)) => RouteOutcome::UnknownPeer,
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => Err(ReplyError::PeerFull),
+            Err(TrySendError::Closed(_)) => Err(ReplyError::PeerGone),
         }
     }
 }
@@ -503,7 +516,7 @@ mod tests {
             request.envelope,
             frames(&["a1", "a2"]),
         );
-        assert_eq!(outcome, RouteOutcome::Sent);
+        assert_eq!(outcome, Ok(()));
         assert_eq!(drain(&mut sa), [frames(&["hop", "", "a1", "a2"])]);
     }
 
@@ -518,7 +531,7 @@ mod tests {
         };
         drop(sa);
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
-        assert_eq!(outcome, RouteOutcome::UnknownPeer);
+        assert_eq!(outcome, Err(ReplyError::PeerGone));
     }
 
     #[test]
@@ -532,7 +545,7 @@ mod tests {
         };
         assert!(peers.remove_key(request.peer));
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
-        assert_eq!(outcome, RouteOutcome::UnknownPeer);
+        assert_eq!(outcome, Err(ReplyError::PeerGone));
         assert_eq!(drain(&mut sa), []);
     }
 
@@ -548,7 +561,7 @@ mod tests {
         let peer = peers.get_mut(request.peer).unwrap();
         peer.connection.tx.try_send(msg("in the way")).unwrap();
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("a"));
-        assert_eq!(outcome, RouteOutcome::PeerFull);
+        assert_eq!(outcome, Err(ReplyError::PeerFull));
         assert_eq!(drain(&mut sa), [msg("in the way")]);
     }
 }

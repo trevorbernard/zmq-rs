@@ -203,7 +203,7 @@ fn a_broker_polls_both_sides() {
     let answering = thread::spawn(move || {
         let request = worker.recv().unwrap();
         assert_eq!(request.body(), &Message::from("ping"));
-        request.reply("pong");
+        request.reply("pong").unwrap();
     });
     let mut forwarded = 0;
     while forwarded < 2 {
@@ -241,7 +241,7 @@ fn a_readable_rep_lends_out_its_request() {
     assert_eq!(zmq::poll([rep.readable()]).unwrap(), [true]);
     let request = rep.try_recv().unwrap().expect("readable");
     assert_eq!(request.body(), &Message::from("question"));
-    request.reply("answer");
+    request.reply("answer").unwrap();
     assert_eq!(asking.join().unwrap(), Message::from("answer"));
 }
 

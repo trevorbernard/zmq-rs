@@ -179,7 +179,7 @@ impl Step for Socket<Router> {
 impl Step for Socket<Rep> {
     fn step(&mut self) {
         while let Ok(Some(request)) = self.try_recv() {
-            request.reply("reply");
+            let _ = request.reply("reply");
         }
     }
 }

@@ -66,7 +66,7 @@ fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
         req.connect(&endpoint).unwrap();
         let answer = within(FIVE, move || req.request("question"));
         assert_eq!(answer, Ok("answer".into()));
-        replier.join().unwrap();
+        replier.join().unwrap().unwrap();
     }
 }
 

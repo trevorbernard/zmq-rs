@@ -12,8 +12,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Error, Message, Pub, Pull, Push, Rep, Req, RequestError, Router, RoutingId,
-    SendError, Sub, Terminated, TrySendError, XSub,
+    Context, Dealer, Error, Message, Pub, Pull, Push, Rep, ReplyError, Req, RequestError, Router,
+    RoutingId, SendError, Sub, Terminated, TrySendError, XSub,
 };
 
 const SHORT: Duration = Duration::from_millis(100);
@@ -174,6 +174,21 @@ fn every_kind_of_send_fails_after_a_shutdown() {
         Err(RequestError::Terminated)
     );
     assert_eq!(TrySendError::Terminated(kept()).into_inner(), kept());
+}
+
+#[test]
+fn a_reply_fails_after_a_shutdown() {
+    let context = Context::new().unwrap();
+    let mut rep = context.socket::<Rep>();
+    rep.bind("inproc://late-reply").unwrap();
+    let mut dealer = context.socket::<Dealer>();
+    dealer.connect("inproc://late-reply").unwrap();
+    let mut question = Message::new("");
+    question.push("question");
+    dealer.send(question).unwrap();
+    let request = rep.recv_timeout(FIVE).unwrap().expect("a request");
+    context.shutdown(FIVE).unwrap();
+    assert_eq!(request.reply("late"), Err(ReplyError::Terminated));
 }
 
 #[test]

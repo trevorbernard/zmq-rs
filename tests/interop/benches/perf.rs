@@ -673,7 +673,7 @@ fn latency(case: Case, count: usize) -> Latency {
                 let request = rep.recv().unwrap();
                 assert_eq!(request.body().last().len(), size, "request size");
                 let body = request.body().clone();
-                assert_eq!(request.reply(body), zmq::RouteOutcome::Sent, "reply sent");
+                assert_eq!(request.reply(body), Ok(()), "reply sent");
             }
             End::Ours(rep)
         }

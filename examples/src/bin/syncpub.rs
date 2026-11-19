@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Get synchronization from subscribers
     println!("Waiting for subscribers");
     for _ in 0..SUBSCRIBERS_EXPECTED {
-        syncservice.recv()?.reply("");
+        syncservice.recv()?.reply("")?;
     }
 
     // Now broadcast exactly 1M updates followed by END

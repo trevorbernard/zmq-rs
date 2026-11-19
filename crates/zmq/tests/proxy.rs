@@ -53,7 +53,7 @@ fn a_router_dealer_proxy_is_a_shared_queue() {
                     let request = rep.recv().unwrap();
                     let text = String::from_utf8_lossy(request.body().get(0).unwrap());
                     let answer = format!("worker {n}: {text}");
-                    request.reply(answer);
+                    request.reply(answer).unwrap();
                 }
             })
         })

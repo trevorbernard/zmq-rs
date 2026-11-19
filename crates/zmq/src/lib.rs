@@ -33,7 +33,7 @@
 //! let mut rep = context.socket::<zmq::Rep>();
 //! let first = rep.recv().unwrap();
 //! let second = rep.recv().unwrap();
-//! first.reply("a");
+//! first.reply("a").unwrap();
 //! ```
 //!
 //! and cannot answer a request twice:
@@ -42,8 +42,8 @@
 //! let context = zmq::Context::new().unwrap();
 //! let mut rep = context.socket::<zmq::Rep>();
 //! let request = rep.recv().unwrap();
-//! request.reply("a");
-//! request.reply("b");
+//! request.reply("a").unwrap();
+//! request.reply("b").unwrap();
 //! ```
 //!
 //! A PUB socket cannot receive, and a SUB socket cannot send:
@@ -109,7 +109,7 @@
 //!
 //! Types marked `#[non_exhaustive]` may gain variants or fields in a minor
 //! release: the errors, [`Endpoint`], [`Event`] and [`EventKind`],
-//! [`Reconnect`], [`RouteOutcome`], [`Security`], the ZAP types
+//! [`Reconnect`], [`Security`], the ZAP types
 //! [`ZapRequest`], [`ZapCredentials`] and [`ZapReply`], [`ShutdownTimedOut`]
 //! and a proxy's statistics. Match them with a wildcard arm, which for an
 //! authenticator should deny.
@@ -156,7 +156,7 @@ pub use socket::{HearsDisconnects, HearsHiccups, SendsHello};
 #[doc(inline)]
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
-    Monitor, MonitorStopped, ProtocolError, ProtocolErrorKind, Reconnect, RouteOutcome, Security,
+    Monitor, MonitorStopped, ProtocolError, ProtocolErrorKind, Reconnect, ReplyError, Security,
     SendError, ShutdownTimedOut, TcpKeepalive, Verbosity, XPubEvent, ZapResponder,
 };
 #[cfg(feature = "draft")]

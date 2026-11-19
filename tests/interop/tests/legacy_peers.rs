@@ -285,7 +285,7 @@ fn an_old_req_asks_our_rep(libzmq: Libzmq) {
     req.send(&[b"question"]);
     let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &message(&["question"]));
-    request.reply("answer");
+    request.reply("answer").unwrap();
     assert_eq!(req.recv(), Some(message(&["answer"])));
 }
 

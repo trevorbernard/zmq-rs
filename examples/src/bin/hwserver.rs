@@ -12,6 +12,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let request = responder.recv()?;
         println!("Received Hello");
         sleep_ms(1000);
-        request.reply("World");
+        // A requester that has left gets no reply: that is no reason to stop.
+        let _ = request.reply("World");
     }
 }

@@ -101,7 +101,7 @@ pub(crate) fn bounce_req_rep(rep: &mut Socket<Rep>, req: Socket<Req>) -> Socket<
     let requesting = Requesting::start(req, content.clone());
     let request = rep.recv_timeout(FIVE).unwrap().expect("the request");
     assert_eq!(request.body(), &content);
-    request.reply(content.clone());
+    request.reply(content.clone()).unwrap();
     let (req, reply) = requesting.finish();
     assert_eq!(reply, content);
     req

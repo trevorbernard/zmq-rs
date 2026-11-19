@@ -57,7 +57,7 @@ pub use pubsub::{Publisher, Subscriber, Verbosity, XPubEvent};
 #[cfg(feature = "draft")]
 pub use radiodish::{Dish, Radio};
 pub use reconnect::{Reconnect, ReconnectStop};
-pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, Requester, RouteOutcome};
+pub use reqrep::{Envelope, Outstanding, PeerGone, Received, Replier, ReplyError, Requester};
 pub use router_table::{RouterTable, SendError};
 pub use security::{Authenticator, Security, ZapResponder};
 #[cfg(feature = "draft")]

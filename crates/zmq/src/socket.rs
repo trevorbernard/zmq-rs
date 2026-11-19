@@ -9,8 +9,8 @@ use std::time::Duration;
 
 use zmq_core::{
     ConnectionConfig, EndpointId, FairQueue, Linger, LoadBalancer, Outstanding,
-    Pair as PairRouting, PeerGone, PeerList, Peers, Publisher, Received, Replier, Requester,
-    RouteOutcome, RouterTable, SendError, SharedLinger, Subscriber, Verbosity, XPubEvent,
+    Pair as PairRouting, PeerGone, PeerList, Peers, Publisher, Received, Replier, ReplyError,
+    Requester, RouterTable, SendError, SharedLinger, Subscriber, Verbosity, XPubEvent,
 };
 use zmtp::{Frame, Message, Subscription};
 
@@ -1895,8 +1895,12 @@ impl Request<'_> {
     }
 
     /// Answers the request. Never blocks: if the requester is gone or its
-    /// queue is full, the reply is dropped and the outcome says so.
-    pub fn reply(self, reply: impl Into<Message>) -> RouteOutcome {
+    /// queue is full, the reply is dropped, as libzmq drops it, and the
+    /// error says so.
+    pub fn reply(self, reply: impl Into<Message>) -> Result<(), ReplyError> {
+        self.socket
+            .alive()
+            .map_err(|Terminated| ReplyError::Terminated)?;
         let Received { peer, envelope, .. } = self.received;
         Replier::reply(self.socket.peers.list_mut(), peer, envelope, reply.into())
     }

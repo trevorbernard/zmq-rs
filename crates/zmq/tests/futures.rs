@@ -212,7 +212,7 @@ fn a_request_and_its_reply() {
 
     let request = server.resume(serving).unwrap();
     assert_eq!(request.body(), &Message::from("question"));
-    request.reply("answer");
+    request.reply("answer").unwrap();
     assert_eq!(client.resume(requesting), Ok(Message::from("answer")));
 }
 

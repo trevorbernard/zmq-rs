@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
         let name = String::from_utf8_lossy(request.body().last()).into_owned();
-        request.reply(format!("hello, {name}"));
+        request.reply(format!("hello, {name}")).unwrap();
     });
 
     let mut req = context.socket::<Req>();

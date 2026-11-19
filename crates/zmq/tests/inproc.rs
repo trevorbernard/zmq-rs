@@ -6,8 +6,8 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{
-    Context, Dealer, Endpoint, Error, Frame, Hwm, Identity, Message, Pull, Push, Rep, Req, Router,
-    RoutingId, SocketOptions,
+    Context, Dealer, Endpoint, Error, Frame, Hwm, Identity, Message, Pull, Push, Rep, ReplyError,
+    Req, Router, RoutingId, SocketOptions,
 };
 use zmq_test_ports::free_endpoint;
 
@@ -122,7 +122,7 @@ fn req_and_rep_over_inproc() {
             "echo {}",
             String::from_utf8_lossy(request.body().get(0).unwrap())
         );
-        request.reply(answer);
+        request.reply(answer).unwrap();
     });
     let mut req = context.socket::<Req>();
     req.connect("inproc://service").unwrap();
@@ -239,4 +239,43 @@ fn the_sum_holds_towards_the_connecting_side_too() {
         push.try_send(format!("{i}")).expect("2 + 3 messages fit");
     }
     assert!(push.try_send("6th").is_err(), "the sixth does not");
+}
+
+/// A request as a REQ frames it, for a DEALER to send.
+fn question() -> Message {
+    let mut request = Message::new("");
+    request.push("question");
+    request
+}
+
+#[test]
+fn a_reply_to_a_requester_that_left_is_dropped_and_says_so() {
+    let context = Context::new().unwrap();
+    let mut rep = context.socket::<Rep>();
+    rep.bind("inproc://left").unwrap();
+    let mut dealer = context.socket::<Dealer>();
+    dealer.connect("inproc://left").unwrap();
+    dealer.send(question()).unwrap();
+    let request = rep.recv_timeout(FIVE).unwrap().expect("a request");
+    drop(dealer);
+    assert_eq!(request.reply("late"), Err(ReplyError::PeerGone));
+}
+
+#[test]
+fn a_reply_to_a_requester_with_no_room_is_dropped_and_says_so() {
+    let context = Context::new().unwrap();
+    let mut rep = context.socket_with::<Rep>(SocketOptions::new().send_hwm(1));
+    rep.bind("inproc://no-room").unwrap();
+    let mut dealer = context.socket_with::<Dealer>(SocketOptions::new().recv_hwm(1));
+    dealer.connect("inproc://no-room").unwrap();
+    for _ in 0..3 {
+        dealer.send(question()).unwrap();
+    }
+    // The two marks together are the room there is.
+    for _ in 0..2 {
+        let request = rep.recv_timeout(FIVE).unwrap().expect("a request");
+        assert_eq!(request.reply("answer"), Ok(()));
+    }
+    let request = rep.recv_timeout(FIVE).unwrap().expect("a request");
+    assert_eq!(request.reply("answer"), Err(ReplyError::PeerFull));
 }

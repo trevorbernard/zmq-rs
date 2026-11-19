@@ -225,10 +225,10 @@ fn a_timed_out_request_leaves_the_socket_usable_and_its_reply_unseen() {
     let server = thread::spawn(move || {
         let first = rep.recv().unwrap();
         thread::sleep(SHORT * 3);
-        first.reply("late");
+        first.reply("late").unwrap();
         let second = rep.recv().unwrap();
         let body = String::from_utf8_lossy(second.body().get(0).unwrap()).into_owned();
-        second.reply(format!("for {body}"));
+        second.reply(format!("for {body}")).unwrap();
     });
     let mut req = context.socket::<Req>();
     req.connect("inproc://slow").unwrap();
