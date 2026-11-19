@@ -27,8 +27,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kvmap = HashMap::new();
 
     // Get state snapshot
-    let mut request = Message::new("ICANHAZ?");
-    request.push(SUBTREE);
+    let request = Message::new("ICANHAZ?").with(SUBTREE);
     snapshot.send(request)?;
     let mut sequence = loop {
         let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()?) else {

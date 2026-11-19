@@ -47,7 +47,7 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
         // First frame in each message is the sender identity, which the
         // ROUTER hands us separately
         let (identity, command) = router.recv()?;
-        assert_eq!(&**command.last(), b"fetch");
+        assert_eq!(command.last(), "fetch");
 
         loop {
             let mut data = Vec::new();

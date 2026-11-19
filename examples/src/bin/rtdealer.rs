@@ -17,8 +17,7 @@ fn worker_task(context: Context) -> Result<(), zmq::Error> {
     let mut total = 0;
     loop {
         // Tell the broker we're ready for work
-        let mut ready = Message::new("");
-        ready.push("Hi Boss");
+        let ready = Message::new("").with("Hi Boss");
         worker.send(ready)?;
 
         // Get workload from broker, after the envelope delimiter

@@ -31,7 +31,7 @@ fn dropping_the_context_delivers_what_was_queued() {
 
     let receiver = thread::spawn(move || {
         let mut count = 0;
-        while pull.recv().unwrap() != "END".into() {
+        while pull.recv().unwrap() != "END" {
             count += 1;
         }
         count

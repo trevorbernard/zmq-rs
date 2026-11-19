@@ -94,12 +94,11 @@ impl KvMsg {
             .iter()
             .map(|(name, value)| format!("{name}={value}\n"))
             .collect();
-        let mut message = Message::new(self.key.clone().unwrap_or_default());
-        message.push(self.sequence.to_be_bytes().to_vec());
-        message.push(self.uuid.clone().unwrap_or_default());
-        message.push(props);
-        message.push(self.body.clone().unwrap_or_default());
-        message
+        Message::new(self.key.clone().unwrap_or_default())
+            .with(self.sequence.to_be_bytes().to_vec())
+            .with(self.uuid.clone().unwrap_or_default())
+            .with(props)
+            .with(self.body.clone().unwrap_or_default())
     }
 
     /// Parses a received message; `None` unless it has exactly five frames

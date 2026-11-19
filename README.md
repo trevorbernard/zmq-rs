@@ -35,7 +35,7 @@ PUSH round-robins messages to its peers and never drops; PULL fair-queues
 from its peers.
 
 ```rust
-use zmq::{Context, Message, Pull, Push};
+use zmq::{Context, Pull, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
@@ -45,14 +45,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut source = context.socket::<Push>();
     source.connect(&endpoint)?;
     source.send("task 1")?;
-    let mut multipart = Message::new("header");
-    multipart.push("body");
-    source.send(multipart)?;
+    source.send(["header", "body"])?;
 
-    assert_eq!(sink.recv()?, "task 1".into());
+    assert_eq!(sink.recv()?, "task 1");
     let message = sink.recv()?;
     assert_eq!(message.len().get(), 2);
-    assert_eq!(&**message.last(), b"body");
+    assert_eq!(message.last(), "body");
     Ok(())
 }
 ```
@@ -80,7 +78,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut req = context.socket::<Req>();
     req.connect(&endpoint)?;
-    assert_eq!(req.request("world")?, "hello, world".into());
+    assert_eq!(req.request("world")?, "hello, world");
     server.join().unwrap();
     Ok(())
 }
@@ -107,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     assert_eq!(publisher.send("paris 18C")?, 0);
     assert_eq!(publisher.send("london 12C")?, 1);
-    assert_eq!(subscriber.recv()?, "london 12C".into());
+    assert_eq!(subscriber.recv()?, "london 12C");
     Ok(())
 }
 ```
@@ -132,9 +130,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let (from, message) = broker.recv()?;
     assert_eq!(from.as_bytes(), b"worker-1");
-    assert_eq!(message, "ready".into());
+    assert_eq!(message, "ready");
     broker.send(&from, "job 42")?;
-    assert_eq!(worker.recv()?, "job 42".into());
+    assert_eq!(worker.recv()?, "job 42");
 
     let stranger = RoutingId::new("nobody")?;
     assert!(broker.send(&stranger, "lost").is_err());
@@ -210,7 +208,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut client = context.socket_with::<Push>(SocketOptions::new().security(security));
     client.connect(&endpoint)?;
     client.send("encrypted")?;
-    assert_eq!(server.recv()?, "encrypted".into());
+    assert_eq!(server.recv()?, "encrypted");
     Ok(())
 }
 ```

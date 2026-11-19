@@ -28,8 +28,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut kvmap = HashMap::new();
 
     // We first request a state snapshot of our subtree
-    let mut request = Message::new("ICANHAZ?");
-    request.push(SUBTREE);
+    let request = Message::new("ICANHAZ?").with(SUBTREE);
     snapshot.send(request)?;
     let mut sequence = loop {
         let Some(kvmsg) = KvMsg::from_message(&snapshot.recv()?) else {

@@ -97,7 +97,7 @@ fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
         let received = within(FIVE, move || {
             loop {
                 let (group, body) = dish.recv().unwrap();
-                if body == Frame::from("to everyone") {
+                if body == "to everyone" {
                     return group;
                 }
             }

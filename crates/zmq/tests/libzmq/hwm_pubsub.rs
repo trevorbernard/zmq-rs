@@ -61,7 +61,7 @@ fn receive(socket: &mut Socket<Sub>) -> (usize, bool) {
     let mut recv_count = 0;
     while let Some(message) = socket.recv_timeout(Duration::from_millis(10)).unwrap() {
         recv_count += 1;
-        if message == Message::from("end") {
+        if message == "end" {
             return (recv_count, true);
         }
     }

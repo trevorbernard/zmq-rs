@@ -177,8 +177,7 @@ impl Agent {
                     server.address, server.port
                 ));
                 if server.requests < 2 {
-                    let mut request = Message::new("ICANHAZ?");
-                    request.push(self.subtree.clone());
+                    let request = Message::new("ICANHAZ?").with(self.subtree.clone());
                     server.snapshot.send(request).unwrap();
                     server.requests += 1;
                 }

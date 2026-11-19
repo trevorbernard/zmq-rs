@@ -88,7 +88,7 @@ fn a_second_libzmq_pair_waits_its_turn() {
         assert!(started.elapsed() < FIVE, "the second never got in");
         thread::sleep(Duration::from_millis(20));
     };
-    assert!(heard == Message::from("knock") || heard == Message::from("lost"));
+    assert!(heard == "knock" || heard == "lost");
     ours.send("welcome").unwrap();
     assert_eq!(second.recv().unwrap(), [b"welcome"]);
 }

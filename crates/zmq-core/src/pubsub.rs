@@ -894,7 +894,7 @@ mod tests {
         assert_eq!(publisher.send(&mut peers, msg("sports")), 1);
         assert_eq!(drain(&mut sa), [msg("news: rain")]);
         assert_eq!(drain(&mut sb), [msg("news: rain"), msg("sports")]);
-        assert_eq!(drain(&mut sc), []);
+        assert_eq!(drain(&mut sc), Vec::<Message>::new());
     }
 
     #[test]
@@ -947,7 +947,7 @@ mod tests {
         let mut publisher = Publisher::default();
         assert_eq!(publisher.send(&mut peers, msg("x")), 0);
         assert_eq!(peers.len(), 1);
-        assert_eq!(drain(&mut sa), []);
+        assert_eq!(drain(&mut sa), Vec::<Message>::new());
     }
 
     #[test]

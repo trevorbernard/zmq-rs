@@ -7,9 +7,7 @@ use zguide::{randof, sleep_ms};
 use zmq::{Context, Message, Pub};
 
 fn update(topic: u64, data: &'static str) -> Message {
-    let mut message = Message::new(format!("{topic:03}"));
-    message.push(data);
-    message
+    Message::new(format!("{topic:03}")).with(data)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

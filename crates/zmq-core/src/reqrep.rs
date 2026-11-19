@@ -546,7 +546,7 @@ mod tests {
         assert!(peers.remove_key(request.peer));
         let outcome = Replier::reply(&mut peers, request.peer, request.envelope, msg("late"));
         assert_eq!(outcome, Err(ReplyError::PeerGone));
-        assert_eq!(drain(&mut sa), []);
+        assert_eq!(drain(&mut sa), Vec::<Message>::new());
     }
 
     #[test]

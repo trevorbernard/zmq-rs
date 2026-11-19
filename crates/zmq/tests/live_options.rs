@@ -68,7 +68,7 @@ fn a_linger_raised_before_the_drop_delivers_what_is_queued() {
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let receiver = thread::spawn(move || {
         let mut count = 0;
-        while pull.recv().unwrap() != "END".into() {
+        while pull.recv().unwrap() != "END" {
             count += 1;
         }
         count

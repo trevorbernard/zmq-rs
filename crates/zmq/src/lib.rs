@@ -13,7 +13,7 @@
 //! let mut push = context.socket::<Push>();
 //! push.connect(&bound)?;
 //! push.send("hello")?;
-//! assert_eq!(pull.recv()?, "hello".into());
+//! assert_eq!(pull.recv()?, "hello");
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!

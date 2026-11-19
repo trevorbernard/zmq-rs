@@ -32,9 +32,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let reply = if control.as_bytes() == b"PING" {
             Message::new("PONG")
         } else {
-            let mut reply = Message::new(control.clone());
-            reply.push("OK");
-            reply
+            Message::new(control.clone()).with("OK")
         };
         if verbose {
             dump(&reply);

@@ -1114,6 +1114,10 @@ impl Socket<Push> {
     }
 
     /// Sends `message`, blocking while no peer has room.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
         self.send_message(message.into())
     }
@@ -1142,6 +1146,10 @@ impl Socket<Pair> {
     }
 
     /// Sends `message`, blocking until there is a peer with room.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
         self.send_message(message.into())
     }
@@ -1291,6 +1299,10 @@ impl<T: Publishes> Socket<T> {
     /// Never blocks. Returns how many subscribers it was queued for: none if
     /// nobody has subscribed to it yet, as subscriptions take a moment to
     /// arrive after connecting.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> Result<usize, Terminated> {
         self.alive()?;
         self.peers.accept(&mut noop());
@@ -1569,6 +1581,10 @@ impl SubscriptionRequest<'_> {
     /// Sends `message` to this peer alone, if it is subscribed to it and
     /// has room, as libzmq's `ZMQ_XPUB_MANUAL_LAST_VALUE` does after a
     /// subscription. Returns whether it was queued.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> bool {
         let socket = &mut *self.socket;
         socket
@@ -1627,6 +1643,10 @@ impl Socket<XSub> {
     /// Sends `message` to every publisher. Never blocks. As in libzmq, a
     /// single frame starting with `0x01` or `0x00` is a subscription and
     /// subscribes or unsubscribes to the rest.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
         self.alive()?;
         self.peers.accept(&mut noop());
@@ -1700,6 +1720,10 @@ impl Socket<Dealer> {
     }
 
     /// Sends `message`, blocking while no peer has room.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(&mut self, message: impl Into<Message>) -> Result<(), Terminated> {
         self.send_message(message.into())
     }
@@ -2040,6 +2064,10 @@ impl Socket<Router> {
     /// Sends `message` to the peer with routing id `to`, blocking while its
     /// queue is full. Fails if no peer has that routing id, or it goes away
     /// meanwhile.
+    ///
+    /// `message` is anything a [`Message`] is made from. Bytes borrowed for
+    /// less than `'static` are copied in with
+    /// [`Frame::copy_from_slice`](crate::Frame::copy_from_slice).
     pub fn send(
         &mut self,
         to: &RoutingId,
@@ -2118,7 +2146,7 @@ impl Socket<Router> {
     /// connecting.connect_with_routing_id("inproc://routers", peer.clone())?;
     /// connecting.send(&peer, "hello")?;
     /// let (_from, message) = bound.recv()?;
-    /// assert_eq!(message, "hello".into());
+    /// assert_eq!(message, "hello");
     /// # Ok::<(), Box<dyn std::error::Error>>(())
     /// ```
     pub fn connect_with_routing_id(

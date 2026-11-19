@@ -40,7 +40,6 @@ fn dump_and_answer(sink: &mut zmq::Socket<Router>) -> Result<(), zmq::SendError<
     let mut framed = Message::new(from.as_bytes().to_vec());
     framed.extend(message);
     dump(&framed);
-    let mut reply = Message::new("");
-    reply.push("OK");
+    let reply = Message::new("").with("OK");
     sink.send(&from, reply)
 }

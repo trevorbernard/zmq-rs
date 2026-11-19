@@ -11,11 +11,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         // Write two messages, each with an envelope and content
-        let mut a = Message::new("A");
-        a.push("We don't want to see this");
+        let a = Message::new("A").with("We don't want to see this");
         publisher.send(a)?;
-        let mut b = Message::new("B");
-        b.push("We would like to see this");
+        let b = Message::new("B").with("We would like to see this");
         publisher.send(b)?;
         sleep_ms(1000);
     }

@@ -16,7 +16,7 @@ fn service_call(session: &mut MdClient, service: &str, request: Message) -> Opti
         process::exit(0); // Interrupted or failed
     };
     let (status, rest) = reply.split_first();
-    match &**status {
+    match status.as_bytes() {
         b"200" => Message::try_from(rest.to_vec()).ok(),
         b"400" => {
             println!("E: client fatal error, aborting");

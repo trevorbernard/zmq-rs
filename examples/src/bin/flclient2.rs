@@ -38,9 +38,9 @@ impl Flclient {
         // Prefix request with sequence number and empty envelope
         self.sequence += 1;
         let sequence = self.sequence.to_string();
-        let mut message = Message::new("");
-        message.push(sequence.clone());
-        message.push(request.to_owned());
+        let message = Message::new("")
+            .with(sequence.clone())
+            .with(request.to_owned());
 
         // Blast the request to all connected servers
         for _ in 0..self.servers {

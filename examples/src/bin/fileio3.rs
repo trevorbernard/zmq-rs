@@ -27,9 +27,9 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
     loop {
         while credit > 0 {
             // Ask for next chunk
-            let mut request = Message::new("fetch");
-            request.push(offset.to_string());
-            request.push(CHUNK_SIZE.to_string());
+            let request = Message::new("fetch")
+                .with(offset.to_string())
+                .with(CHUNK_SIZE.to_string());
             dealer.send(request)?;
             offset += CHUNK_SIZE;
             credit -= 1;
@@ -61,7 +61,7 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
         let [command, offset, chunksz] = request.iter().collect::<Vec<_>>()[..] else {
             continue;
         };
-        assert_eq!(&**command, b"fetch");
+        assert_eq!(command, "fetch");
         let offset: u64 = text(offset).parse()?;
         let chunksz: u64 = text(chunksz).parse()?;
 

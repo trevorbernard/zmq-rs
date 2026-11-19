@@ -42,7 +42,9 @@ impl Frame {
         })
     }
 
-    /// Copies `data` into a new frame.
+    /// Copies `data` into a new frame: the way to make one from bytes that
+    /// are borrowed, as `From` takes only `'static` ones, which it does not
+    /// copy.
     pub fn copy_from_slice(data: &[u8]) -> Self {
         Self::inline(data).unwrap_or_else(|| Self(Repr::Shared(Bytes::copy_from_slice(data))))
     }
@@ -105,10 +107,27 @@ impl PartialEq for Frame {
 
 impl Eq for Frame {}
 
-impl PartialEq<[u8]> for Frame {
-    fn eq(&self, other: &[u8]) -> bool {
-        self.as_bytes() == other
-    }
+/// A frame equals bytes or text with its payload, so that
+/// `assert_eq!(frame, "hello")` and `frame == b"hello"` work.
+macro_rules! eq_bytes {
+    ($([$($generics:tt)*] $other:ty,)*) => {$(
+        impl<$($generics)*> PartialEq<$other> for Frame {
+            fn eq(&self, other: &$other) -> bool {
+                self.as_bytes() == AsRef::<[u8]>::as_ref(other)
+            }
+        }
+    )*};
+}
+
+eq_bytes! {
+    [] [u8],
+    [] &[u8],
+    [] str,
+    [] &str,
+    [] Vec<u8>,
+    [] String,
+    [const N: usize] [u8; N],
+    [const N: usize] &[u8; N],
 }
 
 impl Hash for Frame {
@@ -141,12 +160,16 @@ impl From<String> for Frame {
     }
 }
 
+/// Wraps `data` without copying, which is why it must be `'static`. Bytes
+/// borrowed for less are copied with [`Frame::copy_from_slice`].
 impl From<&'static [u8]> for Frame {
     fn from(data: &'static [u8]) -> Self {
         Self::from_shared(Bytes::from_static(data))
     }
 }
 
+/// Wraps `data` without copying, as a `&'static [u8]` is. Text borrowed
+/// for less is copied with [`Frame::copy_from_slice`], or sent as a `String`.
 impl From<&'static str> for Frame {
     fn from(data: &'static str) -> Self {
         Self::from(data.as_bytes())
@@ -178,6 +201,21 @@ mod tests {
 
     fn is_inline(frame: &Frame) -> bool {
         matches!(frame.0, Repr::Inline { .. })
+    }
+
+    #[test]
+    fn a_frame_equals_text_and_bytes_with_its_payload() {
+        let frame = Frame::from("hello");
+        assert_eq!(frame, "hello");
+        assert_eq!(frame, *"hello");
+        assert_eq!(frame, b"hello");
+        assert_eq!(frame, *b"hello");
+        assert_eq!(frame, &b"hello"[..]);
+        assert_eq!(frame, b"hello"[..]);
+        assert_eq!(frame, b"hello".to_vec());
+        assert_eq!(frame, String::from("hello"));
+        assert_ne!(frame, "hell");
+        assert_ne!(frame, b"hello!");
     }
 
     #[test]

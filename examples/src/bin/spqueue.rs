@@ -48,8 +48,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // Get client request, route to first available worker
             let (client, request) = frontend.recv()?;
             let worker = workers.pop_front().ok_or("no worker is free")?;
-            let mut message = Message::new("");
-            message.push(client.as_bytes().to_vec());
+            let mut message = Message::new("").with(client.as_bytes().to_vec());
             message.extend(request);
             let _ = backend.try_send(&worker, message);
         }

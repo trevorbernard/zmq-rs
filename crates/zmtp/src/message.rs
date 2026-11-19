@@ -15,6 +15,33 @@ use crate::Frame;
 /// A message received over a connection carries that connection's
 /// [`MessageMetadata`], as libzmq's do. Comparing and hashing messages
 /// looks only at their frames.
+///
+/// A message is made from one frame or from several, and compares with
+/// text, bytes, or a list of them:
+///
+/// ```
+/// use zmtp::{Frame, Message};
+///
+/// let single = Message::from("hello");
+/// assert_eq!(single, "hello");
+/// assert_eq!(single, b"hello");
+///
+/// let several = Message::from(["header", "body"]);
+/// assert_eq!(several, ["header", "body"]);
+/// assert_ne!(several, "header");
+///
+/// // Frames of different types, one after another.
+/// let payload = vec![1, 2, 3];
+/// let mixed = Message::new("header").with(payload);
+/// assert_eq!(mixed.last(), &[1, 2, 3]);
+///
+/// // Text and bytes that live for the whole program are not copied.
+/// // Anything borrowed for less is, with `Frame::copy_from_slice`.
+/// fn forward(buffer: &[u8]) -> Message {
+///     Message::new(Frame::copy_from_slice(buffer))
+/// }
+/// assert_eq!(forward(b"borrowed"), "borrowed");
+/// ```
 #[derive(Clone)]
 pub struct Message {
     first: Frame,
@@ -147,6 +174,15 @@ impl Message {
         }
     }
 
+    /// This message with `frame` appended, to build one of several frames
+    /// of different types in one expression:
+    /// `Message::new("header").with(payload)`.
+    #[must_use]
+    pub fn with(mut self, frame: impl Into<Frame>) -> Self {
+        self.push(frame);
+        self
+    }
+
     /// Appends a frame.
     pub fn push(&mut self, frame: impl Into<Frame>) {
         self.rest.push(frame.into());
@@ -221,6 +257,68 @@ impl PartialEq for Message {
 }
 
 impl Eq for Message {}
+
+/// A message equals bytes or text if it is the one frame with that
+/// payload, so that `assert_eq!(message, "hello")` works.
+macro_rules! eq_one_frame {
+    ($([$($generics:tt)*] $other:ty,)*) => {$(
+        impl<$($generics)*> PartialEq<$other> for Message {
+            fn eq(&self, other: &$other) -> bool {
+                self.rest.as_slice().is_empty() && self.first == *other
+            }
+        }
+    )*};
+}
+
+eq_one_frame! {
+    [] Frame,
+    [] [u8],
+    [] &[u8],
+    [] str,
+    [] &str,
+    [] Vec<u8>,
+    [] String,
+    [const N: usize] [u8; N],
+    [const N: usize] &[u8; N],
+}
+
+/// A message equals a list if its frames equal the list's items in order,
+/// so that `assert_eq!(message, ["header", "body"])` works.
+impl<T> PartialEq<[T]> for Message
+where
+    Frame: PartialEq<T>,
+{
+    fn eq(&self, other: &[T]) -> bool {
+        self.len().get() == other.len() && self.iter().zip(other).all(|(frame, item)| frame == item)
+    }
+}
+
+impl<T> PartialEq<&[T]> for Message
+where
+    Frame: PartialEq<T>,
+{
+    fn eq(&self, other: &&[T]) -> bool {
+        *self == **other
+    }
+}
+
+impl<T, const N: usize> PartialEq<[T; N]> for Message
+where
+    Frame: PartialEq<T>,
+{
+    fn eq(&self, other: &[T; N]) -> bool {
+        *self == other[..]
+    }
+}
+
+impl<T> PartialEq<Vec<T>> for Message
+where
+    Frame: PartialEq<T>,
+{
+    fn eq(&self, other: &Vec<T>) -> bool {
+        *self == other[..]
+    }
+}
 
 impl Hash for Message {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -318,6 +416,19 @@ impl<T: Into<Frame>> From<T> for Message {
     }
 }
 
+/// A message of several frames, such as `Message::from(["header",
+/// "body"])`. An empty array does not compile: a message has at least one
+/// frame.
+impl<T: Into<Frame>, const N: usize> From<[T; N]> for Message {
+    fn from(frames: [T; N]) -> Self {
+        const { assert!(N > 0, "a message must have at least one frame") };
+        let mut frames = frames.into_iter().map(Into::into);
+        let mut message = Self::new(frames.next().expect("N > 0"));
+        message.extend(frames);
+        message
+    }
+}
+
 impl TryFrom<Vec<Frame>> for Message {
     type Error = EmptyMessage;
 
@@ -366,6 +477,46 @@ mod tests {
 
     fn frames(parts: &[&'static str]) -> Vec<Frame> {
         parts.iter().map(|&p| Frame::from(p)).collect()
+    }
+
+    #[test]
+    fn a_message_equals_text_or_bytes_only_as_one_frame() {
+        let single = Message::new("hello");
+        assert_eq!(single, "hello");
+        assert_eq!(single, *"hello");
+        assert_eq!(single, b"hello");
+        assert_eq!(single, *b"hello");
+        assert_eq!(single, &b"hello"[..]);
+        assert_eq!(single, b"hello"[..]);
+        assert_eq!(single, b"hello".to_vec());
+        assert_eq!(single, String::from("hello"));
+        assert_eq!(single, Frame::from("hello"));
+        assert_ne!(single, "hell");
+        assert_ne!(Message::from(["hello", "again"]), "hello");
+    }
+
+    #[test]
+    fn a_message_equals_a_list_frame_by_frame() {
+        let several = Message::from(["a", "b"]);
+        assert_eq!(several, ["a", "b"]);
+        assert_eq!(several, [b"a", b"b"]);
+        assert_eq!(several, &["a", "b"][..]);
+        assert_eq!(several, vec![Frame::from("a"), Frame::from("b")]);
+        assert_ne!(several, ["a"]);
+        assert_ne!(several, ["a", "b", "c"]);
+        assert_ne!(several, ["a", "c"]);
+        assert_eq!(Message::new("a"), ["a"]);
+    }
+
+    #[test]
+    fn a_message_is_made_of_several_frames_in_one_expression() {
+        let mut pushed = Message::new("a");
+        pushed.push("b");
+        pushed.push("c");
+        assert_eq!(Message::from(["a", "b", "c"]), pushed);
+        assert_eq!(Message::new("a").with("b").with(b"c".to_vec()), pushed);
+        assert_eq!(Message::from(["a"]), Message::new("a"));
+        assert!(matches!(Message::from(["a", "b"]).rest, Rest::One(_)));
     }
 
     #[test]

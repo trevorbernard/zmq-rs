@@ -54,8 +54,7 @@ impl Flcliapi {
     /// isn't pretty, but saves us from sending all requests to a single
     /// server, at startup time.
     pub fn connect(&mut self, endpoint: &str) {
-        let mut message = Message::new("CONNECT");
-        message.push(endpoint.to_owned());
+        let message = Message::new("CONNECT").with(endpoint.to_owned());
         self.pipe.send(message).unwrap();
         thread::sleep(Duration::from_millis(100)); // Allow connection to come up
     }

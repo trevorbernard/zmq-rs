@@ -45,8 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             // Send random values for worker availability
             None => {
-                let mut status = Message::new(me.clone());
-                status.push(randof(10).to_string());
+                let status = Message::new(me.clone()).with(randof(10).to_string());
                 statebe.send(status)?;
             }
         }

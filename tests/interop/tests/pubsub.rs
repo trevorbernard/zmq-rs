@@ -65,7 +65,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
         loop {
             let message = subscriber.recv().unwrap();
             assert_ne!(message, Message::from("sports"));
-            if message == Message::from("news: last") {
+            if message == "news: last" {
                 break;
             }
         }

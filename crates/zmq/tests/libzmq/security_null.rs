@@ -33,7 +33,7 @@ fn server_in_domain(
     let (seen, requests) = mpsc::channel();
     let handler = move |request: &ZapRequest| {
         let _ = seen.send(request.clone());
-        if request.domain == Frame::from("TEST") {
+        if request.domain == "TEST" {
             ZapReply::Ok {
                 user_id: Frame::from("anonymous"),
                 metadata: Metadata::new(),

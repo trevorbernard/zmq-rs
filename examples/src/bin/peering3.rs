@@ -230,8 +230,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if workers.len() != previous {
             // We stick our own identity onto the envelope, then broadcast
             // new capacity
-            let mut capacity = Message::new(me.clone());
-            capacity.push(workers.len().to_string());
+            let capacity = Message::new(me.clone()).with(workers.len().to_string());
             statebe.send(capacity)?;
         }
     }

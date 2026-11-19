@@ -19,7 +19,7 @@ use crate::support::{FIVE, settle, within};
 /// libzmq's test handler: in the domain DOMAIN, accepts the peer as
 /// anonymous with the property Hello: World.
 fn zap_handler(request: &ZapRequest) -> ZapReply {
-    if request.domain != Frame::from("DOMAIN") {
+    if request.domain != "DOMAIN" {
         return ZapReply::AuthenticationFailure;
     }
     let mut metadata = Metadata::new();

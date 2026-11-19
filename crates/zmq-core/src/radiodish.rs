@@ -194,7 +194,7 @@ mod tests {
             0
         );
         assert_eq!(drain(&mut sa), [on_air("news", "rain")]);
-        assert_eq!(drain(&mut sb), []);
+        assert_eq!(drain(&mut sb), Vec::<Message>::new());
     }
 
     #[test]
