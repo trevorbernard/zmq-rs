@@ -9,18 +9,18 @@
 
 use std::time::Duration;
 
-use zmq::{Context, EventKind, Monitor, Pub, Reconnect, RecvTimeoutError, Socket, Sub};
+use zmq::{Context, EventKind, Monitor, Pub, Reconnect, Socket, Sub};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, zero_linger};
 
 fn expect(monitor: &mut Monitor, kind: EventKind) {
-    let event = monitor.recv_timeout(FIVE).expect("an event");
+    let event = monitor.recv_timeout(FIVE).unwrap().expect("an event");
     assert_eq!(event.kind, kind);
 }
 
 fn expect_retry(monitor: &mut Monitor) {
-    let event = monitor.recv_timeout(FIVE).expect("an event");
+    let event = monitor.recv_timeout(FIVE).unwrap().expect("an event");
     assert!(
         matches!(event.kind, EventKind::ConnectRetried { .. }),
         "{event:?}"
@@ -29,8 +29,10 @@ fn expect_retry(monitor: &mut Monitor) {
 
 fn expect_nothing(monitor: &mut Monitor, wait: Duration) {
     assert_eq!(
-        monitor.recv_timeout(wait).map(|event| event.kind),
-        Err(RecvTimeoutError::Timeout)
+        monitor
+            .recv_timeout(wait)
+            .map(|event| event.map(|event| event.kind)),
+        Ok(None)
     );
 }
 
@@ -176,7 +178,7 @@ mod stop {
 
         sub.disconnect(&endpoint).unwrap();
         // One retry may have been on its way.
-        if let Ok(event) = monitor.recv_timeout(SETTLE) {
+        if let Ok(Some(event)) = monitor.recv_timeout(SETTLE) {
             assert!(
                 matches!(event.kind, EventKind::ConnectRetried { .. }),
                 "{event:?}"

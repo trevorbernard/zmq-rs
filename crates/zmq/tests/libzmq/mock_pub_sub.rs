@@ -70,7 +70,7 @@ fn mock_handshake(stream: &mut TcpStream, sub_command: bool, mock_pub: bool) {
 /// Waits for the monitor to report the mock's connection accepted.
 fn expect_accepted(monitor: &mut Monitor) {
     loop {
-        let event = monitor.recv_timeout(FIVE).expect("an event");
+        let event = monitor.recv_timeout(FIVE).unwrap().expect("an event");
         if event.kind == EventKind::Accepted {
             return;
         }

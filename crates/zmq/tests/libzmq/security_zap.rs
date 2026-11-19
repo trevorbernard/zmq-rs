@@ -118,7 +118,7 @@ fn expect_bounce_fail(pair: &mut Pair) {
 fn handshake_failures(monitor: &mut Monitor, timeout: Duration) -> Vec<HandshakeFailure> {
     let mut failures = Vec::new();
     let mut wait = timeout;
-    while let Ok(event) = monitor.recv_timeout(wait) {
+    while let Ok(Some(event)) = monitor.recv_timeout(wait) {
         if let EventKind::HandshakeFailed(failure) = event.kind {
             failures.push(failure);
             wait = Duration::ZERO;

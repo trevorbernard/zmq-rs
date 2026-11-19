@@ -47,7 +47,8 @@ pub use context::{
 pub use fair_queue::FairQueue;
 pub use load_balancer::LoadBalancer;
 pub use monitor::{
-    Event, EventKind, HandshakeFailure, Monitor, MonitorSink, ProtocolError, ProtocolErrorKind,
+    Event, EventKind, HandshakeFailure, Monitor, MonitorSink, MonitorStopped, ProtocolError,
+    ProtocolErrorKind,
 };
 pub use pair::Pair;
 pub use peers::{EndpointId, Peer, PeerKey, PeerList, Peers, noop_context};

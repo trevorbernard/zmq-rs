@@ -16,7 +16,7 @@
 use std::net::TcpListener;
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Event, EventKind, Linger, Monitor, RecvTimeoutError, SocketOptions};
+use zmq::{Context, Dealer, Event, EventKind, Linger, Monitor, MonitorStopped, SocketOptions};
 use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, bounce_dealer, within};
@@ -24,9 +24,9 @@ use crate::support::{FIVE, bounce_dealer, within};
 /// The next event, or `None` once the monitor has stopped.
 fn next_event(monitor: &mut Monitor) -> Option<Event> {
     match monitor.recv_timeout(FIVE) {
-        Ok(event) => Some(event),
-        Err(RecvTimeoutError::Closed) => None,
-        Err(RecvTimeoutError::Timeout) => panic!("no event within {FIVE:?}"),
+        Ok(Some(event)) => Some(event),
+        Err(MonitorStopped) => None,
+        Ok(None) => panic!("no event within {FIVE:?}"),
     }
 }
 

@@ -17,7 +17,7 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) {
     let started = Instant::now();
     let mut seen = Vec::new();
     loop {
-        if let Ok(event) = monitor.try_recv() {
+        if let Ok(Some(event)) = monitor.try_recv() {
             if wanted(&event.kind) {
                 return;
             }

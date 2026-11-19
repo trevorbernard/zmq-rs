@@ -140,7 +140,7 @@ impl Fixture {
 fn handshake_events(monitor: &mut Monitor, timeout: Duration) -> Vec<EventKind> {
     let mut events = Vec::new();
     let mut wait = timeout;
-    while let Ok(event) = monitor.recv_timeout(wait) {
+    while let Ok(Some(event)) = monitor.recv_timeout(wait) {
         if matches!(
             event.kind,
             EventKind::HandshakeSucceeded | EventKind::HandshakeFailed(_)

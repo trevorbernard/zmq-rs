@@ -17,7 +17,10 @@ const FIVE: Duration = Duration::from_secs(5);
 fn await_handshakes(events: &mut zmq::Monitor, count: usize) {
     let mut seen = 0;
     while seen < count {
-        let event = events.recv_timeout(FIVE).expect("a handshake in time");
+        let event = events
+            .recv_timeout(FIVE)
+            .unwrap()
+            .expect("a handshake in time");
         if event.kind == zmq::EventKind::HandshakeSucceeded {
             seen += 1;
         }

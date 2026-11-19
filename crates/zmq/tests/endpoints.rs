@@ -68,7 +68,9 @@ fn unbinding_closes_accepted_connections() {
     first.unbind(&bound).unwrap();
     // Sent before the push sees its connection end, a message would go
     // down that connection and be lost, as in libzmq.
-    while monitor.recv_timeout(FIVE).unwrap().kind != zmq::EventKind::Disconnected {}
+    while monitor.recv_timeout(FIVE).unwrap().expect("an event").kind
+        != zmq::EventKind::Disconnected
+    {}
     // The push reconnects to whoever binds the port next.
     let mut second = context.socket::<Pull>();
     second.bind(&bound).unwrap();
@@ -223,7 +225,10 @@ fn a_host_name_is_resolved_when_connecting_not_before() {
     let endpoint = "tcp://no-such-host.invalid:5555";
     push.connect(endpoint).unwrap();
     // Each attempt looks the name up again, and retries when it fails.
-    let retried = monitor.recv_timeout(FIVE).unwrap();
+    let retried = monitor
+        .recv_timeout(FIVE)
+        .unwrap()
+        .expect("a retry in time");
     assert_eq!(retried.endpoint, endpoint);
     assert!(matches!(
         retried.kind,

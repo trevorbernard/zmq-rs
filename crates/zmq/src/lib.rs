@@ -156,8 +156,8 @@ pub use socket::{HearsDisconnects, HearsHiccups, SendsHello};
 #[doc(inline)]
 pub use zmq_core::{
     Authenticator, Event, EventKind, HandshakeFailure, Heartbeat, Linger, MessageProperties,
-    Monitor, ProtocolError, ProtocolErrorKind, Reconnect, RecvTimeoutError, RouteOutcome, Security,
-    SendError, ShutdownTimedOut, TcpKeepalive, TryRecvError, Verbosity, XPubEvent, ZapResponder,
+    Monitor, MonitorStopped, ProtocolError, ProtocolErrorKind, Reconnect, RouteOutcome, Security,
+    SendError, ShutdownTimedOut, TcpKeepalive, Verbosity, XPubEvent, ZapResponder,
 };
 #[cfg(feature = "draft")]
 #[doc(inline)]

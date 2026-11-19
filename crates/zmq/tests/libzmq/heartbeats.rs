@@ -45,7 +45,7 @@ fn next_event(monitor: &mut Monitor, timeout: Duration) -> Option<EventKind> {
     loop {
         let event = monitor
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .ok()?;
+            .ok()??;
         if matches!(
             event.kind,
             EventKind::Accepted | EventKind::Connected | EventKind::Disconnected

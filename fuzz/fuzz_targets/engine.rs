@@ -281,7 +281,7 @@ fn exchange(mut stream: UnixStream, traffic: &[u8], socket: &mut dyn Step, monit
         }
         while matches!(stream.read(&mut sink), Ok(read) if read > 0) {}
         socket.step();
-        while let Ok(event) = monitor.try_recv() {
+        while let Ok(Some(event)) = monitor.try_recv() {
             if event.kind == EventKind::Disconnected {
                 return;
             }

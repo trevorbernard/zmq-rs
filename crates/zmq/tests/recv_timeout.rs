@@ -6,8 +6,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
-    Context, Dealer, EventKind, Frame, ManualXPub, Message, Pair, Pub, Pull, Push,
-    RecvTimeoutError, Rep, Req, RequestError, Router, Sub, XPub, XSub,
+    Context, Dealer, EventKind, Frame, ManualXPub, Message, MonitorStopped, Pair, Pub, Pull, Push,
+    Rep, Req, RequestError, Router, Sub, XPub, XSub,
 };
 use zmq_test_ports::free_endpoint;
 
@@ -268,24 +268,21 @@ fn a_monitor_times_out_then_sees_events_then_the_end() {
     let mut pull = context.socket::<Pull>();
     let mut monitor = pull.monitor();
     let start = Instant::now();
-    assert_eq!(
-        monitor.recv_timeout(SHORT).map(|e| e.kind),
-        Err(RecvTimeoutError::Timeout)
-    );
+    assert_eq!(monitor.recv_timeout(SHORT), Ok(None));
     assert!(start.elapsed() >= SHORT);
     pull.bind(free_endpoint()).unwrap();
     assert_eq!(
-        monitor.recv_timeout(FIVE).map(|e| e.kind),
-        Ok(EventKind::Listening)
+        monitor.recv_timeout(FIVE).map(|e| e.map(|e| e.kind)),
+        Ok(Some(EventKind::Listening))
     );
     drop(pull);
     let end = loop {
         match monitor.recv_timeout(FIVE) {
-            Ok(_) => {}
+            Ok(Some(_)) => {}
             other => break other,
         }
     };
-    assert_eq!(end.map(|e| e.kind), Err(RecvTimeoutError::Closed));
+    assert_eq!(end, Err(MonitorStopped));
 }
 
 #[cfg(feature = "draft")]

@@ -148,6 +148,10 @@ pub struct MonitorSink {
 /// Receives a socket's events from the moment it is made. Each monitor
 /// hears every event; one that falls 1000 events behind misses new ones
 /// until it catches up, as libzmq's does.
+///
+/// It receives as a socket does: `None` when nothing is waiting or the
+/// timeout ran out, and an error, [`MonitorStopped`], when nothing ever
+/// will be.
 #[derive(Debug)]
 pub struct Monitor {
     events: Reader<Event>,
@@ -185,36 +189,56 @@ impl MonitorSink {
     }
 }
 
+/// The monitored socket and all its connections are gone and every event
+/// is read, so a [`Monitor`] has nothing more to say, as libzmq's
+/// `ZMQ_EVENT_MONITOR_STOPPED`. Drop the monitor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MonitorStopped;
+
+impl fmt::Display for MonitorStopped {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("the monitored socket is gone")
+    }
+}
+
+impl std::error::Error for MonitorStopped {}
+
 impl Monitor {
-    /// The next event, if one is waiting. Fails with `Closed` once the
-    /// socket and all its connections are gone and every event is read.
-    pub fn try_recv(&mut self) -> Result<Event, TryRecvError> {
-        self.events.try_recv()
+    /// The next event, if one is waiting.
+    pub fn try_recv(&mut self) -> Result<Option<Event>, MonitorStopped> {
+        match self.events.try_recv() {
+            Ok(event) => Ok(Some(event)),
+            Err(TryRecvError::Empty) => Ok(None),
+            Err(TryRecvError::Closed) => Err(MonitorStopped),
+        }
     }
 
-    /// The next event, or `None` once the socket and all its connections
-    /// are gone.
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<Event>> {
-        self.events.poll_recv(cx)
+    /// The next event, waking `cx` for it if none is waiting.
+    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Result<Event, MonitorStopped>> {
+        self.events
+            .poll_recv(cx)
+            .map(|event| event.ok_or(MonitorStopped))
     }
 
     /// The next event, blocking the thread, as a socket's `recv` does.
-    /// `None` once the socket and all its connections are gone.
-    pub fn recv(&mut self) -> Option<Event> {
-        self.events.recv_blocking()
+    pub fn recv(&mut self) -> Result<Event, MonitorStopped> {
+        self.events.recv_blocking().ok_or(MonitorStopped)
     }
 
     /// The next event, waiting for one without blocking the thread, as a
-    /// socket's `recv_async` does. `None` once the socket and all its
-    /// connections are gone.
-    pub async fn recv_async(&mut self) -> Option<Event> {
-        self.events.recv().await
+    /// socket's `recv_async` does.
+    pub async fn recv_async(&mut self) -> Result<Event, MonitorStopped> {
+        self.events.recv().await.ok_or(MonitorStopped)
     }
 
-    /// The next event, blocking the thread for at most `timeout`. Fails
-    /// with `Closed` once the socket and all its connections are gone.
-    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Event, RecvTimeoutError> {
-        self.events.recv_timeout(timeout)
+    /// The next event, blocking the thread for at most `timeout`: `None` if
+    /// it ran out.
+    pub fn recv_timeout(&mut self, timeout: Duration) -> Result<Option<Event>, MonitorStopped> {
+        match self.events.recv_timeout(timeout) {
+            Ok(event) => Ok(Some(event)),
+            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Closed) => Err(MonitorStopped),
+        }
     }
 }
 
@@ -231,18 +255,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn try_recv_tells_an_empty_monitor_from_a_closed_one() {
+    fn try_recv_tells_an_empty_monitor_from_a_stopped_one() {
         let sink = MonitorSink::default();
         let mut monitor = sink.monitor();
-        assert_eq!(monitor.try_recv(), Err(TryRecvError::Empty));
+        assert_eq!(monitor.try_recv(), Ok(None));
         sink.emit("tcp://127.0.0.1:1", EventKind::Closed);
         drop(sink);
-        assert!(monitor.try_recv().is_ok());
-        assert_eq!(monitor.try_recv(), Err(TryRecvError::Closed));
+        assert!(matches!(monitor.try_recv(), Ok(Some(_))));
+        assert_eq!(monitor.try_recv(), Err(MonitorStopped));
     }
 
     #[test]
-    fn each_way_of_waiting_gets_the_next_event_then_none_once_closed() {
+    fn recv_timeout_tells_a_quiet_monitor_from_a_stopped_one() {
+        let sink = MonitorSink::default();
+        let mut monitor = sink.monitor();
+        assert_eq!(monitor.recv_timeout(Duration::ZERO), Ok(None));
+        drop(sink);
+        assert_eq!(monitor.recv_timeout(Duration::ZERO), Err(MonitorStopped));
+    }
+
+    #[test]
+    fn each_way_of_waiting_gets_the_next_event_then_fails_once_stopped() {
         let sink = MonitorSink::default();
         let mut monitor = sink.monitor();
         for _ in 0..3 {
@@ -251,13 +284,17 @@ mod tests {
         drop(sink);
         let (_, waker) = crate::test_support::waker();
         let mut cx = Context::from_waker(&waker);
-        assert!(matches!(monitor.poll_recv(&mut cx), Poll::Ready(Some(_))));
-        assert!(monitor.recv().is_some());
+        assert!(matches!(monitor.poll_recv(&mut cx), Poll::Ready(Ok(_))));
+        assert!(monitor.recv().is_ok());
         {
             let next = std::pin::pin!(monitor.recv_async());
-            assert!(matches!(next.poll(&mut cx), Poll::Ready(Some(_))));
+            assert!(matches!(next.poll(&mut cx), Poll::Ready(Ok(_))));
         }
-        assert!(matches!(monitor.poll_recv(&mut cx), Poll::Ready(None)));
-        assert_eq!(monitor.recv(), None);
+        assert_eq!(monitor.poll_recv(&mut cx), Poll::Ready(Err(MonitorStopped)));
+        assert_eq!(monitor.recv(), Err(MonitorStopped));
+        {
+            let next = std::pin::pin!(monitor.recv_async());
+            assert_eq!(next.poll(&mut cx), Poll::Ready(Err(MonitorStopped)));
+        }
     }
 }

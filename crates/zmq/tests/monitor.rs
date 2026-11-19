@@ -19,7 +19,7 @@ fn events_until(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) -> V
     let started = Instant::now();
     let mut seen = Vec::new();
     loop {
-        if let Ok(event) = monitor.try_recv() {
+        if let Ok(Some(event)) = monitor.try_recv() {
             let done = wanted(&event.kind);
             seen.push(event.kind);
             if done {
@@ -38,7 +38,7 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) -> Event {
     let started = Instant::now();
     let mut seen = Vec::new();
     loop {
-        if let Ok(event) = monitor.try_recv() {
+        if let Ok(Some(event)) = monitor.try_recv() {
             if wanted(&event.kind) {
                 return event;
             }
@@ -304,12 +304,13 @@ fn an_attempt_that_never_connects_only_retries() {
 /// Waits for `monitor` to report its socket gone, past any events.
 fn assert_closes(mut monitor: Monitor) {
     let started = Instant::now();
-    while monitor.recv_timeout(FIVE).is_ok() {
+    while let Ok(event) = monitor.recv_timeout(FIVE) {
+        assert!(event.is_some(), "still open");
         assert!(started.elapsed() < FIVE, "still open");
     }
     assert_eq!(
         monitor.recv_timeout(Duration::ZERO),
-        Err(zmq::RecvTimeoutError::Closed)
+        Err(zmq::MonitorStopped)
     );
 }
 
