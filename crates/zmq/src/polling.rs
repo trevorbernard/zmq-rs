@@ -1,6 +1,8 @@
 //! Waiting on several sockets at once, as libzmq's `zmq_poll`.
 
+use std::cell::RefCell;
 use std::fmt;
+use std::rc::Rc;
 use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
@@ -11,7 +13,7 @@ use crate::{Terminated, wait};
 /// A socket to [`poll`], and what to wait for. Made by
 /// [`Socket::readable`](crate::Socket::readable),
 /// [`Socket::writable`](crate::Socket::writable) and
-/// [`Socket::readable_or_writable`](crate::Socket::readable_or_writable);
+/// [`Socket::readable_and_writable`](crate::Socket::readable_and_writable);
 /// it borrows the socket only until the poll returns.
 pub struct PollItem<'a> {
     target: Target<'a>,
@@ -20,11 +22,14 @@ pub struct PollItem<'a> {
 enum Target<'a> {
     Readable(&'a mut dyn PollReadable),
     Writable(&'a mut dyn PollWritable),
-    /// Ready once either is, as libzmq's `ZMQ_POLLIN | ZMQ_POLLOUT`.
-    Either(&'a mut dyn PollEither),
+    /// One of the two items of a socket polled both ways, which share it.
+    SharedReadable(Shared<'a>),
+    SharedWritable(Shared<'a>),
     /// Left out by [`PollItem::when`]: never ready.
     Skipped,
 }
+
+type Shared<'a> = Rc<RefCell<&'a mut dyn PollBoth>>;
 
 /// A socket that can be polled until a receive would not wait.
 pub(crate) trait PollReadable: Terminates {
@@ -39,9 +44,9 @@ pub(crate) trait PollWritable: Terminates {
 }
 
 /// A socket that can be polled both ways.
-pub(crate) trait PollEither: PollReadable + PollWritable {}
+pub(crate) trait PollBoth: PollReadable + PollWritable {}
 
-impl<T: PollReadable + PollWritable> PollEither for T {}
+impl<T: PollReadable + PollWritable> PollBoth for T {}
 
 impl<'a> PollItem<'a> {
     /// This item if `condition` holds, and otherwise one that is never
@@ -90,26 +95,25 @@ impl<'a> PollItem<'a> {
         }
     }
 
-    pub(crate) fn either(socket: &'a mut dyn PollEither) -> Self {
-        Self {
-            target: Target::Either(socket),
-        }
+    /// Two items for one socket: when it is readable, and when writable.
+    pub(crate) fn both(socket: &'a mut dyn PollBoth) -> (Self, Self) {
+        let shared = Rc::new(RefCell::new(socket));
+        (
+            Self {
+                target: Target::SharedReadable(shared.clone()),
+            },
+            Self {
+                target: Target::SharedWritable(shared),
+            },
+        )
     }
 
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<()> {
         match &mut self.target {
             Target::Readable(socket) => socket.poll_readable(cx),
             Target::Writable(socket) => socket.poll_writable(cx),
-            // Both are polled, so that both register `cx`.
-            Target::Either(socket) => {
-                let readable = socket.poll_readable(cx);
-                let writable = socket.poll_writable(cx);
-                if readable.is_ready() || writable.is_ready() {
-                    Poll::Ready(())
-                } else {
-                    Poll::Pending
-                }
-            }
+            Target::SharedReadable(socket) => socket.borrow_mut().poll_readable(cx),
+            Target::SharedWritable(socket) => socket.borrow_mut().poll_writable(cx),
             Target::Skipped => Poll::Pending,
         }
     }
@@ -122,7 +126,9 @@ impl PollItem<'_> {
         match &self.target {
             Target::Readable(socket) => socket.poll_terminated(cx),
             Target::Writable(socket) => socket.poll_terminated(cx),
-            Target::Either(socket) => Terminates::poll_terminated(&**socket, cx),
+            Target::SharedReadable(socket) | Target::SharedWritable(socket) => {
+                Terminates::poll_terminated(&**socket.borrow(), cx)
+            }
             Target::Skipped => false,
         }
     }
@@ -131,9 +137,8 @@ impl PollItem<'_> {
 impl fmt::Debug for PollItem<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let interest = match self.target {
-            Target::Readable(_) => "readable",
-            Target::Writable(_) => "writable",
-            Target::Either(_) => "readable or writable",
+            Target::Readable(_) | Target::SharedReadable(_) => "readable",
+            Target::Writable(_) | Target::SharedWritable(_) => "writable",
             Target::Skipped => "skipped",
         };
         f.debug_tuple("PollItem").field(&interest).finish()

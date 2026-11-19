@@ -282,21 +282,34 @@ fn draft_sockets_poll_too() {
 }
 
 #[test]
-fn a_socket_can_be_polled_both_ways_at_once() {
+fn a_socket_polled_both_ways_says_which_is_ready() {
     let context = Context::new().unwrap();
     let mut a = context.socket::<Dealer>();
     a.bind("inproc://both-ways").unwrap();
     // No peer: nothing to receive, and nowhere to send.
+    let (readable, writable) = a.readable_and_writable();
     assert_eq!(
-        zmq::poll_timeout([a.readable_or_writable()], BRIEFLY).unwrap(),
+        zmq::poll_timeout([readable, writable], BRIEFLY).unwrap(),
         None
     );
     let mut b = context.socket::<Dealer>();
     b.connect("inproc://both-ways").unwrap();
-    b.send("hello").unwrap();
+    let (readable, writable) = a.readable_and_writable();
     assert_eq!(
-        zmq::poll_timeout([a.readable_or_writable()], FIVE).unwrap(),
-        Some([true])
+        zmq::poll_timeout([readable, writable], FIVE).unwrap(),
+        Some([false, true])
+    );
+    b.send("hello").unwrap();
+    // In either order, and with the other left out.
+    let (readable, writable) = a.readable_and_writable();
+    assert_eq!(
+        zmq::poll_timeout([writable.when(false), readable], FIVE).unwrap(),
+        Some([false, true])
+    );
+    let (readable, writable) = a.readable_and_writable();
+    assert_eq!(
+        zmq::poll_timeout([writable, readable], FIVE).unwrap(),
+        Some([true, true])
     );
     assert_eq!(a.try_recv().unwrap(), Some(Message::from("hello")));
     assert!(a.try_send("back").is_ok());

@@ -456,10 +456,11 @@ impl<T: WaitsForRoom> Socket<T> {
 }
 
 impl<T: Receives + WaitsForRoom> Socket<T> {
-    /// This socket, to [`poll`](crate::poll()) until a receive or a send
-    /// would not wait, as libzmq's `ZMQ_POLLIN | ZMQ_POLLOUT`. Once the
-    /// poll reports it, try both: `try_recv` returns a message if one is
-    /// waiting, and `try_send` succeeds if a peer has room.
+    /// This socket twice, to [`poll`](crate::poll()) until a receive would
+    /// not wait and until a send would not, as libzmq's
+    /// `ZMQ_POLLIN | ZMQ_POLLOUT`: the poll says which, as `zmq_poll`'s
+    /// `revents` does. Either can be left out with
+    /// [`when`](PollItem::when).
     ///
     /// ```
     /// # use zmq::{Context, Dealer};
@@ -470,14 +471,14 @@ impl<T: Receives + WaitsForRoom> Socket<T> {
     /// let mut b = context.socket::<Dealer>();
     /// b.connect("inproc://both")?;
     /// // Nothing to receive yet, but room to send.
-    /// assert_eq!(zmq::poll([b.readable_or_writable()])?, [true]);
-    /// assert!(b.try_recv()?.is_none());
+    /// let (readable, writable) = b.readable_and_writable();
+    /// assert_eq!(zmq::poll([readable, writable])?, [false, true]);
     /// assert!(b.try_send("hello").is_ok());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn readable_or_writable(&mut self) -> PollItem<'_> {
-        PollItem::either(self)
+    pub fn readable_and_writable(&mut self) -> (PollItem<'_>, PollItem<'_>) {
+        PollItem::both(self)
     }
 }
 
