@@ -6,8 +6,10 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Frame, Message, Reconnect, Rep, Req, RequestError, SocketOptions};
-use zmq_interop::libzmq::{Kind, Socket};
-use zmq_test_ports::free_endpoint;
+use zmq_interop::libzmq::{self, Kind, Socket};
+use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
+use zmtp::SocketType;
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -260,5 +262,70 @@ fn a_timed_out_request_to_a_libzmq_rep_leaves_the_socket_usable() {
     assert_eq!(
         answer.recv_timeout(FIVE).unwrap(),
         Ok(Message::from("fresh"))
+    );
+}
+
+/// A hand-written ROUTER that answers the request it is sent with one
+/// frame, where a reply starts with an empty delimiter.
+fn reply_without_a_delimiter(listener: &std::net::TcpListener) -> Peer {
+    let mut router = Peer::accept(
+        listener,
+        SocketType::Router,
+        zmtp::Identity::default(),
+        Security::Null,
+    )
+    .unwrap();
+    router.recv_message().unwrap();
+    router.send(&zmtp::Message::from("no delimiter")).unwrap();
+    router
+}
+
+#[test]
+fn libzmq_drops_a_connection_that_replies_without_a_delimiter() {
+    let listener = std::net::TcpListener::bind(free_port()).unwrap();
+    let req = Socket::new(Kind::Req);
+    req.set_reconnect(10, 0);
+    let monitor = req.monitor();
+    req.connect(listener.local_addr().unwrap());
+    req.send(&[b"request"]).unwrap();
+    let _router = reply_without_a_delimiter(&listener);
+    let events: Vec<u16> = monitor
+        .during(Duration::from_millis(500))
+        .into_iter()
+        .map(|(event, _)| event)
+        .collect();
+    assert!(events.contains(&libzmq::EVENT_DISCONNECTED), "{events:?}");
+    assert!(
+        !events.contains(&libzmq::EVENT_CONNECT_RETRIED),
+        "a protocol error is not retried: {events:?}"
+    );
+}
+
+#[test]
+fn we_drop_a_connection_that_replies_without_a_delimiter() {
+    let listener = std::net::TcpListener::bind(free_port()).unwrap();
+    let context = Context::new().unwrap();
+    let mut req = context.socket_with::<Req>(SocketOptions::new().reconnect(Reconnect::Fixed {
+        interval: Duration::from_millis(10),
+    }));
+    let mut monitor = req.monitor();
+    req.connect(format!("tcp://{}", listener.local_addr().unwrap()))
+        .unwrap();
+    let reply = spawn(move || req.request("request"));
+    let _router = reply_without_a_delimiter(&listener);
+    assert!(matches!(
+        reply.recv_timeout(Duration::from_secs(5)),
+        Ok(Err(RequestError::PeerGone))
+    ));
+    let mut events = Vec::new();
+    while let Ok(Some(event)) = monitor.recv_timeout(Duration::from_millis(300)) {
+        events.push(event.kind);
+    }
+    assert!(events.contains(&zmq::EventKind::Disconnected), "{events:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|kind| matches!(kind, zmq::EventKind::ConnectRetried { .. })),
+        "{events:?}"
     );
 }

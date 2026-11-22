@@ -187,6 +187,24 @@ pub(crate) enum EngineError {
     Curve(CurveError),
     /// A SOCKS5 proxy did not connect us.
     Proxy(#[expect(dead_code, reason = "shown when the error is debugged")] SocksError),
+    /// A REQ was sent something that is not framed as a reply.
+    NotAReply,
+}
+
+/// Whether `message` is framed as libzmq's `req_session_t` requires of
+/// what a REQ receives: an empty delimiter, after a request id of four
+/// octets if there is one, and at least one frame after it.
+fn is_reply(message: &Message) -> bool {
+    let mut frames = message.iter();
+    let Some(first) = frames.next() else {
+        return false;
+    };
+    let delimiter = if first.len() == 4 {
+        frames.next()
+    } else {
+        Some(first)
+    };
+    delimiter.is_some_and(|frame| frame.is_empty()) && frames.next().is_some()
 }
 
 fn protocol(detail: ProtocolDetail) -> HandshakeFailure {
@@ -219,7 +237,7 @@ impl EngineError {
             Self::Greeting(err) => protocol(ProtocolDetail::Greeting(err.clone())),
             Self::Decode(err) => protocol(ProtocolDetail::Decode(err.clone())),
             Self::Curve(err) => protocol(ProtocolDetail::Curve(*err)),
-            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) => {
+            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) | Self::NotAReply => {
                 HandshakeFailure::NoDetail
             }
         }
@@ -1042,6 +1060,11 @@ impl Engine {
             }
             match item {
                 Some(Incoming::Message(mut message)) => {
+                    // libzmq's REQ session drops a connection that sends
+                    // anything else, and it is not tried again.
+                    if self.config.socket_type == SocketType::Req && !is_reply(&message) {
+                        return Err(EngineError::NotAReply);
+                    }
                     announce(&mut message, metadata, self.config.conflate_inbound);
                     if let Some(refused) = deliver(pipes.inbound, message, cx) {
                         *pending = Some(refused);
@@ -1270,6 +1293,27 @@ fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, confl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_has_a_delimiter_and_a_body() {
+        let message = |frames: &[&[u8]]| {
+            let frames: Vec<_> = frames
+                .iter()
+                .map(|frame| zmtp::Frame::copy_from_slice(frame))
+                .collect();
+            Message::try_from(frames).unwrap()
+        };
+        assert!(is_reply(&message(&[b"", b"body"])));
+        assert!(is_reply(&message(&[b"", b"body", b"more"])));
+        assert!(is_reply(&message(&[b"\0\0\0\x01", b"", b"body"])));
+        assert!(!is_reply(&message(&[b"body"])));
+        assert!(!is_reply(&message(&[b""])), "nothing after the delimiter");
+        assert!(!is_reply(&message(&[b"id", b"", b"body"])));
+        assert!(
+            !is_reply(&message(&[b"\0\0\0\x01", b"body"])),
+            "four octets are a request id, which a delimiter follows"
+        );
+    }
 
     #[test]
     fn an_error_reason_is_a_zap_status_only_if_it_is_a_failure() {

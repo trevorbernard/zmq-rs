@@ -50,7 +50,6 @@ sees, with no safety gain.
 | D17 | A disconnect stops reconnection only with `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` | Always |
 | D18 | `ENODEV`, `ENAMETOOLONG`, `ENOCOMPATPROTO` and `EPROTONOSUPPORT` are distinct | `ENODEV` is `InvalidEndpoint`, `ENAMETOOLONG` an `Io` error, and the last two are both `UnsupportedTransport` |
 | D19 | `zmq_socket` fails with `ETERM` once the context is shut down | Succeeds; the socket's operations then fail |
-| D20 | A REQ drops the connection on a reply with no delimiter | Drops the reply and keeps waiting |
 | D21 | A PAIR drops what a departed peer had delivered, with its pipe | Still delivers it, ahead of the next peer's |
 
 ## Exceptions

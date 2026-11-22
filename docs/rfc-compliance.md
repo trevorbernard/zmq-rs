@@ -320,7 +320,7 @@ Rules shared by every pattern:
   - Sends an empty delimiter frame, round-robins requests, and keeps strict lockstep.
   - Accepts replies only from the peer it last sent to; others are discarded.
   - With no peers it blocks or errors, and never drops.
-  - libzmq also drops the connection when a reply has no delimiter.
+  - libzmq also drops the connection when a reply has no delimiter, over `tcp` and `ipc`.
 - **REP**
   - Strips the whole envelope (every identity frame plus the delimiter), stores it, and restores it on reply.
   - Never blocks on send.
@@ -343,8 +343,8 @@ Rules shared by every pattern:
   - A dropped `request_async` future leaves the socket in relaxed mode: the next request is allowed, and the late reply is filtered out by pipe and, when `correlate` is on, by request id.
   - `request_timeout` is the exception: it turns `correlate` on for good, since calling it asks for abandonment, where dropping a future may be accidental. A ROUTER application serving the REQ then sees the request id frame; REP peers do not notice.
 - Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. This is documented on `Request`.
-- Three deliberate differences from libzmq's REQ:
-  - A reply without a delimiter is dropped and the wait continues; libzmq drops the connection.
+- Over `tcp` and `ipc`, a connection that sends a REQ what is not framed as a reply (a delimiter, after a request id if any, then a body) is closed and not retried, as libzmq's REQ session closes it. Over `inproc` such a reply is dropped and the wait continues, as in libzmq.
+- Two deliberate differences from libzmq's REQ:
   - If the asked peer's connection closes before replying, `request` fails with `RequestError::PeerGone`; libzmq waits forever.
   - After `request_timeout` gives up (`RequestError::TimedOut`), the socket takes a new request at once. libzmq's REQ is stuck after `ZMQ_RCVTIMEO` (EFSM) unless `ZMQ_REQ_RELAXED` is set.
 
