@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D10 | A context may have no I/O threads, for `inproc` alone | Refused |
 | D11 | `inproc` pairs any two socket types | Refuses a pair RFC 23 does not allow |
 | D12 | `ZMQ_HEARTBEAT_TTL` is truncated to deciseconds, and `EINVAL` above the maximum | Rounded up, and saturating |
 | D13 | `zmq_connect_peer` is refused under `ZMQ_IMMEDIATE` | `IMMEDIATE` is ignored |
@@ -209,7 +208,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 
 | libzmq | zmq-rs | Status |
 |---|---|---|
-| `ZMQ_IO_THREADS` | `Context::with_io_threads` | Same; Divergence D10 |
+| `ZMQ_IO_THREADS` | `Context::with_io_threads` | Same; Verified for 0 (`tests/interop/tests/context.rs`) |
 | `ZMQ_MAX_SOCKETS`, `ZMQ_SOCKET_LIMIT` | No limit | Gap |
 | `ZMQ_THREAD_PRIORITY`, `ZMQ_THREAD_SCHED_POLICY` | | Gap |
 | `ZMQ_THREAD_AFFINITY_CPU_ADD`, `_REMOVE` | | Gap |

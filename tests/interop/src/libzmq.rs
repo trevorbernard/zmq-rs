@@ -11,6 +11,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+const ZMQ_IO_THREADS: c_int = 1;
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SUBSCRIBE: c_int = 6;
 const ZMQ_SNDHWM: c_int = 23;
@@ -47,6 +48,7 @@ struct RawMsg([u8; 64]);
 unsafe extern "C" {
     fn zmq_ctx_new() -> *mut c_void;
     fn zmq_ctx_term(context: *mut c_void) -> c_int;
+    fn zmq_ctx_set(context: *mut c_void, option: c_int, value: c_int) -> c_int;
     fn zmq_socket(context: *mut c_void, socket_type: c_int) -> *mut c_void;
     fn zmq_close(socket: *mut c_void) -> c_int;
     fn zmq_setsockopt(
@@ -160,6 +162,17 @@ impl Context {
         // SAFETY: plain constructor call; the result is checked for null.
         let raw = NonNull::new(unsafe { zmq_ctx_new() }).expect("zmq_ctx_new failed");
         Self(Arc::new(RawContext(raw)))
+    }
+}
+
+impl Context {
+    /// A context with `threads` I/O threads (`ZMQ_IO_THREADS`).
+    pub fn with_io_threads(threads: i32) -> Self {
+        let context = Self::new();
+        // SAFETY: the context is live and has no sockets yet.
+        check(unsafe { zmq_ctx_set(context.0.0.as_ptr(), ZMQ_IO_THREADS, threads) })
+            .unwrap_or_else(|err| panic!("zmq_ctx_set(ZMQ_IO_THREADS, {threads}): {err}"));
+        context
     }
 }
 
@@ -347,6 +360,20 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+    }
+
+    /// Binds to `endpoint`, or says why libzmq would not.
+    pub fn try_bind(&self, endpoint: &str) -> io::Result<()> {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_bind(self.raw.as_ptr(), c_endpoint.as_ptr()) }).map(drop)
+    }
+
+    /// Connects to `endpoint`, or says why libzmq would not.
+    pub fn try_connect(&self, endpoint: &str) -> io::Result<()> {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) }).map(drop)
     }
 
     /// Connects to `endpoint` as written, such as `ipc:///path`.

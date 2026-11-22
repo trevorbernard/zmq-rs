@@ -847,12 +847,13 @@ impl ConnectionConfig {
 impl Context {
     /// A context with one I/O thread, like libzmq's default.
     pub fn new() -> io::Result<Self> {
-        Self::with_io_threads(NonZeroUsize::MIN)
+        Self::with_io_threads(1)
     }
 
-    /// A context with `threads` I/O threads.
-    pub fn with_io_threads(threads: NonZeroUsize) -> io::Result<Self> {
-        let io_threads = (0..threads.get())
+    /// A context with `threads` I/O threads. With none, as libzmq allows,
+    /// it serves `inproc` alone: see [`has_io_threads`](Self::has_io_threads).
+    pub fn with_io_threads(threads: usize) -> io::Result<Self> {
+        let io_threads = (0..threads)
             .map(IoThread::spawn)
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Self {
@@ -1185,9 +1186,20 @@ impl Context {
         self.inner.io_threads.iter().any(IoThread::forked)
     }
 
+    /// Whether the context can bind and connect over `tcp` and `ipc`,
+    /// which only `inproc` does without an I/O thread. Callers check
+    /// before binding or connecting: libzmq's `EMTHREAD`.
+    pub fn has_io_threads(&self) -> bool {
+        !self.inner.io_threads.is_empty()
+    }
+
     /// The next I/O thread, round robin.
     fn io_thread(&self) -> &IoThread {
         let threads = &self.inner.io_threads;
+        assert!(
+            !threads.is_empty(),
+            "a context without I/O threads serves inproc alone"
+        );
         &threads[self.inner.next.fetch_add(1, Ordering::Relaxed) % threads.len()]
     }
 }

@@ -37,9 +37,20 @@ fn connections_spread_over_several_io_threads() {
 }
 
 #[test]
-fn a_context_needs_an_io_thread() {
-    let err = Context::with_io_threads(0).unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+fn a_context_without_io_threads_refuses_tcp_and_ipc() {
+    let context = Context::with_io_threads(0).unwrap();
+    let mut pull = context.socket::<Pull>();
+    for endpoint in ["tcp://127.0.0.1:*", "ipc://*"] {
+        assert!(
+            matches!(pull.bind(endpoint), Err(zmq::Error::NoIoThread)),
+            "{endpoint}"
+        );
+    }
+    assert!(matches!(
+        pull.connect("ipc:///nowhere"),
+        Err(zmq::Error::NoIoThread)
+    ));
+    pull.bind("inproc://without-threads").unwrap();
 }
 
 #[test]

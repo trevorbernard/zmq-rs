@@ -967,7 +967,9 @@ impl<T: SocketType> Socket<T> {
         let endpoint = endpoint.written();
         let endpoint = &*endpoint;
         self.alive()?;
-        let (id, bound) = match endpoint::bind_target(endpoint)? {
+        let target = endpoint::bind_target(endpoint)?;
+        self.served(&target)?;
+        let (id, bound) = match target {
             Target::Tcp(addr) => self
                 .peers
                 .bind(addr)
@@ -1049,6 +1051,15 @@ impl<T: SocketType> Socket<T> {
         self.connect_key(&endpoint.written()).map(drop)
     }
 
+    /// Fails if `target` needs an I/O thread and the context has none.
+    fn served(&self, target: &Target) -> Result<(), Error> {
+        if matches!(target, Target::Inproc(_)) || self.peers.has_io_threads() {
+            Ok(())
+        } else {
+            Err(Error::NoIoThread)
+        }
+    }
+
     /// Connects to `endpoint` and returns the new peer, unless
     /// [`immediate`](SocketOptions::immediate) defers it.
     pub(crate) fn connect_key(
@@ -1057,6 +1068,7 @@ impl<T: SocketType> Socket<T> {
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
         self.alive()?;
         let target = endpoint::connect_target(endpoint)?;
+        self.served(&target)?;
         let (id, key) = match &target {
             Target::Tcp(addr) => self.peers.connect(*addr),
             Target::TcpHost { host, port, source } => self.peers.connect_host(host, *port, *source),

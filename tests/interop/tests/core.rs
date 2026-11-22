@@ -1,7 +1,6 @@
 //! zmq-core connections against libzmq and against a zmtp peer.
 
 use std::net::TcpListener;
-use std::num::NonZeroUsize;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
@@ -227,7 +226,7 @@ fn refused_connection_closes_the_pipes() {
 fn connections_spread_over_io_threads() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
-    let context = Context::with_io_threads(NonZeroUsize::new(3).unwrap()).unwrap();
+    let context = Context::with_io_threads(3).unwrap();
     let mut connections: Vec<Connection> = (0..6)
         .map(|i| context.connect(addr, dealer(&format!("c{i}"))))
         .collect();

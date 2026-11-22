@@ -135,7 +135,6 @@ mod socket;
 mod wait;
 
 use std::io;
-use std::num::NonZeroUsize;
 use std::time::Duration;
 
 #[cfg(feature = "draft")]
@@ -202,16 +201,10 @@ impl Context {
 
     /// A context with `threads` I/O threads (`ZMQ_IO_THREADS`). Each
     /// connection runs on one of them, chosen round robin, so more threads
-    /// help when many connections are busy at once. Fails with
-    /// `InvalidInput` for 0: libzmq allows none in a context used only for
-    /// `inproc`, but here every context runs at least one.
+    /// help when many connections are busy at once. With 0, as in libzmq,
+    /// the context serves `inproc` alone: binding or connecting over
+    /// `tcp` or `ipc` fails with [`Error::NoIoThread`].
     pub fn with_io_threads(threads: usize) -> io::Result<Self> {
-        let threads = NonZeroUsize::new(threads).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "a context needs at least one I/O thread",
-            )
-        })?;
         Ok(Self {
             core: zmq_core::Context::with_io_threads(threads)?,
         })

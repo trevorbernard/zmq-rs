@@ -27,6 +27,9 @@ pub enum Error {
     /// Another peer of the socket has that routing id, for
     /// [`Socket::connect_with_routing_id`](crate::Socket::connect_with_routing_id).
     RoutingIdInUse,
+    /// The context has no I/O thread, so only `inproc` can be bound or
+    /// connected to (libzmq's `EMTHREAD`).
+    NoIoThread,
 }
 
 impl From<crate::Terminated> for Error {
@@ -363,6 +366,7 @@ impl fmt::Display for Error {
             }
             Self::Terminated => crate::Terminated.fmt(f),
             Self::RoutingIdInUse => f.write_str("another peer has that routing id"),
+            Self::NoIoThread => f.write_str("the context has no I/O thread"),
         }
     }
 }

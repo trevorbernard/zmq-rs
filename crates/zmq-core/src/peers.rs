@@ -367,6 +367,11 @@ impl Peers {
     }
 
     /// The configuration new connections use.
+    /// Whether the context has an I/O thread for `tcp` and `ipc`.
+    pub fn has_io_threads(&self) -> bool {
+        self.context.has_io_threads()
+    }
+
     pub fn config_mut(&mut self) -> &mut ConnectionConfig {
         &mut self.config
     }
