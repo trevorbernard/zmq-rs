@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
+#[cfg(unix)]
+use crate::transport::set_backlog;
 use crate::transport::{Address, IpcCleanup, StreamListener, TcpTuning, listen_tcp};
 use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security, SocksProxy};
 
@@ -203,6 +205,9 @@ pub struct ConnectionConfig {
     /// What TCP sockets are given before they connect or listen, nothing
     /// by default.
     pub tcp: TcpTuning,
+    /// How many connections a listener holds for the socket to accept
+    /// (`ZMQ_BACKLOG`): 100 by default, as libzmq's.
+    pub backlog: u32,
     /// The SOCKS5 proxy TCP connections are made through
     /// (`ZMQ_SOCKS_PROXY`), none by default.
     pub socks_proxy: Option<SocksProxy>,
@@ -825,6 +830,7 @@ impl ConnectionConfig {
             heartbeat: None,
             tcp_keepalive: None,
             tcp: TcpTuning::default(),
+            backlog: 100,
             socks_proxy: None,
             reconnect_stop: ReconnectStop::default(),
             metadata: Metadata::new(),
@@ -863,7 +869,7 @@ impl Context {
     /// reported here, and accepts peers on an I/O thread. Accepted
     /// connections use `config`.
     pub fn bind(&self, addr: SocketAddr, config: ConnectionConfig) -> io::Result<Listener> {
-        let bound = listen_tcp(addr, &config.tcp).and_then(|listener| {
+        let bound = listen_tcp(addr, &config.tcp, config.backlog).and_then(|listener| {
             let local_addr = listener.local_addr()?;
             Ok((listener, local_addr))
         });
@@ -885,7 +891,11 @@ impl Context {
     #[cfg(unix)]
     pub fn bind_ipc(&self, path: &Path, config: ConnectionConfig) -> io::Result<IpcListener> {
         let endpoint = format!("ipc://{}", path.display());
-        let (listener, cleanup) = reported(crate::transport::bind_ipc(path), &config, &endpoint)?;
+        let bound = crate::transport::bind_ipc(path).and_then(|(listener, cleanup)| {
+            set_backlog(&listener, config.backlog)?;
+            Ok((listener, cleanup))
+        });
+        let (listener, cleanup) = reported(bound, &config, &endpoint)?;
         let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
             Some(cleanup),
@@ -903,8 +913,11 @@ impl Context {
     /// directory, for `ipc://*`. Both are removed when the listener closes.
     #[cfg(unix)]
     pub fn bind_ipc_anywhere(&self, config: ConnectionConfig) -> io::Result<IpcListener> {
-        let (listener, cleanup, path) =
-            reported(crate::transport::bind_ipc_anywhere(), &config, "ipc://*")?;
+        let bound = crate::transport::bind_ipc_anywhere().and_then(|(listener, cleanup, path)| {
+            set_backlog(&listener, config.backlog)?;
+            Ok((listener, cleanup, path))
+        });
+        let (listener, cleanup, path) = reported(bound, &config, "ipc://*")?;
         let endpoint = format!("ipc://{}", path.display());
         let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
@@ -930,11 +943,11 @@ impl Context {
         config: ConnectionConfig,
     ) -> io::Result<IpcAbstractListener> {
         let endpoint = format!("ipc://@{name}");
-        let listener = reported(
-            crate::transport::bind_ipc_abstract(name),
-            &config,
-            &endpoint,
-        )?;
+        let bound = crate::transport::bind_ipc_abstract(name).and_then(|listener| {
+            set_backlog(&listener, config.backlog)?;
+            Ok(listener)
+        });
+        let listener = reported(bound, &config, &endpoint)?;
         let (connections, closed) =
             self.listen(StreamListener::Unix(listener), None, endpoint, config);
         Ok(IpcAbstractListener {

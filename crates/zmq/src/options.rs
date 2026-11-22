@@ -51,6 +51,7 @@ pub struct SocketOptions {
     pub(crate) security: Security,
     pub(crate) heartbeat: Option<Heartbeat>,
     pub(crate) tcp_keepalive: Option<TcpKeepalive>,
+    pub(crate) backlog: u32,
     pub(crate) type_of_service: u8,
     pub(crate) bind_to_device: Option<String>,
     pub(crate) socks_proxy: Option<SocksProxy>,
@@ -75,6 +76,7 @@ impl Default for SocketOptions {
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            backlog: 100,
             type_of_service: 0,
             bind_to_device: None,
             socks_proxy: None,
@@ -197,6 +199,15 @@ impl SocketOptions {
     #[must_use]
     pub fn tcp_keepalive(mut self, keepalive: TcpKeepalive) -> Self {
         self.tcp_keepalive = Some(keepalive);
+        self
+    }
+
+    /// How many connections a `tcp` or `ipc` listener holds until the I/O
+    /// thread accepts them (`ZMQ_BACKLOG`): 100 by default, as libzmq's.
+    /// The system may hold fewer.
+    #[must_use]
+    pub fn backlog(mut self, backlog: u32) -> Self {
+        self.backlog = backlog;
         self
     }
 

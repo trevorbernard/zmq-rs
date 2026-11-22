@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
 | D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
 | D8 | An XPUB reports a cancel for a topic the peer never held | Ignores it |
 | D9 | Application metadata (`ZMQ_METADATA`) is announced sorted by name | Announced in the order added |
@@ -160,7 +159,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_LINGER` | `SocketOptions::linger`, `set_linger` | Same |
 | `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Same; Verified for 0 (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_RECONNECT_IVL_MAX` | `Reconnect::Backoff` | Same; Verified (`tests/interop/tests/reconnect.rs`) |
-| `ZMQ_BACKLOG` | | Gap; Divergence D5 |
+| `ZMQ_BACKLOG` | `SocketOptions::backlog`, `set_backlog` | Same; Verified (`tests/interop/tests/backlog.rs`) |
 | `ZMQ_MAXMSGSIZE` | `max_message_size` | Same; Verified (`tests/interop/tests/max_message_size.rs`) |
 | No limit on a message's frames together, so one of endless `MORE` frames is held without bound (GHSA-h9gj-c9m7-qxqm) | `max_multipart_size`, off by default | zmq-rs only |
 | `ZMQ_SNDHWM`, `ZMQ_RCVHWM` | `send_hwm`, `recv_hwm` and their setters | Same |

@@ -767,6 +767,7 @@ impl<T: SocketType> Socket<T> {
                 bind_to_device: options.bind_to_device,
                 busy_poll: None,
             },
+            backlog: options.backlog,
             socks_proxy: options.socks_proxy.map(|proxy| proxy.0),
             handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
@@ -870,6 +871,12 @@ impl<T: SocketType> Socket<T> {
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_tcp_keepalive(&mut self, keepalive: crate::TcpKeepalive) {
         self.peers.config_mut().tcp_keepalive = Some(keepalive);
+    }
+
+    /// Changes [`SocketOptions::backlog`] for binds made from now on. Those
+    /// already made keep what they had, as in libzmq.
+    pub fn set_backlog(&mut self, backlog: u32) {
+        self.peers.config_mut().backlog = backlog;
     }
 
     /// Changes [`SocketOptions::type_of_service`] for binds and connects made from
