@@ -2,6 +2,7 @@
 
 - Crates, and which file holds each piece: `docs/architecture.md`
 - Every source file opens with a `//!` summary: `head -n3 crates/<crate>/src/*.rs`
+- libzmq Gaps, Divergences, Exceptions and Exclusions: `docs/libzmq-compatibility.md` (the only list; terms in `GLOSSARY.md`, rule in `docs/adr/0001-libzmq-behaviour-wins.md`)
 - Spec coverage: `docs/rfc-compliance.md`. Benchmarks: `docs/benchmarks.md`
 - Tests:
   - unit: inline `mod tests` (zmq-core has no `tests/` dir)
