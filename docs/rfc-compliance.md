@@ -1,9 +1,14 @@
 # RFC compliance
 
-This port targets wire compatibility with libzmq (the reference implementation)
+This port targets compatibility with libzmq (the reference implementation)
 and conformance with the ZeroMQ RFCs at <https://rfc.zeromq.org/>. Where libzmq
-and an RFC disagree, **interop with libzmq wins on what we accept**, and **the
-RFC wins on what we send**, unless noted.
+and an RFC disagree, **libzmq's observable behaviour wins**, and the RFC decides
+what we send only where libzmq handles the RFC's form as it handles its own
+([ADR 0001](adr/0001-libzmq-behaviour-wins.md)).
+
+This document explains how each RFC is met. Whether a libzmq behaviour is
+matched, missing, or differs here, and whether that is to change, is recorded
+in [libzmq-compatibility.md](libzmq-compatibility.md) and nowhere else.
 
 Each section lists the normative requirements, the libzmq behaviour we must
 match, and the resulting design decision. libzmq paths refer to `src/` in the
@@ -21,7 +26,7 @@ libzmq repository.
 | 25 / 26 | ZMTP-CURVE / CurveZMQ | stable | yes |
 | 27 | ZAP | stable | yes (in-process trait, see below) |
 | 32 | Z85 | stable | yes |
-| 38 | ZMTP-GSSAPI | draft | later |
+| 38 | ZMTP-GSSAPI | draft | not planned |
 | 28 | REQREP | stable | yes |
 | 29 | PUBSUB | stable | yes |
 | 30 | PIPELINE | stable | yes |
@@ -59,10 +64,10 @@ Protocols built on top of ZeroMQ (MDP, ZRE, FILEMQ, ...) are out of scope.
 **Design:** an incremental, sans-IO greeting parser yields
 
 ```rust
-enum NegotiatedVersion { V1 { peer_identity_len: u64 }, V2 { peer_socket_type: u8 }, V3_0, V3_1 }
+enum Version { V1, V2, V3_0, V3_1 }
 ```
 
-which selects a `Codec` (`V1 | V2 | V3_0 | V3_1`). The codec owns both frame
+(`zmtp::Version`), which selects a codec. The codec owns both frame
 encoding and the wire form of subscriptions.
 
 ### Downgrade security
@@ -72,9 +77,9 @@ encoding and the wire form of subscriptions.
 
 **Design:** the handshake state machine has no transition from a legacy
 version to a non-NULL mechanism, so a downgraded connection can only ever run
-NULL. Old peers are also refused when NULL has ZAP configured. Downgrade is
-on by default, as in libzmq, behind a `legacy_peers` option that can switch it
-off.
+NULL. Old peers are also refused when NULL has ZAP configured. A NULL socket
+without ZAP always accepts them, as libzmq's does: no option switches
+downgrade off.
 
 ### Framing
 
@@ -87,7 +92,7 @@ off.
 - libzmq deviation: its V2/V3 decoder ignores reserved bits and accepts MORE on commands.
 
 **Design:**
-- Decode leniently by default, as libzmq does, with an optional strict mode. Encode strictly.
+- Decode leniently, as libzmq does. Encode strictly.
 - Always reject a size of 2^63 or more, enforce `max_msg_size` before allocating, and reject a V1 length of 0.
 - `zmtp::Frame` and `zmtp::Command` are distinct types.
 
@@ -284,7 +289,7 @@ prefixes are `WELCOME-`, `COOKIE--` and `VOUCH---`.
   - The request's identity frame is the server socket's own identity (`ZapRequest::identity`), not the connecting peer's as RFC 27 can be read to say (libzmq [#4161](https://github.com/zeromq/libzmq/issues/4161)).
 
 **Design:**
-- `Authenticator` is a Rust trait: `authenticate(&self, ZapRequest, ZapResponder)`. The responder may answer at once or later from any thread, so authentication never has to block an I/O thread; a responder dropped unanswered counts as status 500. A closure `Fn(&ZapRequest) -> ZapReply` implements it for the synchronous case. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. An optional adapter can bind the RFC's inproc endpoint for existing handlers.
+- `Authenticator` is a Rust trait: `authenticate(&self, ZapRequest, ZapResponder)`. The responder may answer at once or later from any thread, so authentication never has to block an I/O thread; a responder dropped unanswered counts as status 500. A closure `Fn(&ZapRequest) -> ZapReply` implements it for the synchronous case. `ZapReply::Ok { user_id, metadata }` is the only variant that carries those fields. Nothing binds the RFC's inproc endpoint yet, so a handler written for libzmq's ZAP socket cannot be used as it is.
 - NULL with ZAP is `Security::null_authenticated(domain, authenticator)`: before sending READY, the socket asks the authenticator about the peer (`ZapCredentials::Null`, its address), as libzmq does for a NULL socket with a ZAP domain. Success sends READY and records the user id; 400 and 500 send ERROR, and 300 closes silently. ZMTP 1.0 and 2.0 peers are refused at the greeting, as libzmq refuses them whenever ZAP is in use. Verified against libzmq both ways, its ZAP handler included.
 - CURVE with ZAP is `Security::curve_server_authenticated`; see CURVE above.
 - **A single function maps `ZapStatus` to READY, a silent close, or ERROR, and every mechanism goes through it.** libzmq commit ba63f037 fixed a GSSAPI bug where READY was sent despite a rejection; this design rules that bug out.
@@ -308,7 +313,7 @@ Rules shared by every pattern:
 - Messages are never modified.
 - HWM is checked per **message**, not per frame.
 - A `Message` must contain at least one frame, and an empty frame is valid. ROUTER and REP traffic relies on empty delimiter frames.
-- Receive timeouts (`ZMQ_RCVTIMEO`) are per call, not a socket option: every blocking `recv` has a `recv_timeout(Duration)` beside it returning `None` on timeout, as does `Monitor::recv_timeout`. libzmq's `-1`, `0` and `N` map to `recv`, `try_recv` and `recv_timeout`. `recv` stays infallible, and each call site shows how long it may block. Async code races `recv_async` against its executor's timer.
+- Receive timeouts (`ZMQ_RCVTIMEO`) are per call, not a socket option: every blocking `recv` has a `recv_timeout(Duration)` beside it returning `None` on timeout, as does `Monitor::recv_timeout`. libzmq's `-1`, `0` and `N` map to `recv`, `try_recv` and `recv_timeout`. `recv` fails only with `Terminated`, and each call site shows how long it may block. Async code races `recv_async` against its executor's timer.
 - Send timeouts (`ZMQ_SNDTIMEO`) are per call too: every blocking `send` has a `send_timeout` beside it (`send_all_timeout` for `XPUB_NODROP`) returning what that socket's `try_send` returns, so `try_send` is `send_timeout` with a zero timeout. On timeout the message is handed back: `Err(message)`, or `Full(message)` for ROUTER, SERVER and PEER, which still report an unknown peer at once. REQ's `request_timeout` covers waiting for room.
 
 ### REQREP (RFC 28)
@@ -340,7 +345,7 @@ Rules shared by every pattern:
   - A dropped `request_async` future leaves the socket in relaxed mode: the next request is allowed, and the late reply is filtered out by pipe and, when `correlate` is on, by request id.
   - `request_timeout` is the exception: it turns `correlate` on for good, since calling it asks for abandonment, where dropping a future may be accidental. A ROUTER application serving the REQ then sees the request id frame; REP peers do not notice.
 - Dropping a REP `Request` without replying is allowed by the RFC, but the REQ peer then stalls. This is documented on `Request`.
-- Two deliberate differences from libzmq's REQ:
+- Three deliberate differences from libzmq's REQ:
   - A reply without a delimiter is dropped and the wait continues; libzmq drops the connection.
   - If the asked peer's connection closes before replying, `request` fails with `RequestError::PeerGone`; libzmq waits forever.
   - After `request_timeout` gives up (`RequestError::TimedOut`), the socket takes a new request at once. libzmq's REQ is stuck after `ZMQ_RCVTIMEO` (EFSM) unless `ZMQ_REQ_RELAXED` is set.
@@ -397,7 +402,7 @@ Rules shared by every pattern:
 **`unbind` and `disconnect`** (`zmq_unbind`, `zmq_disconnect`): each undoes a bind or connect, closing its listener or ending its retries, and drops the peers that came through it. As in libzmq, what those peers sent is discarded and what was queued to them is delivered within the linger. Differences:
 - `unbind` returns once the I/O thread has closed the listener, so the address can be bound again at once; libzmq closes it in the background.
 - `unbind` of an `inproc` name also closes the connections accepted on it, as for TCP and IPC; libzmq frees only the name.
-- A TCP `connect` to a host name only checks that it looks like one, and resolves it on the I/O thread for each connection attempt, as libzmq does: `connect` neither waits on DNS nor fails on it, a name that does not resolve yet is retried like a refused connection, and a reconnect follows the name to a new address. `bind` takes `*`, an address or an interface name such as `tcp://eth0:5555`, as libzmq does, the interface's IPv4 address if it has one; it also takes a host name, as libzmq's does, resolved at once, and one that does not resolve is `InvalidEndpoint` (libzmq's `EINVAL`).
+- A TCP `connect` to a host name only checks that it looks like one, and resolves it on the I/O thread for each connection attempt, as libzmq does: `connect` neither waits on DNS nor fails on it, a name that does not resolve yet is retried like a refused connection, and a reconnect follows the name to a new address. `bind` takes `*`, an address or an interface name such as `tcp://eth0:5555`, as libzmq does, the interface's IPv4 address if it has one; it also takes a host name, as libzmq's does, resolved at once, and one that does not resolve is `InvalidEndpoint` (libzmq's `ENODEV`).
 - `connect` takes libzmq's `tcp://source;host:port`: the connection is made from `source`, `*`, an address or an interface name with a port (`*` for any), bound with `SO_REUSEADDR` before connecting as libzmq does. As in libzmq, a source is never a host name, so nothing is looked up for it. libzmq resolves the source only when it connects, so its `connect` accepts one it cannot resolve, such as a host name, and then never connects; ours resolves it at once, and that is `InvalidEndpoint`.
 - TCP sockets are given, before they connect or listen, as libzmq's `tcp_open_socket` gives them: `SocketOptions::type_of_service` (`ZMQ_TOS`), also set on each accepted connection; `SocketOptions::bind_to_device` (`ZMQ_BINDTODEVICE`, Linux and Android only); and, with the `draft` feature, `Socket::set_busy_poll` (`ZMQ_BUSY_POLL`, Linux only). As in libzmq, a device the socket cannot be bound to fails a bind, and each attempt of a connect, which keeps retrying. Failing to set the type of service or busy polling is ignored, where libzmq aborts. `ZMQ_TOS` cannot be read back: it is a field of the options. libzmq's draft `ZMQ_PRIORITY` (`SO_PRIORITY`) is not provided.
 - `SocketOptions::socks_proxy` (`ZMQ_SOCKS_PROXY`) makes TCP connections through a SOCKS5 proxy (RFC 1928), as libzmq's `socks_connecter_t` does. `SocksProxy::new` takes libzmq's `host:port`, or `source;host:port` to reach the proxy from a source address; `with_credentials`, with the `draft` feature, is libzmq's draft `ZMQ_SOCKS_USERNAME` and `ZMQ_SOCKS_PASSWORD` (RFC 1929).
@@ -438,7 +443,7 @@ failure.
 - Single-part only. Received multipart messages MUST be discarded, and the peer MAY be disconnected.
 - **SERVER and PEER**
   - The routing id is a local, non-zero u32 assigned by us, never by the peer. libzmq starts it at a random value and increments.
-  - Unknown id → `HostUnreachable`. Full queue → block, or `WouldBlock` for a non-blocking send.
+  - Unknown id → `UnknownPeer` (libzmq's `EHOSTUNREACH`). Full queue → block, or `Full` for a non-blocking send (`EAGAIN`).
   - `connect_peer` returns the id synchronously.
 - **CLIENT and SCATTER** round-robin and never drop. **GATHER** fair-queues.
 
@@ -452,7 +457,7 @@ failure.
 - `Socket<Dish>` joins and leaves groups (`false` for a second join, or leaving one not joined, as libzmq refuses them), and receives `(Group, Frame)`. It filters what arrives, so messages queued before a leave are dropped. A join is never dropped: it goes to peers past the HWM.
 - On the wire, messages are `group (MORE) | body` and membership changes are JOIN and LEAVE commands, whatever the ZMTP 3.x version, as libzmq's DISH sends them. Inside the process, DISH writes `zmtp::Membership` in a `0x01`/`0x00` message form, as SUB does subscriptions; engines convert, and a session replays its groups after reconnecting.
 - The interop tests drive libzmq's RADIO and DISH through its draft API (`zmq_join`, `zmq_msg_set_group`, `zmq_msg_group`), looked up at run time: a libzmq without drafts exports them only under C++-mangled names.
-- Not supported: UDP, RADIO/DISH's other transport.
+- UDP, RADIO/DISH's other transport, is not there yet.
 
 **Done (SCATTER and GATHER):**
 - `Socket<Scatter>` load-balances single frames to its GATHER peers and waits while none has room, as PUSH does; `Socket<Gather>` fair-queues them, as PULL does, and drops multipart messages. Sending a multipart message does not compile.
@@ -461,11 +466,10 @@ failure.
 **Done (PEER and CHANNEL):**
 - `Socket<Peer>` routes as SERVER does, by the `PeerId` it gives every peer, connected or accepted. `connect_peer(endpoint)` returns the new peer's id at once, as libzmq's `zmq_connect_peer` does, so messages to it queue before the connection is up. `send`, `try_send` (`SendError`), `recv` and `disconnect_peer` mirror SERVER's.
 - `Socket<Channel>` is PAIR in single frames: the first peer is the one, and multipart messages received are dropped.
-- Not supported: libzmq's `ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG` and `ZMQ_HICCUP_MSG` options for PEER.
 - Verified against libzmq's PEER both ways and its CHANNEL.
 - **CHANNEL** has a single peer.
 - **RADIO**
-  - Silently drops when full, and never blocks unless `no_drop` is set.
+  - Silently drops when full, and never blocks.
   - Never delivers JOIN or LEAVE to the application.
 - **DISH**
   - Filters by exact match. Joining the same group twice or leaving an unjoined group is an error.
@@ -478,10 +482,8 @@ failure.
   - Over UDP: a datagram `u8 group_len | group | body`, at most 8192 octets. RADIO only connects and DISH only binds.
 
 **Design:**
-- `RoutingId` for SERVER and PEER is `NonZeroU32` (a separate type from the ROUTER identity).
+- SERVER's `ClientId` and PEER's `PeerId` each hold a `NonZeroU32` (separate types from the ROUTER identity).
 - `Group::new` is fallible.
-- A UDP RADIO send over 8192 octets returns `TooLarge` instead of being silently dropped.
-- A sealed `CompatiblePeer` trait encodes the pairing table.
 
 ## ZWS (RFC 45), not planned
 
