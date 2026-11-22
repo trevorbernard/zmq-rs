@@ -60,6 +60,7 @@ unsafe extern "C" {
     ) -> c_int;
     fn zmq_bind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_connect(socket: *mut c_void, endpoint: *const c_char) -> c_int;
+    fn zmq_unbind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_send(socket: *mut c_void, buf: *const c_void, len: usize, flags: c_int) -> c_int;
     fn zmq_msg_init(msg: *mut RawMsg) -> c_int;
     fn zmq_msg_recv(msg: *mut RawMsg, socket: *mut c_void, flags: c_int) -> c_int;
@@ -376,6 +377,14 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+    }
+
+    /// Unbinds from `endpoint`, as bound.
+    pub fn unbind(&self, endpoint: &str) {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_unbind(self.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_unbind({endpoint}): {err}"));
     }
 
     /// Binds to `endpoint`, or says why libzmq would not.

@@ -521,6 +521,15 @@ impl Peers {
         }
     }
 
+    /// Undoes the bind of an `inproc` name as libzmq's `zmq_unbind` does:
+    /// the name is free to bind again, and the connections made to it
+    /// stay.
+    pub fn unbind_inproc(&mut self, endpoint: EndpointId) {
+        // Those not yet taken from the listener are connections too.
+        self.accept(&mut noop_context());
+        self.listeners.retain(|(made_by, _)| *made_by != endpoint);
+    }
+
     /// A new monitor of this socket's events, from now on.
     pub fn monitor(&self) -> crate::Monitor {
         self.config.monitor.monitor()

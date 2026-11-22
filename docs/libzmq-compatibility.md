@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D14 | `zmq_unbind` of an `inproc` name frees the name only | Also closes the connections accepted on it |
 | D15 | A ZMTP 2.0 peer's socket-type octet is not checked | Checked, and a mismatch refused |
 | D16 | An XSUB's send and an XPUB's receive read a subscription from any frame of a message, unless `ZMQ_ONLY_FIRST_SUBSCRIBE` | Read one only from a single-frame message; no option |
 | D17 | A disconnect stops reconnection only with `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` | Always |
@@ -222,7 +221,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_ctx_term`, `zmq_ctx_destroy`, `zmq_term`, `zmq_ctx_shutdown` | Drop, `Context::shutdown` | Exception (API shape) |
 | `zmq_socket` | `Context::socket`, `socket_with` | Same; Divergence D19 |
 | `zmq_close` | Drop | Same |
-| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Divergence D14 |
+| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`) |
 | `zmq_send`, `zmq_recv`, `zmq_msg_send`, `zmq_msg_recv`, `zmq_send_const` | `send`, `recv`, their `try_`, `_timeout` and `_async` forms | Same |
 | `zmq_sendiov`, `zmq_recviov` | | N/A |
 | `zmq_msg_init*`, `_close`, `_move`, `_copy`, `_data`, `_size` | `Frame`, `Message` | Same |

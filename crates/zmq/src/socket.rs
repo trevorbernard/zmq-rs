@@ -998,7 +998,8 @@ impl<T: SocketType> Socket<T> {
     /// Stops listening on `endpoint`, as libzmq's `zmq_unbind`, and closes
     /// the connections accepted there. What those peers sent is discarded;
     /// what was queued to them is still delivered within the
-    /// [`linger`](SocketOptions::linger).
+    /// [`linger`](SocketOptions::linger). An `inproc` name's connections
+    /// stay, as in libzmq: only the name is freed.
     ///
     /// `endpoint` is as [`bind`](Self::bind) took it or as it returned it:
     /// `tcp://*:5555` and `tcp://0.0.0.0:5555` are the same bind, but a
@@ -1013,15 +1014,20 @@ impl<T: SocketType> Socket<T> {
         self.bound.retain(|(bound, id)| {
             let keep = Some(bound) != wanted.as_ref();
             if !keep {
-                found.push(*id);
+                found.push((matches!(bound, Endpoint::Inproc(_)), *id));
             }
             keep
         });
         if found.is_empty() {
             return Err(Error::UnknownEndpoint(endpoint.to_owned()));
         }
-        for id in found {
-            self.peers.close(id);
+        for (inproc, id) in found {
+            if inproc {
+                self.peers.unbind_inproc(id);
+                self.routing.connected(self.peers.list_mut());
+            } else {
+                self.peers.close(id);
+            }
         }
         Ok(())
     }
