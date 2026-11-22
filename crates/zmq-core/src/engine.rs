@@ -346,7 +346,7 @@ impl Engine {
         };
         let encoder = *encoder;
         let ping = Command::Ping(Ping {
-            ttl: Ttl::from_duration(heartbeat.ttl),
+            ttl: heartbeat.ttl,
             context: PingContext::default(),
         });
         let mut body = Vec::new();

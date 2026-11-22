@@ -278,12 +278,6 @@ impl Ttl {
         Self(deciseconds)
     }
 
-    /// Rounds `duration` up to whole deciseconds, saturating at the maximum.
-    pub fn from_duration(duration: Duration) -> Self {
-        let deciseconds = duration.as_nanos().div_ceil(DECISECOND_NANOS);
-        Self(u16::try_from(deciseconds).unwrap_or(u16::MAX))
-    }
-
     /// Tenths of a second.
     #[must_use]
     pub const fn deciseconds(self) -> u16 {
@@ -294,6 +288,31 @@ impl Ttl {
     #[must_use]
     pub fn to_duration(self) -> Duration {
         Duration::from_millis(u64::from(self.0) * 100)
+    }
+}
+
+/// A duration too long for a [`Ttl`], which holds at most 6553.5 seconds.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TtlTooLong;
+
+impl fmt::Display for TtlTooLong {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a heartbeat TTL is at most 6553.5 seconds")
+    }
+}
+
+impl std::error::Error for TtlTooLong {}
+
+/// Whole deciseconds of `duration`, what is left over dropped, as libzmq
+/// takes `ZMQ_HEARTBEAT_TTL`: under 100 ms is no time-to-live at all.
+/// Fails past the most a PING can carry, libzmq's `EINVAL`.
+impl TryFrom<Duration> for Ttl {
+    type Error = TtlTooLong;
+
+    fn try_from(duration: Duration) -> Result<Self, TtlTooLong> {
+        u16::try_from(duration.as_nanos() / DECISECOND_NANOS)
+            .map(Self)
+            .map_err(|_| TtlTooLong)
     }
 }
 
@@ -741,23 +760,14 @@ mod tests {
             Ttl::from_deciseconds(u16::MAX).to_duration(),
             Duration::from_millis(6_553_500)
         );
-        assert_eq!(Ttl::from_duration(Duration::ZERO), Ttl::ZERO);
-        assert_eq!(
-            Ttl::from_duration(Duration::from_millis(50)).deciseconds(),
-            1
-        );
-        assert_eq!(
-            Ttl::from_duration(Duration::from_millis(100)).deciseconds(),
-            1
-        );
-        assert_eq!(
-            Ttl::from_duration(Duration::from_millis(101)).deciseconds(),
-            2
-        );
-        assert_eq!(
-            Ttl::from_duration(Duration::from_secs(1 << 40)).deciseconds(),
-            u16::MAX
-        );
+        let ttl = |millis| Ttl::try_from(Duration::from_millis(millis));
+        assert_eq!(ttl(0), Ok(Ttl::ZERO));
+        assert_eq!(ttl(99), Ok(Ttl::ZERO), "as libzmq truncates");
+        assert_eq!(ttl(100), Ok(Ttl::from_deciseconds(1)));
+        assert_eq!(ttl(199), Ok(Ttl::from_deciseconds(1)));
+        assert_eq!(ttl(6_553_599), Ok(Ttl::from_deciseconds(u16::MAX)));
+        assert_eq!(ttl(6_553_600), Err(TtlTooLong), "libzmq's EINVAL");
+        assert_eq!(Ttl::try_from(Duration::MAX), Err(TtlTooLong));
     }
 
     #[test]

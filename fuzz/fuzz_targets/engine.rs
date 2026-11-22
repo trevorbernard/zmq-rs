@@ -76,7 +76,7 @@ impl From<u8> for Setup {
             heartbeat: (octet & 0x80 != 0).then(|| Heartbeat {
                 interval: Duration::from_millis(1),
                 timeout: Duration::from_millis(20),
-                ttl: Duration::from_millis(100),
+                ttl: zmq::Ttl::from_deciseconds(1),
             }),
         }
     }

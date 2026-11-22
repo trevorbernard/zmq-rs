@@ -340,6 +340,21 @@ impl Socket {
         Monitor(pair)
     }
 
+    /// Sets `ZMQ_HEARTBEAT_TTL` to `millis`, or says why libzmq would not.
+    pub fn try_set_heartbeat_ttl(&self, millis: i32) -> io::Result<()> {
+        let value = millis.to_ne_bytes();
+        // SAFETY: `value` is valid for its four octets for the call.
+        check(unsafe {
+            zmq_setsockopt(
+                self.raw.as_ptr(),
+                ZMQ_HEARTBEAT_TTL,
+                value.as_ptr().cast(),
+                value.len(),
+            )
+        })
+        .map(drop)
+    }
+
     /// The ZAP domain this server authenticates in.
     pub fn set_zap_domain(&self, domain: &[u8]) {
         self.set_bytes(ZMQ_ZAP_DOMAIN, domain);

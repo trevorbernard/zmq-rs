@@ -3,7 +3,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Heartbeat, Linger, Message, Pull, Push, Reconnect, SocketOptions};
+use zmq::{Context, Heartbeat, Linger, Message, Pull, Push, Reconnect, SocketOptions, Ttl};
 use zmq_test_ports::free_endpoint;
 
 const FIVE: Duration = Duration::from_secs(5);
@@ -15,7 +15,7 @@ fn forever() -> SocketOptions {
         .heartbeat(Heartbeat {
             interval: Duration::MAX,
             timeout: Duration::MAX,
-            ttl: Duration::MAX,
+            ttl: Ttl::from_deciseconds(u16::MAX),
         })
         .reconnect(Reconnect::Backoff {
             initial: Duration::MAX,

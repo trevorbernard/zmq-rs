@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D12 | `ZMQ_HEARTBEAT_TTL` is truncated to deciseconds, and `EINVAL` above the maximum | Rounded up, and saturating |
 | D13 | `zmq_connect_peer` is refused under `ZMQ_IMMEDIATE` | `IMMEDIATE` is ignored |
 | D14 | `zmq_unbind` of an `inproc` name frees the name only | Also closes the connections accepted on it |
 | D15 | A ZMTP 2.0 peer's socket-type octet is not checked | Checked, and a mismatch refused |
@@ -184,7 +183,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_XPUB_WELCOME_MSG` | `set_welcome` on XPUB | Same; Gap on PUB |
 | `ZMQ_INVERT_MATCHING` | `set_invert_matching` | Same |
 | `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Same; Verified for 0 (`tests/interop/tests/heartbeat.rs`) |
-| `ZMQ_HEARTBEAT_TTL` | `Heartbeat::ttl` | Divergence D12 |
+| `ZMQ_HEARTBEAT_TTL` | `Heartbeat::ttl`, a `Ttl` | Same; Verified (`tests/interop/tests/heartbeat.rs`) |
 | `ZMQ_CONNECT_TIMEOUT` | | Gap |
 | `ZMQ_TCP_MAXRT` | | Gap |
 | `ZMQ_THREAD_SAFE` | | N/A |

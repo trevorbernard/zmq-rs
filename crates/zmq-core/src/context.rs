@@ -16,7 +16,7 @@ use atomic_waker::AtomicWaker;
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
 use zmtp::{
     Established, Frame, Identity, InvalidName, Message, MessageMetadata, Metadata, PropertyName,
-    SocketType, Version,
+    SocketType, Ttl, Version,
 };
 
 #[cfg(unix)]
@@ -295,8 +295,10 @@ pub struct Heartbeat {
     /// connection. Zero never gives up, as libzmq's 0.
     pub timeout: Duration,
     /// How long the peer should wait for traffic from us before giving up,
-    /// announced in each PING. Zero announces none.
-    pub ttl: Duration,
+    /// announced in each PING, in tenths of a second: `Ttl::try_from` a
+    /// `Duration` takes its whole ones and refuses more than a PING can
+    /// carry, as libzmq does. Zero announces none.
+    pub ttl: Ttl,
 }
 
 impl Heartbeat {
@@ -306,7 +308,7 @@ impl Heartbeat {
         Self {
             interval,
             timeout: interval,
-            ttl: Duration::ZERO,
+            ttl: Ttl::ZERO,
         }
     }
 }

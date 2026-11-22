@@ -169,7 +169,7 @@ pub use zmtp::z85::Z85Error;
 pub use zmtp::{
     Credential, EmptyMessage, Frame, Identity, InvalidIdentity, InvalidName, KeyError, Keypair,
     Message, MessageMetadata, Metadata, PlainCredentials, PropertyName, PublicKey, SecretKey,
-    TooLong, ZapCredentials, ZapReply, ZapRequest,
+    TooLong, Ttl, TtlTooLong, ZapCredentials, ZapReply, ZapRequest,
 };
 #[cfg(feature = "draft")]
 #[doc(inline)]
