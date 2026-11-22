@@ -361,3 +361,29 @@ fn a_probing_libzmq_router_greets_our_dealer() {
         .expect("probed within 5 s");
     assert_eq!(received, Message::new(Frame::new()));
 }
+
+#[test]
+fn libzmq_announces_an_identity_starting_with_a_zero_octet() {
+    let context = Context::new().unwrap();
+    let mut router = context.socket::<Router>();
+    let addr = router.bind(free_endpoint()).unwrap();
+    let dealer = Socket::new(Kind::Dealer);
+    dealer.set_routing_id(b"\0lib");
+    dealer.connect(addr);
+    dealer.send(&[b"hello"]).unwrap();
+    let (from, message) = within(Duration::from_secs(5), move || router.recv().unwrap());
+    assert_eq!(from.as_bytes(), b"\0lib");
+    assert_eq!(message, Message::from("hello"));
+}
+
+#[test]
+fn we_announce_an_identity_starting_with_a_zero_octet() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let identity = Identity::new(&b"\0ours"[..]).expect("as libzmq takes it");
+    let mut dealer = context.socket_with::<Dealer>(SocketOptions::new().identity(identity));
+    dealer.connect(format!("tcp://{addr}")).unwrap();
+    dealer.send("hello").unwrap();
+    assert_eq!(router.recv().unwrap(), [&b"\0ours"[..], b"hello"]);
+}

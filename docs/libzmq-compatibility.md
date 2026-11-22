@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
 | D8 | An XPUB reports a cancel for a topic the peer never held | Ignores it |
 | D9 | Application metadata (`ZMQ_METADATA`) is announced sorted by name | Announced in the order added |
 | D10 | A context may have no I/O threads, for `inproc` alone | Refused |
@@ -149,7 +148,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | libzmq | zmq-rs | Status |
 |---|---|---|
 | `ZMQ_AFFINITY` | | Gap |
-| `ZMQ_ROUTING_ID` (`ZMQ_IDENTITY`) | `SocketOptions::identity`, `set_identity` | Divergence D6 |
+| `ZMQ_ROUTING_ID` (`ZMQ_IDENTITY`) | `SocketOptions::identity`, `set_identity` | Same; Verified for a leading zero octet (`tests/interop/tests/router.rs`). An empty one, libzmq's `EINVAL`, is accepted as none |
 | `ZMQ_SUBSCRIBE`, `ZMQ_UNSUBSCRIBE` | `subscribe`, `unsubscribe` | Same |
 | `ZMQ_SNDBUF`, `ZMQ_RCVBUF` | | Gap |
 | `ZMQ_RCVMORE` | | Exception (API shape) |

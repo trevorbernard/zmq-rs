@@ -173,10 +173,10 @@ with both. Messages flow only after READY has been both sent and received.
 
 - The Identity property is 0..255 octets. It is meaningful only from REQ, DEALER or ROUTER towards a ROUTER.
 - RFC 37: the first octet SHALL NOT be `00`, which is reserved.
-- libzmq accepts a leading `00` from peers. For an empty identity, ROUTER auto-assigns `00 + u32`.
+- libzmq accepts a leading `00` from peers, and as its own `ZMQ_ROUTING_ID`. For an empty identity, ROUTER auto-assigns `00 + u32`.
 
 **Design:**
-- `RoutingId` is non-empty and at most 255 octets. A local routing id may not start with `00`.
+- `RoutingId` is non-empty and at most 255 octets. `Identity`, what a socket announces, is at most 255 octets of any value, as libzmq's, and empty for none.
 - Peer identities with a leading `00` are accepted.
 - Auto-assigned ids are a distinct internal variant.
 
