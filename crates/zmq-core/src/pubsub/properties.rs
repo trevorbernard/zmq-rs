@@ -248,6 +248,10 @@ impl Model {
         }
         if self.peers[i].topics.remove(&topic) {
             self.drop_subscriber(i, topic);
+        } else {
+            // As libzmq: a cancel of a topic the peer does not hold is
+            // reported, whoever else holds it.
+            self.event(i, XPubEvent::Cancel(Frame::from(topic)));
         }
     }
 

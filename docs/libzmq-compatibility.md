@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D8 | An XPUB reports a cancel for a topic the peer never held | Ignores it |
 | D9 | Application metadata (`ZMQ_METADATA`) is announced sorted by name | Announced in the order added |
 | D10 | A context may have no I/O threads, for `inproc` alone | Refused |
 | D11 | `inproc` pairs any two socket types | Refuses a pair RFC 23 does not allow |

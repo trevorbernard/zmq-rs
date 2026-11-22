@@ -630,6 +630,9 @@ impl Changes<'_> {
             return;
         }
         if !peer.topics.remove(&topic) {
+            // Reported, as libzmq does when its trie has no such topic for
+            // the peer, whether or not another peer holds it.
+            self.event(XPubEvent::Cancel(topic));
             return;
         }
         if leave(self.index, &topic, self.key()) || self.verbosity == Verbosity::Everything {
@@ -997,12 +1000,12 @@ mod tests {
     }
 
     #[test]
-    fn xpub_ignores_cancels_for_topics_never_subscribed() {
+    fn xpub_reports_cancels_for_topics_never_subscribed() {
         let (a, mut sa) = connection(10);
         let mut peers = list(vec![a]);
         let mut publisher = Publisher::with_events();
         sa.to_socket.try_send(cancel("x")).unwrap();
-        assert_eq!(events(&mut publisher, &mut peers), []);
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("x")]);
     }
 
     #[test]
@@ -1013,7 +1016,11 @@ mod tests {
         let mut publisher = Publisher::with_events();
         sa.to_socket.try_send(subscribe("x")).unwrap();
         sb.to_socket.try_send(cancel("x")).unwrap();
-        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+        // Reported, as libzmq reports it, but the subscription stands.
+        assert_eq!(
+            events(&mut publisher, &mut peers),
+            [subscribed("x"), cancelled("x")]
+        );
         assert_eq!(publisher.send(&mut peers, msg("x")), 1);
         assert_eq!(drain(&mut sa), [msg("x")]);
     }

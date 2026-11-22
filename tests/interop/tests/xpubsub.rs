@@ -5,8 +5,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{Context, Frame, Message, XPub, XPubEvent, XSub};
+use zmq_interop::Peer;
 use zmq_interop::libzmq::{Kind, Socket};
 use zmq_test_ports::free_endpoint;
+use zmtp::{Command, SocketType};
 
 const FIVE: Duration = Duration::from_secs(5);
 
@@ -95,4 +97,56 @@ fn our_xsub_talks_to_a_libzmq_xpub() {
         assert!(started.elapsed() < FIVE, "nothing arrived");
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+/// A subscriber that cancels `topic`, which it does not hold, after
+/// subscribing to `held` if given: no socket of ours or libzmq's sends
+/// such a cancel unasked.
+fn cancel_unheld(
+    addr: std::net::SocketAddr,
+    held: Option<&'static str>,
+    topic: &'static str,
+) -> Peer {
+    let mut peer = Peer::connect(addr, SocketType::Sub, b"").unwrap();
+    if let Some(held) = held {
+        peer.send_command(&Command::Subscribe(Frame::from(held)))
+            .unwrap();
+    }
+    peer.send_command(&Command::Cancel(Frame::from(topic)))
+        .unwrap();
+    peer
+}
+
+#[test]
+fn libzmq_reports_a_cancel_for_a_topic_its_peer_never_held() {
+    let xpub = Socket::new(Kind::XPub);
+    let addr = xpub.bind_loopback();
+    let _first = cancel_unheld(addr, None, "never");
+    assert_eq!(xpub.recv().unwrap(), [b"\0never"]);
+
+    // Even one that another peer holds.
+    let _holder = cancel_unheld(addr, Some("held"), "other");
+    assert_eq!(xpub.recv().unwrap(), [b"\x01held"]);
+    assert_eq!(xpub.recv().unwrap(), [b"\0other"]);
+    let _second = cancel_unheld(addr, None, "held");
+    assert_eq!(xpub.recv().unwrap(), [b"\0held"]);
+}
+
+#[test]
+fn we_report_a_cancel_for_a_topic_our_peer_never_held() {
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<XPub>();
+    let addr = xpub.bind("tcp://127.0.0.1:*").unwrap().tcp_addr().unwrap();
+    let cancel = |topic: &'static str| Some(XPubEvent::Cancel(Frame::from(topic)));
+    let _first = cancel_unheld(addr, None, "never");
+    assert_eq!(xpub.recv_timeout(FIVE).unwrap(), cancel("never"));
+
+    let _holder = cancel_unheld(addr, Some("held"), "other");
+    assert_eq!(
+        xpub.recv_timeout(FIVE).unwrap(),
+        Some(XPubEvent::Subscribe(Frame::from("held")))
+    );
+    assert_eq!(xpub.recv_timeout(FIVE).unwrap(), cancel("other"));
+    let _second = cancel_unheld(addr, None, "held");
+    assert_eq!(xpub.recv_timeout(FIVE).unwrap(), cancel("held"));
 }

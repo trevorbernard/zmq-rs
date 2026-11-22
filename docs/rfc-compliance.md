@@ -369,8 +369,8 @@ Rules shared by every pattern:
 
 **Done (XPUB and XSUB):**
 - XPUB reports a topic's first subscription and last cancel across all peers, as libzmq does without `XPUB_VERBOSE`. A peer that disconnects cancels its topics. Anything else a peer sends is delivered as `XPubEvent::Message`.
-- Two differences from libzmq:
-  - A cancel for a topic the peer never subscribed to is ignored. libzmq notifies anyway (`rm_result == not_found`; its code marks this with a TODO).
+- A cancel for a topic the peer does not hold is reported, whether or not another peer holds it, as libzmq reports it (`rm_result == not_found`; its code marks this with a TODO).
+- One difference from libzmq:
   - A ZMTP 1.0 subscriber's implicit subscription is reported as `Subscribe("")`. libzmq reports nothing on arrival, yet still sends the cancel when the peer leaves.
 - XSUB `send`: a single frame starting with `01` or `00` subscribes or unsubscribes, as libzmq does, so the topics stay counted. Multi-frame messages are always user messages. libzmq would also read a subscription from their first frame.
 - XSUB, like SUB, never drops a subscription at the HWM: it goes to peers past it, where libzmq's `dist_t` drops it. An XSUB's other messages are dropped for a peer at the HWM, as libzmq's are.
@@ -386,7 +386,7 @@ Rules shared by every pattern:
 **Done (PUB and SUB):**
 - `Socket<Pub>::send` returns how many subscribers the message was queued for, so a full queue or a topic nobody wants is visible without being an error.
 - A SUB counts its subscriptions: every `subscribe` goes upstream, as in libzmq, while `unsubscribe` sends CANCEL only for the last one. A publisher keeps one subscription per topic and peer, as libzmq's XPUB does.
-- `Socket<XSub>::set_verbose_unsubscribe`, with the `draft` feature, is libzmq's draft `XSUB_VERBOSE_UNSUBSCRIBE`: every unsubscription goes upstream, even of a topic subscribed more than once or not at all. Our XPUB ignores the ones for topics the peer does not hold, as above, where libzmq's reports them.
+- `Socket<XSub>::set_verbose_unsubscribe`, with the `draft` feature, is libzmq's draft `XSUB_VERBOSE_UNSUBSCRIBE`: every unsubscription goes upstream, even of a topic subscribed more than once or not at all. An XPUB reports the ones for topics the peer does not hold, as above.
 - A SUB filters what arrives too. That covers publishers that send everything, and messages queued before an `unsubscribe`.
 - A SUB's subscriptions go to a peer as soon as `connect` returns. A subscription is never dropped at the HWM: it goes to peers past it. An XSUB's other messages are dropped for a peer at the HWM, as libzmq's are.
 - A session replays the topics it has carried to each new connection after a reconnect, which is the effect of libzmq's hiccup. Cancelled topics are not replayed.
