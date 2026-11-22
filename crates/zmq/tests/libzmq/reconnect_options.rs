@@ -164,8 +164,9 @@ mod stop {
         expect_retry(&mut monitor);
     }
 
-    /// libzmq's needs `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` for this;
-    /// zmq-rs never retries an endpoint the socket has disconnected.
+    /// libzmq's sets `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, without which
+    /// its retries stop only when the socket is next called; zmq-rs has no
+    /// such flag and stops at once.
     #[cfg(unix)]
     #[test]
     fn reconnect_stop_after_disconnect() {

@@ -17,6 +17,7 @@ const ZMQ_SUBSCRIBE: c_int = 6;
 const ZMQ_SNDHWM: c_int = 23;
 const ZMQ_RCVHWM: c_int = 24;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
+const ZMQ_EVENTS: c_int = 15;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RECONNECT_IVL: c_int = 18;
 const ZMQ_RECONNECT_IVL_MAX: c_int = 21;
@@ -39,6 +40,8 @@ const ZMQ_HEARTBEAT_TIMEOUT: c_int = 77;
 const ZMQ_XPUB_WELCOME_MSG: c_int = 72;
 /// Draft in libzmq 4.3, which the flake builds with drafts.
 const ZMQ_METADATA: c_int = 95;
+/// Draft.
+const ZMQ_RECONNECT_STOP: c_int = 109;
 const ZMQ_SNDMORE: c_int = 2;
 
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
@@ -58,9 +61,16 @@ unsafe extern "C" {
         value: *const c_void,
         len: usize,
     ) -> c_int;
+    fn zmq_getsockopt(
+        socket: *mut c_void,
+        option: c_int,
+        value: *mut c_void,
+        len: *mut usize,
+    ) -> c_int;
     fn zmq_bind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_connect(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_unbind(socket: *mut c_void, endpoint: *const c_char) -> c_int;
+    fn zmq_disconnect(socket: *mut c_void, endpoint: *const c_char) -> c_int;
     fn zmq_send(socket: *mut c_void, buf: *const c_void, len: usize, flags: c_int) -> c_int;
     fn zmq_msg_init(msg: *mut RawMsg) -> c_int;
     fn zmq_msg_recv(msg: *mut RawMsg, socket: *mut c_void, flags: c_int) -> c_int;
@@ -326,6 +336,12 @@ impl Socket {
         self.set_int(ZMQ_RECONNECT_IVL_MAX, max);
     }
 
+    /// The draft `ZMQ_RECONNECT_STOP`, as its `ZMQ_RECONNECT_STOP_*` bits.
+    /// Needs a libzmq with drafts.
+    pub fn set_reconnect_stop(&self, bits: i32) {
+        self.set_int(ZMQ_RECONNECT_STOP, bits);
+    }
+
     /// Every event libzmq reports about this socket from now on
     /// (`zmq_socket_monitor`).
     pub fn monitor(&self) -> Monitor {
@@ -385,6 +401,33 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_unbind(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_unbind({endpoint}): {err}"));
+    }
+
+    /// `ZMQ_EVENTS`, reading which has the socket process what its I/O
+    /// thread has sent it, as every call on it does.
+    pub fn events(&self) -> i32 {
+        let mut value: c_int = 0;
+        let mut len = size_of::<c_int>();
+        // SAFETY: `value` and `len` are valid for the call, and `len` is
+        // the size of `value`.
+        check(unsafe {
+            zmq_getsockopt(
+                self.raw.as_ptr(),
+                ZMQ_EVENTS,
+                (&raw mut value).cast(),
+                &raw mut len,
+            )
+        })
+        .unwrap_or_else(|err| panic!("zmq_getsockopt(ZMQ_EVENTS): {err}"));
+        value
+    }
+
+    /// Disconnects from `endpoint`, as connected to.
+    pub fn disconnect(&self, endpoint: &str) {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_disconnect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_disconnect({endpoint}): {err}"));
     }
 
     /// Binds to `endpoint`, or says why libzmq would not.
@@ -649,6 +692,8 @@ impl Socket {
 pub const EVENT_CONNECT_RETRIED: u16 = 0x0004;
 /// libzmq's `ZMQ_EVENT_CLOSED`.
 pub const EVENT_CLOSED: u16 = 0x0080;
+/// libzmq's `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`.
+pub const RECONNECT_STOP_AFTER_DISCONNECT: i32 = 0x4;
 /// libzmq's `ZMQ_EVENT_DISCONNECTED`.
 pub const EVENT_DISCONNECTED: u16 = 0x0200;
 
@@ -692,6 +737,21 @@ impl Monitor {
             self.recv_timeout(left.max(Duration::from_millis(1)))
         })
         .collect()
+    }
+
+    /// The endpoint of every event numbered `event` that comes within
+    /// `window`.
+    pub fn endpoints_of(&self, event: u16, window: Duration) -> Vec<String> {
+        let until = Instant::now() + window;
+        self.0.set_receive_timeout(Duration::from_millis(10));
+        let mut endpoints = Vec::new();
+        while Instant::now() < until {
+            let Ok(frames) = self.0.recv() else { continue };
+            if frames[0][..2] == event.to_ne_bytes() {
+                endpoints.push(String::from_utf8_lossy(&frames[1]).into_owned());
+            }
+        }
+        endpoints
     }
 
     /// Every event that comes until `quiet` passes without one.

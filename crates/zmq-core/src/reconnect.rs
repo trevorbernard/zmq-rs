@@ -33,8 +33,10 @@ impl Default for Reconnect {
 /// [`Reconnect`]: libzmq's `ZMQ_RECONNECT_STOP`. A session that gives up
 /// ends as one disconnected does, its pipes closing.
 ///
-/// libzmq's third condition, `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, needs
-/// no flag: a disconnected endpoint is never retried.
+/// libzmq's third condition, `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, has no
+/// flag here. A disconnected endpoint is never retried, as in libzmq once
+/// its socket is next called; with that flag libzmq also gives up on every
+/// other `ipc` endpoint that refuses.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReconnectStop {
     pub(crate) connection_refused: bool,

@@ -896,8 +896,9 @@ impl<T: SocketType> Socket<T> {
     /// they retry as [`SocketOptions::reconnect`] says.
     ///
     /// A connection that gives up ends as one disconnected does. libzmq's
-    /// `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` needs no flag here:
-    /// [`disconnect`](Self::disconnect) always ends the retrying.
+    /// `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` has no flag here:
+    /// [`disconnect`](Self::disconnect) ends the retrying of its endpoint
+    /// at once, and of no other.
     #[cfg(feature = "draft")]
     pub fn set_reconnect_stop(&mut self, stop: crate::ReconnectStop) {
         self.peers.config_mut().reconnect_stop = stop;
