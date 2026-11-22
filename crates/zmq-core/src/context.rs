@@ -279,10 +279,11 @@ pub struct TcpKeepalive {
 /// and `ZMQ_HEARTBEAT_TTL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Heartbeat {
-    /// How often to send a PING once the handshake is done.
+    /// How often to send a PING once the handshake is done. Zero sends
+    /// none, as libzmq's 0.
     pub interval: Duration,
     /// How long to wait for any traffic after a PING before giving up on the
-    /// connection.
+    /// connection. Zero never gives up, as libzmq's 0.
     pub timeout: Duration,
     /// How long the peer should wait for traffic from us before giving up,
     /// announced in each PING. Zero announces none.

@@ -33,7 +33,7 @@ use crate::{
     ZapResponder,
 };
 
-/// The shortest PING interval, so a zero interval cannot spin.
+/// The shortest PING interval, so one below a millisecond cannot spin.
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Stop taking messages from the socket while this much output is unsent.
@@ -355,10 +355,11 @@ impl Engine {
             // An interval or timeout too long for an `Instant` to reach
             // never comes.
             self.deadlines.next_ping = now.checked_add(heartbeat.interval.max(MIN_PING_INTERVAL));
-            self.deadlines.ping_timeout = self
-                .deadlines
-                .ping_timeout
-                .or_else(|| now.checked_add(heartbeat.timeout));
+            // A timeout of zero never gives up, as libzmq's.
+            self.deadlines.ping_timeout = self.deadlines.ping_timeout.or_else(|| {
+                now.checked_add(heartbeat.timeout)
+                    .filter(|_| !heartbeat.timeout.is_zero())
+            });
         }
         Ok(())
     }
@@ -844,9 +845,11 @@ impl Engine {
                 self.deadlines.handshake = None;
                 // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
                 if matches!(version, Version::V3_0 | Version::V3_1) {
+                    // An interval of zero is libzmq's default: no PINGs.
                     self.deadlines.next_ping = self
                         .config
                         .heartbeat
+                        .filter(|heartbeat| !heartbeat.interval.is_zero())
                         .and_then(|heartbeat| Instant::now().checked_add(heartbeat.interval));
                 }
                 // A ZMTP 1.0 subscriber filters for itself and never says

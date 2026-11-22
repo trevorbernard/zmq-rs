@@ -46,7 +46,6 @@ sees, with no safety gain.
 | # | libzmq | zmq-rs today |
 |---|---|---|
 | D1 | `ZMQ_MAXMSGSIZE` limits each frame | Limits the whole message, so a multipart message of small frames is refused |
-| D4 | `ZMQ_HEARTBEAT_IVL` of 0 is off; `ZMQ_HEARTBEAT_TIMEOUT` of 0 never times out | An interval of 0 pings every millisecond; a timeout of 0 expires on the first PING |
 | D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
 | D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
 | D7 | A failed connection attempt reports `CLOSED`, then `CONNECT_RETRIED` | Reports `ConnectRetried` only |
@@ -192,7 +191,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_XPUB_MANUAL`, `ZMQ_XPUB_MANUAL_LAST_VALUE` (d) | `ManualXPub` | Exception (API shape) |
 | `ZMQ_XPUB_WELCOME_MSG` | `set_welcome` on XPUB | Same; Gap on PUB |
 | `ZMQ_INVERT_MATCHING` | `set_invert_matching` | Same |
-| `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Divergence D4 |
+| `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Same; Verified for 0 (`tests/interop/tests/heartbeat.rs`) |
 | `ZMQ_HEARTBEAT_TTL` | `Heartbeat::ttl` | Divergence D12 |
 | `ZMQ_CONNECT_TIMEOUT` | | Gap |
 | `ZMQ_TCP_MAXRT` | | Gap |

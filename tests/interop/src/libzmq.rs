@@ -9,7 +9,7 @@ use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::{self, JoinHandle};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const ZMQ_ROUTING_ID: c_int = 5;
 const ZMQ_SUBSCRIBE: c_int = 6;
@@ -597,6 +597,16 @@ impl Monitor {
             }
         }
         values
+    }
+
+    /// Every event that comes within `window`.
+    pub fn during(&self, window: Duration) -> Vec<(u16, u32)> {
+        let until = Instant::now() + window;
+        std::iter::from_fn(|| {
+            let left = until.checked_duration_since(Instant::now())?;
+            self.recv_timeout(left.max(Duration::from_millis(1)))
+        })
+        .collect()
     }
 
     /// Every event that comes until `quiet` passes without one.
