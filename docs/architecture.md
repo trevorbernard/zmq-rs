@@ -100,7 +100,7 @@ signal again for data it has already reported.
   connection sends them before anything else in the pipe. The new peer
   starts with no subscriptions, so this is how it learns them.
 - `Reconnect::Fixed` waits the interval plus random jitter below it, and
-  `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
+  `Reconnect::Backoff` doubles from `initial` up to `max` with no jitter, resetting once a
   connection is made, before its handshake; both follow libzmq's
   `get_new_reconnect_ivl`.
 - `ReconnectStop` (`Socket::set_reconnect_stop`, with the `draft` feature)

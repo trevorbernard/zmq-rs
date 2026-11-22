@@ -7,6 +7,7 @@ use std::io;
 use std::net::SocketAddr;
 use std::ptr::NonNull;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
@@ -16,6 +17,8 @@ const ZMQ_SNDHWM: c_int = 23;
 const ZMQ_RCVHWM: c_int = 24;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_LINGER: c_int = 17;
+const ZMQ_RECONNECT_IVL: c_int = 18;
+const ZMQ_RECONNECT_IVL_MAX: c_int = 21;
 const ZMQ_RCVTIMEO: c_int = 27;
 const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
@@ -66,6 +69,7 @@ unsafe extern "C" {
     fn zmq_msg_init_size(msg: *mut RawMsg, size: usize) -> c_int;
     fn zmq_msg_send(msg: *mut RawMsg, socket: *mut c_void, flags: c_int) -> c_int;
     fn zmq_strerror(errnum: c_int) -> *const c_char;
+    fn zmq_socket_monitor(socket: *mut c_void, endpoint: *const c_char, events: c_int) -> c_int;
 }
 
 // libzmq's draft API is exported under these names only by a build with
@@ -292,6 +296,29 @@ impl Socket {
         self.set_int(ZMQ_HEARTBEAT_IVL, millis(interval));
         self.set_int(ZMQ_HEARTBEAT_TIMEOUT, millis(timeout));
         self.set_int(ZMQ_HEARTBEAT_TTL, millis(ttl));
+    }
+
+    /// `ZMQ_RECONNECT_IVL` and `ZMQ_RECONNECT_IVL_MAX`, in milliseconds as
+    /// libzmq takes them, so that 0 and -1 can be given.
+    pub fn set_reconnect(&self, interval: i32, max: i32) {
+        self.set_int(ZMQ_RECONNECT_IVL, interval);
+        self.set_int(ZMQ_RECONNECT_IVL_MAX, max);
+    }
+
+    /// Every event libzmq reports about this socket from now on
+    /// (`zmq_socket_monitor`).
+    pub fn monitor(&self) -> Monitor {
+        static NEXT: AtomicU32 = AtomicU32::new(0);
+        let endpoint = format!("inproc://monitor-{}", NEXT.fetch_add(1, Ordering::Relaxed));
+        let c_endpoint = CString::new(endpoint.as_str()).unwrap();
+        // SAFETY: the socket is live and `c_endpoint` a valid C string.
+        check(unsafe { zmq_socket_monitor(self.raw.as_ptr(), c_endpoint.as_ptr(), 0xFFFF) })
+            .unwrap_or_else(|err| panic!("zmq_socket_monitor: {err}"));
+        let pair = Self::in_context(&self._context, Kind::Pair);
+        // SAFETY: the pair is live and `c_endpoint` a valid C string.
+        check(unsafe { zmq_connect(pair.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+        Monitor(pair)
     }
 
     /// The ZAP domain this server authenticates in.
@@ -529,6 +556,52 @@ impl Socket {
         // SAFETY: `msg` is an initialized message and the socket is open.
         check(unsafe { zmq_msg_recv(&mut msg.0, self.raw.as_ptr(), 0) })?;
         Ok(msg.size())
+    }
+}
+
+/// libzmq's `ZMQ_EVENT_CONNECT_RETRIED`, whose value is the interval in
+/// milliseconds.
+pub const EVENT_CONNECT_RETRIED: u16 = 0x0004;
+/// libzmq's `ZMQ_EVENT_CLOSED`.
+pub const EVENT_CLOSED: u16 = 0x0080;
+/// libzmq's `ZMQ_EVENT_DISCONNECTED`.
+pub const EVENT_DISCONNECTED: u16 = 0x0200;
+
+/// The events of a libzmq socket, from [`Socket::monitor`].
+#[derive(Debug)]
+pub struct Monitor(Socket);
+
+impl Monitor {
+    /// The next event, as its `ZMQ_EVENT_*` number and its value, or
+    /// `None` if none comes within `timeout`.
+    pub fn recv_timeout(&self, timeout: Duration) -> Option<(u16, u32)> {
+        self.0.set_receive_timeout(timeout);
+        let frames = self.0.recv().ok()?;
+        let event = frames.first()?;
+        Some((
+            u16::from_ne_bytes(event.get(..2)?.try_into().ok()?),
+            u32::from_ne_bytes(event.get(2..6)?.try_into().ok()?),
+        ))
+    }
+
+    /// The values of the first `count` events numbered `event`, failing if
+    /// they do not come within five seconds.
+    pub fn values_of(&self, event: u16, count: usize) -> Vec<u32> {
+        let mut values = Vec::new();
+        while values.len() < count {
+            let (seen, value) = self
+                .recv_timeout(Duration::from_secs(5))
+                .unwrap_or_else(|| panic!("event {event:#06x} after {values:?}"));
+            if seen == event {
+                values.push(value);
+            }
+        }
+        values
+    }
+
+    /// Every event that comes until `quiet` passes without one.
+    pub fn until_quiet(&self, quiet: Duration) -> Vec<(u16, u32)> {
+        std::iter::from_fn(|| self.recv_timeout(quiet)).collect()
     }
 }
 

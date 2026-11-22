@@ -46,7 +46,6 @@ sees, with no safety gain.
 | # | libzmq | zmq-rs today |
 |---|---|---|
 | D1 | `ZMQ_MAXMSGSIZE` limits each frame | Limits the whole message, so a multipart message of small frames is refused |
-| D2 | No jitter on a reconnect interval that backs off (`ZMQ_RECONNECT_IVL_MAX` set) | Adds jitter below the base interval |
 | D3 | `ZMQ_RECONNECT_IVL` of 0 means never reconnect | Retries at once |
 | D4 | `ZMQ_HEARTBEAT_IVL` of 0 is off; `ZMQ_HEARTBEAT_TIMEOUT` of 0 never times out | An interval of 0 pings every millisecond; a timeout of 0 expires on the first PING |
 | D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
@@ -165,7 +164,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_TYPE` | The type parameter | N/A |
 | `ZMQ_LINGER` | `SocketOptions::linger`, `set_linger` | Same |
 | `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Divergence D3 |
-| `ZMQ_RECONNECT_IVL_MAX` | `Reconnect::Backoff` | Divergence D2 |
+| `ZMQ_RECONNECT_IVL_MAX` | `Reconnect::Backoff` | Same; Verified (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_BACKLOG` | | Gap; Divergence D5 |
 | `ZMQ_MAXMSGSIZE` | `max_message_size` | Divergence D1 |
 | `ZMQ_SNDHWM`, `ZMQ_RCVHWM` | `send_hwm`, `recv_hwm` and their setters | Same |
@@ -279,8 +278,10 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 
 A row is Verified when a test shows it: against libzmq itself for what a
 peer sees, in both bind directions; by libzmq's own test, ported with its
-assertion unchanged, for what only the application sees. No row has been
-judged against that bar yet. What is known to fall short of it:
+assertion unchanged, for what only the application sees. A row that is
+Verified says so and names its test; no other row has been judged against
+that bar. A Divergence is taken off its list once it is closed. What is
+known to fall short of the bar:
 
 - **One bind direction only**, against libzmq: every pair but PUSH/PULL,
   PAIR, PEER, DEALER/DEALER and ROUTER/DEALER.
