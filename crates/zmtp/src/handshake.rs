@@ -77,7 +77,9 @@ pub struct Established {
     /// The protocol version both sides speak.
     pub version: Version,
     /// The peer's socket type, when it announced one. Unversioned ZMTP 1.0
-    /// peers and READY commands without `Socket-Type` do not.
+    /// peers and READY commands without `Socket-Type` do not, and a ZMTP
+    /// 1.0 or 2.0 greeting may hold a number no socket type has. Such a
+    /// greeting's type need not be one ours pairs with.
     pub peer_socket_type: Option<SocketType>,
     /// The identity the peer announced, possibly empty.
     pub peer_identity: Frame,
@@ -99,8 +101,6 @@ pub enum HandshakeError {
     IncompatiblePeer { peer: SocketType },
     /// The peer's READY named a socket type we do not know.
     UnknownSocketType(Frame),
-    /// The peer's ZMTP 1.0/2.0 greeting carried an unknown socket type.
-    UnknownLegacySocketType(u8),
     /// The peer sent ERROR. Do not reconnect with the same configuration.
     PeerError(ErrorReason),
     /// The peer sent a command other than READY or ERROR.
@@ -127,8 +127,8 @@ impl NullHandshake {
     /// Starts the handshake with a peer whose greeting is `peer`, writing our
     /// READY, or our identity frame for a ZMTP 1.0/2.0 peer, to `out`.
     ///
-    /// A ZMTP 1.0/2.0 peer's socket type is known from its greeting, so an
-    /// incompatible one is refused here, silently as RFC 15 asks.
+    /// A ZMTP 1.0/2.0 peer is let in whatever socket type its greeting
+    /// announces, as libzmq, which does not look at it, lets it in.
     pub fn start(
         socket_type: SocketType,
         identity: &Identity,
@@ -147,14 +147,9 @@ impl NullHandshake {
             PeerGreeting::Zmtp1Unversioned { .. } => None,
             PeerGreeting::Zmtp1 { socket_type: code }
             | PeerGreeting::Zmtp2 { socket_type: code } => {
-                let peer_type = SocketType::from_legacy_code(code)
-                    .ok_or(HandshakeError::UnknownLegacySocketType(code))?;
-                if !socket_type.accepts(peer_type) {
-                    return Err(HandshakeError::IncompatiblePeer { peer: peer_type });
-                }
                 let identity = Frame::copy_from_slice(identity.as_bytes());
                 Encoder::new(version).encode(&Message::new(identity), out);
-                Some(peer_type)
+                SocketType::from_legacy_code(code)
             }
         };
         let implicit_subscription = matches!(peer, PeerGreeting::Zmtp1Unversioned { .. })
@@ -429,9 +424,6 @@ impl fmt::Display for HandshakeError {
             }
             Self::UnknownSocketType(name) => {
                 write!(f, "peer socket type \"{}\" is unknown", name.escape_ascii())
-            }
-            Self::UnknownLegacySocketType(code) => {
-                write!(f, "peer socket type code {code} is unknown")
             }
             Self::PeerError(reason) => write!(
                 f,
@@ -804,33 +796,19 @@ mod tests {
     }
 
     #[test]
-    fn zmtp_2_incompatible_peer_is_refused_silently() {
-        let mut out = Vec::new();
-        let peer = PeerGreeting::Zmtp2 { socket_type: 1 };
-        assert_eq!(
-            NullHandshake::start(SocketType::Dealer, &me(), &Metadata::new(), &peer, &mut out)
-                .unwrap_err(),
-            HandshakeError::IncompatiblePeer {
-                peer: SocketType::Pub
-            }
-        );
-        assert!(out.is_empty(), "ZMTP 2.0 has no ERROR command");
-    }
-
-    #[test]
-    fn zmtp_2_unknown_socket_type_is_refused() {
-        let peer = PeerGreeting::Zmtp2 { socket_type: 42 };
-        assert_eq!(
-            NullHandshake::start(
-                SocketType::Dealer,
-                &me(),
-                &Metadata::new(),
-                &peer,
-                &mut Vec::new()
-            )
-            .unwrap_err(),
-            HandshakeError::UnknownLegacySocketType(42)
-        );
+    fn zmtp_2_peer_is_let_in_whatever_type_it_announces() {
+        for (code, peer_type) in [(1, Some(SocketType::Pub)), (42, None)] {
+            let peer = PeerGreeting::Zmtp2 { socket_type: code };
+            let (handshake, out) = start(SocketType::Dealer, &peer);
+            assert_eq!(out, b"\x00\x02me");
+            let established = handshake
+                .receive(
+                    Incoming::Message(Message::new(Frame::new())),
+                    &mut Vec::new(),
+                )
+                .unwrap();
+            assert_eq!(established.peer_socket_type, peer_type);
+        }
     }
 
     #[test]

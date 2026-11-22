@@ -58,7 +58,7 @@ Protocols built on top of ZeroMQ (MDP, ZRE, FILEMQ, ...) are out of scope.
   5. Within V3, minor `0` is 3.0, and minor `>= 1` (or an unknown future minor) is treated as 3.1.
 - libzmq deviations:
   - libzmq maps revision `2` to 3.1; we follow the RFC and treat it as V2.
-  - libzmq never validates the V2 peer's socket-type byte. We validate it, mapping libzmq's enum values 0–10.
+  - libzmq never looks at a V1 or V2 peer's socket-type byte, and neither do we: a peer of any type is let in.
   - libzmq always sends `as-server = 0` and never reads it. We send the RFC value and never require it from the peer.
 
 **Design:** an incremental, sans-IO greeting parser yields

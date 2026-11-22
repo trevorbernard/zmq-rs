@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D15 | A ZMTP 2.0 peer's socket-type octet is not checked | Checked, and a mismatch refused |
 | D16 | An XSUB's send and an XPUB's receive read a subscription from any frame of a message, unless `ZMQ_ONLY_FIRST_SUBSCRIBE` | Read one only from a single-frame message; no option |
 | D17 | With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, disconnected or not. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once. Found on 2026-11-22 in place of what was listed, that libzmq's disconnect stops the retrying only with the flag (`tests/interop/tests/reconnect.rs`). Not yet ruled a Divergence to close or an Exception |
 | D18 | `ENODEV`, `ENAMETOOLONG`, `ENOCOMPATPROTO` and `EPROTONOSUPPORT` are distinct | `ENODEV` is `InvalidEndpoint`, `ENAMETOOLONG` an `Io` error, and the last two are both `UnsupportedTransport` |
@@ -102,6 +101,7 @@ Divergences that stand.
 | `ZMQ_TOPICS_COUNT` on a publisher is stale until the socket is next used | Current | Not observable as a difference |
 | The least loaded I/O thread takes a new connection | The next in turn | Not observable |
 | Greeting revision 2 is read as ZMTP 3.1 | As ZMTP 2.0 | No peer sends it |
+| A ZMTP 1.0 or 2.0 greeting announces XPUB and XSUB as 9 and 10 | As PUB and SUB, 1 and 2 | RFC 15; libzmq does not read the octet (Verified, `tests/interop/tests/legacy_socket_type.rs`) |
 | `as-server` is always sent as 0 | The RFC's value | libzmq never reads it |
 | Message metadata is always attached | `MessageProperties::Off` omits it | Off by default |
 
@@ -297,6 +297,8 @@ known to fall short of the bar:
   `inproc_connect` (lacks `shutdown_during_pend`).
 - **Not settled by reading the sources**:
   - which `ipc` socket files libzmq removes when a listener closes
+  - whether libzmq's draft sockets talk to a ZMTP 1.0 or 2.0 peer: ours
+    refuse one, having no RFC 15 socket-type number to announce
   - whether libzmq's proxy stalls both directions when one end is full
   - the length limit of a ZAP domain
   - whether `Security::null_authenticated` with an empty domain asks its
