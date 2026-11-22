@@ -46,7 +46,6 @@ sees, with no safety gain.
 | # | libzmq | zmq-rs today |
 |---|---|---|
 | D1 | `ZMQ_MAXMSGSIZE` limits each frame | Limits the whole message, so a multipart message of small frames is refused |
-| D3 | `ZMQ_RECONNECT_IVL` of 0 means never reconnect | Retries at once |
 | D4 | `ZMQ_HEARTBEAT_IVL` of 0 is off; `ZMQ_HEARTBEAT_TIMEOUT` of 0 never times out | An interval of 0 pings every millisecond; a timeout of 0 expires on the first PING |
 | D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
 | D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
@@ -163,7 +162,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_EVENTS` | `readable`, `writable` in `zmq::poll`; no way to read the flags | Gap |
 | `ZMQ_TYPE` | The type parameter | N/A |
 | `ZMQ_LINGER` | `SocketOptions::linger`, `set_linger` | Same |
-| `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Divergence D3 |
+| `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Same; Verified for 0 (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_RECONNECT_IVL_MAX` | `Reconnect::Backoff` | Same; Verified (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_BACKLOG` | | Gap; Divergence D5 |
 | `ZMQ_MAXMSGSIZE` | `max_message_size` | Divergence D1 |
@@ -316,3 +315,6 @@ known to fall short of the bar:
   - whether `Security::null_authenticated` with an empty domain asks its
     authenticator, where libzmq would not
   - link-local addresses with a zone (`fe80::1%eth0`)
+  - what becomes of a connection that is never retried: `Reconnect::Never`
+    closes its pipes, where libzmq's connecter stays, idle, after a first
+    attempt fails

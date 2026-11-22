@@ -11,12 +11,13 @@ pub enum Reconnect {
     /// Give up: the connection's pipes close.
     Never,
     /// Wait `interval` plus a random fraction of it each time, like libzmq's
-    /// `ZMQ_RECONNECT_IVL` (default 100 ms).
+    /// `ZMQ_RECONNECT_IVL` (default 100 ms). An interval of zero is
+    /// [`Never`](Self::Never), as libzmq's 0 is.
     Fixed { interval: Duration },
     /// Wait `initial`, then double up to `max`, with nothing random added,
     /// like libzmq's `ZMQ_RECONNECT_IVL` with `ZMQ_RECONNECT_IVL_MAX`.
     /// Resets once a connection is made, before its handshake, as in
-    /// libzmq.
+    /// libzmq. An `initial` of zero is [`Never`](Self::Never).
     Backoff { initial: Duration, max: Duration },
 }
 
@@ -80,6 +81,11 @@ impl Retry {
     pub(crate) fn next_delay(&mut self) -> Option<Duration> {
         match self.policy {
             Reconnect::Never => None,
+            // libzmq retries only if `ZMQ_RECONNECT_IVL` is above zero.
+            Reconnect::Fixed { interval }
+            | Reconnect::Backoff {
+                initial: interval, ..
+            } if interval.is_zero() => None,
             // libzmq: the base interval plus `random % interval`.
             Reconnect::Fixed { interval } => Some(interval.saturating_add(jitter(interval))),
             Reconnect::Backoff { initial, max } => {
@@ -127,6 +133,21 @@ mod tests {
     #[test]
     fn never_gives_up_at_once() {
         assert_eq!(Retry::new(Reconnect::Never).next_delay(), None);
+    }
+
+    #[test]
+    fn an_interval_of_zero_gives_up_at_once() {
+        for policy in [
+            Reconnect::Fixed {
+                interval: Duration::ZERO,
+            },
+            Reconnect::Backoff {
+                initial: Duration::ZERO,
+                max: MS(500),
+            },
+        ] {
+            assert_eq!(Retry::new(policy).next_delay(), None, "{policy:?}");
+        }
     }
 
     #[test]

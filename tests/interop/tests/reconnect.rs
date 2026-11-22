@@ -1,7 +1,7 @@
 //! When a connection is tried again, compared with libzmq through both
 //! libraries' monitors. Nothing listens at the endpoints connected to.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use zmq::{Context, EventKind, Monitor, Push, Reconnect, SocketOptions};
 use zmq_interop::libzmq::{self, Kind, Socket};
@@ -59,4 +59,50 @@ fn we_back_off_without_jitter() {
         our_intervals(&mut monitor, 5),
         [MS(10), MS(20), MS(40), MS(40), MS(40)]
     );
+}
+
+/// Our events for as long as `window`.
+fn our_events(monitor: &mut Monitor, window: Duration) -> Vec<EventKind> {
+    let until = Instant::now() + window;
+    std::iter::from_fn(|| {
+        let left = until.checked_duration_since(Instant::now())?;
+        monitor.recv_timeout(left).ok()?
+    })
+    .map(|event| event.kind)
+    .collect()
+}
+
+#[test]
+fn libzmq_never_retries_with_an_interval_of_zero() {
+    let (_push, monitor) = libzmq_push(0, 0);
+    let events = monitor.until_quiet(MS(300));
+    assert!(
+        events
+            .iter()
+            .all(|(event, _)| *event != libzmq::EVENT_CONNECT_RETRIED),
+        "{events:?}"
+    );
+    assert!(!events.is_empty(), "the attempt itself is reported");
+}
+
+#[test]
+fn we_never_retry_with_an_interval_of_zero() {
+    for reconnect in [
+        Reconnect::Fixed {
+            interval: Duration::ZERO,
+        },
+        Reconnect::Backoff {
+            initial: Duration::ZERO,
+            max: MS(40),
+        },
+    ] {
+        let (_push, mut monitor) = our_push(reconnect);
+        let events = our_events(&mut monitor, MS(300));
+        assert!(
+            events
+                .iter()
+                .all(|kind| !matches!(kind, EventKind::ConnectRetried { .. })),
+            "{reconnect:?}: {events:?}"
+        );
+    }
 }
