@@ -155,11 +155,9 @@ downgrade off.
 | PEER | PEER |
 | CHANNEL | CHANNEL |
 
-**Design:** a `const fn` table on socket types, checked when READY arrives
-and when an `inproc` connection is paired. Incompatible `inproc` sockets
-are never paired, so they exchange nothing. libzmq checks only in the
-handshake, which `inproc` skips, so it pairs any two socket types (a
-DEALER can feed a PULL). We apply RFC 23's rule on every transport.
+**Design:** a `const fn` table on socket types, checked when READY
+arrives. As in libzmq, that is the only check: `inproc` has no handshake,
+so any two socket types are paired over it (a DEALER can feed a PULL).
 
 ### NULL handshake
 

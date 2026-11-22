@@ -754,8 +754,9 @@ pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader
 }
 
 /// Introduces the two ends of an `inproc` connection to each other, as a
-/// handshake would, and returns the server's end. Incompatible socket types
-/// are never paired: dropping the server's end closes the connection.
+/// handshake would, and returns the server's end. Any two socket types are
+/// paired, as in libzmq, which checks them only in the handshake that
+/// `inproc` does not have.
 ///
 /// The server's hello goes to the client here, and its disconnect message
 /// waits for the client to leave, as libzmq sets both when it connects the
@@ -765,12 +766,7 @@ fn pair(
     client_end: &InprocEnd,
     mut server: Connection,
     client: &PeerSlot,
-) -> Option<Connection> {
-    if !server_end.socket_type.accepts(client_end.socket_type)
-        || !client_end.socket_type.accepts(server_end.socket_type)
-    {
-        return None;
-    }
+) -> Connection {
     server.peer.set(introduce(client_end));
     client.set(introduce(server_end));
     if !server_end.hello_message.is_empty() {
@@ -781,7 +777,7 @@ fn pair(
     if !server_end.disconnect_message.is_empty() {
         server.rx.farewell = Some(Message::new(server_end.disconnect_message.clone()));
     }
-    Some(server)
+    server
 }
 
 /// What a handshake with the peer at `end` would establish.
@@ -1008,9 +1004,7 @@ impl Context {
             // for a connect to a bound name.
             server.rx.set_hwm(end.recv_hwm);
             server.tx.set_hwm(end.send_hwm);
-            if let Some(server) = pair(&end, &pending.end, server, &pending.client) {
-                let _ = writer.try_send(server);
-            }
+            let _ = writer.try_send(pair(&end, &pending.end, server, &pending.client));
         }
         registry.bound.insert(
             name.to_owned(),
@@ -1072,9 +1066,10 @@ impl Context {
         };
         match binding {
             Some(binding) => {
-                if let Some(server) = pair(&binding.end, &end, server, &client.peer) {
-                    let _ = binding.connections.try_send(server);
-                }
+                let _ =
+                    binding
+                        .connections
+                        .try_send(pair(&binding.end, &end, server, &client.peer));
             }
             None => {
                 let pending = registry.pending.entry(name.to_owned()).or_default();
@@ -1379,15 +1374,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_connect_of_the_wrong_type_is_closed_by_the_bind() {
+    fn a_pending_connect_of_any_type_is_paired_by_the_bind() {
+        // As libzmq pairs them: only a handshake checks socket types.
         let context = Context::new().unwrap();
         let client = context.connect_inproc("late", config(SocketType::Push));
         let mut listener = context
             .bind_inproc("late", config(SocketType::Push))
             .unwrap();
-        assert!(listener.try_accept().is_err());
-        assert!(client.tx.is_closed());
-        assert_eq!(client.peer(), None);
+        let _server = listener.try_accept().expect("paired");
+        assert!(!client.tx.is_closed());
+        assert!(client.peer().is_some());
     }
 
     #[test]

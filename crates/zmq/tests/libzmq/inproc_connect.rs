@@ -81,10 +81,8 @@ fn multiple_connects() {
     });
 }
 
-// libzmq's pushers here are PAIR sockets connecting to a PULL, which
-// libzmq lets through over inproc. zmq-rs checks socket types on inproc
-// as on TCP (docs/rfc-compliance.md, "Valid socket pairs"), so they are
-// PUSH sockets.
+// The pushers are PAIR sockets connecting to a PULL, as libzmq's are:
+// over inproc, which has no handshake, any two socket types are paired.
 #[test]
 fn multiple_threads() {
     let context = Context::new().unwrap();
@@ -92,9 +90,9 @@ fn multiple_threads() {
         .map(|_| {
             let context = context.clone();
             thread::spawn(move || {
-                let mut push = context.socket::<Push>();
-                push.connect("inproc://sink").unwrap();
-                push.send("foobar").unwrap();
+                let mut pair = context.socket::<Pair>();
+                pair.connect("inproc://sink").unwrap();
+                pair.send("foobar").unwrap();
             })
         })
         .collect();

@@ -169,12 +169,17 @@ fn a_client_load_balances_across_servers() {
 }
 
 #[test]
-fn only_clients_and_servers_pair() {
+fn inproc_pairs_a_server_with_any_socket_type() {
+    // As in libzmq, where only a handshake checks socket types.
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>();
     server.bind("inproc://strangers").unwrap();
     let mut dealer = context.socket::<Dealer>();
     dealer.connect("inproc://strangers").unwrap();
-    assert!(dealer.try_send("not a client").is_err());
-    assert!(server.try_recv().unwrap().is_none());
+    dealer.try_send("not a client").unwrap();
+    let (_, frame) = server
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .expect("the dealer's message");
+    assert_eq!(frame, "not a client");
 }

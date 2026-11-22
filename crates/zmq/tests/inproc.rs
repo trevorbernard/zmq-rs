@@ -163,16 +163,18 @@ fn a_name_is_free_again_once_its_socket_is_gone() {
 }
 
 #[test]
-fn incompatible_sockets_are_never_paired() {
+fn any_two_socket_types_are_paired() {
+    // As in libzmq, where only a handshake checks them.
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>();
-    pull.bind("inproc://wrong").unwrap();
-    let mut router = context.socket::<Router>();
-    router.connect("inproc://wrong").unwrap();
+    pull.bind("inproc://any").unwrap();
     let mut dealer = context.socket::<Dealer>();
-    dealer.connect("inproc://wrong").unwrap();
-    assert!(dealer.try_send("dealers cannot feed a PULL").is_err());
-    assert_eq!(pull.try_recv().unwrap(), None);
+    dealer.connect("inproc://any").unwrap();
+    dealer.try_send("a dealer can feed a PULL").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("a dealer can feed a PULL"))
+    );
 }
 
 #[test]

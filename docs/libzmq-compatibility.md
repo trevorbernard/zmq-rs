@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D11 | `inproc` pairs any two socket types | Refuses a pair RFC 23 does not allow |
 | D12 | `ZMQ_HEARTBEAT_TTL` is truncated to deciseconds, and `EINVAL` above the maximum | Rounded up, and saturating |
 | D13 | `zmq_connect_peer` is refused under `ZMQ_IMMEDIATE` | `IMMEDIATE` is ignored |
 | D14 | `zmq_unbind` of an `inproc` name frees the name only | Also closes the connections accepted on it |
@@ -128,7 +127,7 @@ Divergences that stand.
 | `tcp://` with `ZMQ_IPV6`: `*` binds `::` for both families, names resolve to IPv6 first | No option: `*` is `0.0.0.0`, names prefer IPv4 | Gap |
 | An IPv6 literal is refused without `ZMQ_IPV6` | Accepted | Same (accepts more) |
 | `ipc://`: path, `ipc://*`, abstract `@name` on Linux | The same | Same |
-| `inproc://`, connect before bind | The same | Same |
+| `inproc://`, connect before bind, between any two socket types | The same | Same; Verified for mismatched types (`inproc_connect::multiple_threads`, ported) |
 | `udp://` for RADIO, DISH and DGRAM: unicast, multicast, broadcast | | Gap |
 | `pgm://`, `epgm://`, `norm://`, `ws://`, `wss://`, `tipc://`, `vmci://` | | Exclusion |
 | `ZMQ_USE_FD`: a listener or connection from a file descriptor the application supplies | | Gap |

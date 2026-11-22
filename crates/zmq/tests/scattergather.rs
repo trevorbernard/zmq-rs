@@ -101,12 +101,17 @@ fn a_scatter_without_gathers_hands_the_frame_back() {
 }
 
 #[test]
-fn only_scatters_and_gathers_pair() {
+fn inproc_pairs_a_gather_with_any_socket_type() {
+    // As in libzmq, where only a handshake checks socket types.
     let context = Context::new().unwrap();
     let mut gather = context.socket::<Gather>();
     gather.bind("inproc://strangers").unwrap();
     let mut push = context.socket::<zmq::Push>();
     push.connect("inproc://strangers").unwrap();
-    assert!(push.try_send("not a scatter").is_err());
-    assert_eq!(gather.try_recv().unwrap(), None);
+    push.try_send("not a scatter").unwrap();
+    let frame = gather
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .expect("the push's message");
+    assert_eq!(frame, "not a scatter");
 }

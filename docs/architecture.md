@@ -353,9 +353,9 @@ connections waiting for a name.
   the name is bound. A parked connection whose socket is dropped is
   forgotten.
 - Pairing fills both `PeerSlot`s with what a handshake would have
-  established (ZMTP 3.1, the other side's socket type and identity). An
-  incompatible pair is never paired: the far end is dropped, which closes
-  the connection.
+  established (ZMTP 3.1, the other side's socket type and identity). Any
+  two socket types are paired, as in libzmq, where only a handshake
+  checks them.
 - As in libzmq, each direction's HWM is the sender's send HWM plus the
   receiver's receive HWM, unlimited if either is. A connection made
   before the bind only knows its own side, so it uses its own HWMs.
