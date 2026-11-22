@@ -19,6 +19,7 @@ const ZMQ_UNSUBSCRIBE: c_int = 7;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RECONNECT_IVL: c_int = 18;
 const ZMQ_RECONNECT_IVL_MAX: c_int = 21;
+const ZMQ_MAXMSGSIZE: c_int = 22;
 const ZMQ_RCVTIMEO: c_int = 27;
 const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
@@ -296,6 +297,11 @@ impl Socket {
         self.set_int(ZMQ_HEARTBEAT_IVL, millis(interval));
         self.set_int(ZMQ_HEARTBEAT_TIMEOUT, millis(timeout));
         self.set_int(ZMQ_HEARTBEAT_TTL, millis(ttl));
+    }
+
+    /// `ZMQ_MAXMSGSIZE`, in octets.
+    pub fn set_max_message_size(&self, octets: i64) {
+        self.set_bytes(ZMQ_MAXMSGSIZE, &octets.to_ne_bytes());
     }
 
     /// `ZMQ_RECONNECT_IVL` and `ZMQ_RECONNECT_IVL_MAX`, in milliseconds as

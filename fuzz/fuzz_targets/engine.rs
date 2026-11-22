@@ -194,6 +194,7 @@ fn open<T: SocketType>(
         // The context outlives every run: nothing may linger.
         .linger(Linger::For(Duration::ZERO))
         .max_message_size(zmtp_fuzz::MAX_MESSAGE_SIZE)
+        .max_multipart_size(zmtp_fuzz::MAX_MESSAGE_SIZE)
         .security(security(setup));
     if let Some(heartbeat) = setup.heartbeat {
         options = options.heartbeat(heartbeat);

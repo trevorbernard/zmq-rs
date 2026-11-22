@@ -757,6 +757,7 @@ impl<T: SocketType> Socket<T> {
             linger: SharedLinger::new(options.linger.unwrap_or_else(default_linger::<T>)),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
+            max_multipart_size: options.max_multipart_size,
             message_properties: options.message_properties,
             security: options.security,
             heartbeat: options.heartbeat,
@@ -839,6 +840,12 @@ impl<T: SocketType> Socket<T> {
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_max_message_size(&mut self, octets: u64) {
         self.peers.config_mut().max_message_size = Some(octets);
+    }
+
+    /// Changes [`SocketOptions::max_multipart_size`] for binds and connects
+    /// made from now on. Those already made keep what they had.
+    pub fn set_max_multipart_size(&mut self, octets: u64) {
+        self.peers.config_mut().max_multipart_size = Some(octets);
     }
 
     /// Changes [`SocketOptions::message_properties`] for binds and connects made from

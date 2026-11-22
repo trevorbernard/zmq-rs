@@ -13,6 +13,7 @@ pub const MAX_MESSAGE_SIZE: u64 = 64 * 1024 * 1024;
 pub fn decoder_config() -> DecoderConfig {
     DecoderConfig {
         max_message_size: Some(MAX_MESSAGE_SIZE),
+        max_multipart_size: Some(MAX_MESSAGE_SIZE),
     }
 }
 

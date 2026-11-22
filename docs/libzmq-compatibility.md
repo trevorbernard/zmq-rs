@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D1 | `ZMQ_MAXMSGSIZE` limits each frame | Limits the whole message, so a multipart message of small frames is refused |
 | D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
 | D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
 | D8 | An XPUB reports a cancel for a topic the peer never held | Ignores it |
@@ -78,7 +77,6 @@ Divergences that stand.
 | Aborts if `ZMQ_TOS` or `ZMQ_BUSY_POLL` cannot be set | Ignores the failure |
 | A PING shorter than its TTL is read out of bounds | Refused |
 | A heartbeat TTL of 65.6 s or more overflows | Held without overflow |
-| A message of endless `MORE` frames is buffered without bound | Bounded |
 | CURVE's vouch is checked against the client's short-term key only | Also against the server's long-term key |
 | PLAIN's ERROR is sent as `^RROR` (libzmq#4943) | Sent as the RFC has it; both forms accepted. The one Exception that is neither a hazard nor an API shape: copying the bug would fail every other implementation |
 
@@ -163,7 +161,8 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Same; Verified for 0 (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_RECONNECT_IVL_MAX` | `Reconnect::Backoff` | Same; Verified (`tests/interop/tests/reconnect.rs`) |
 | `ZMQ_BACKLOG` | | Gap; Divergence D5 |
-| `ZMQ_MAXMSGSIZE` | `max_message_size` | Divergence D1 |
+| `ZMQ_MAXMSGSIZE` | `max_message_size` | Same; Verified (`tests/interop/tests/max_message_size.rs`) |
+| No limit on a message's frames together, so one of endless `MORE` frames is held without bound (GHSA-h9gj-c9m7-qxqm) | `max_multipart_size`, off by default | zmq-rs only |
 | `ZMQ_SNDHWM`, `ZMQ_RCVHWM` | `send_hwm`, `recv_hwm` and their setters | Same |
 | `ZMQ_MULTICAST_HOPS`, `ZMQ_MULTICAST_LOOP` (d) | | Gap, with UDP |
 | `ZMQ_RCVTIMEO`, `ZMQ_SNDTIMEO` | Per call | Exception (API shape) |

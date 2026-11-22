@@ -175,8 +175,12 @@ pub struct ConnectionConfig {
     /// Keep only the latest message towards the peer, ignoring `send_hwm`
     /// (`ZMQ_CONFLATE`).
     pub conflate_outbound: bool,
-    /// The largest message accepted from the peer, counting all its frames.
+    /// The largest frame accepted from the peer, as libzmq's
+    /// `ZMQ_MAXMSGSIZE`.
     pub max_message_size: Option<u64>,
+    /// The largest message accepted from the peer, counting all its frames.
+    /// libzmq has no such limit.
+    pub max_multipart_size: Option<u64>,
     /// Whether messages from the peer carry the connection's properties.
     pub message_properties: MessageProperties,
     /// How a connecting session retries. Accepted connections never do.
@@ -812,6 +816,7 @@ impl ConnectionConfig {
             conflate_inbound: false,
             conflate_outbound: false,
             max_message_size: None,
+            max_multipart_size: None,
             message_properties: MessageProperties::default(),
             reconnect: Reconnect::default(),
             immediate: false,

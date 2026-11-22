@@ -93,7 +93,7 @@ downgrade off.
 
 **Design:**
 - Decode leniently, as libzmq does. Encode strictly.
-- Always reject a size of 2^63 or more, enforce `max_msg_size` before allocating, and reject a V1 length of 0.
+- Always reject a size of 2^63 or more, enforce `max_message_size`, a frame's limit as libzmq's `ZMQ_MAXMSGSIZE` is, and `max_multipart_size`, a whole message's, before allocating, and reject a V1 length of 0.
 - `zmtp::Frame` and `zmtp::Command` are distinct types.
 
 ### Commands and metadata

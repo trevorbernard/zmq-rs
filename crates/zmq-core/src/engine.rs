@@ -654,6 +654,7 @@ impl Engine {
             peer.version(),
             DecoderConfig {
                 max_message_size: self.config.max_message_size,
+                max_multipart_size: self.config.max_multipart_size,
             },
         );
         // An unversioned ZMTP 1.0 peer's greeting octets were the start of
@@ -839,7 +840,7 @@ impl Engine {
                 let mut metadata = (self.config.message_properties == MessageProperties::Attach)
                     .then(|| connection_metadata(&self.stream, &established));
                 self.curve = codec.map(|mut codec| {
-                    codec.set_max_message_size(self.config.max_message_size);
+                    codec.set_max_multipart_size(self.config.max_multipart_size);
                     codec
                 });
                 self.deadlines.handshake = None;

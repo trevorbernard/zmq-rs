@@ -49,12 +49,12 @@ fn push_and_pull_over_curve() {
 }
 
 #[test]
-fn max_message_size_counts_every_frame_of_a_curve_message() {
+fn max_multipart_size_counts_every_frame_of_a_curve_message() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(secured(Security::curve_server(server)).max_message_size(1000));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(server)).max_multipart_size(1000));
     let bound = pull.bind(free_endpoint()).unwrap();
     let mut push = context.socket_with::<Push>(secured(Security::curve_client(
         Keypair::generate(),

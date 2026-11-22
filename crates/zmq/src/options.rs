@@ -46,6 +46,7 @@ pub struct SocketOptions {
     pub(crate) reconnect: Reconnect,
     pub(crate) immediate: bool,
     pub(crate) max_message_size: Option<u64>,
+    pub(crate) max_multipart_size: Option<u64>,
     pub(crate) message_properties: MessageProperties,
     pub(crate) security: Security,
     pub(crate) heartbeat: Option<Heartbeat>,
@@ -69,6 +70,7 @@ impl Default for SocketOptions {
             reconnect: Reconnect::default(),
             immediate: false,
             max_message_size: None,
+            max_multipart_size: None,
             message_properties: MessageProperties::default(),
             security: Security::default(),
             heartbeat: None,
@@ -141,12 +143,25 @@ impl SocketOptions {
         self
     }
 
-    /// The largest message accepted from peers, in octets, counting all its
-    /// frames (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is
-    /// disconnected. No limit by default.
+    /// The largest frame accepted from peers, in octets
+    /// (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is disconnected.
+    /// As in libzmq, a message of several frames may be larger: see
+    /// [`max_multipart_size`](Self::max_multipart_size). No limit by
+    /// default.
     #[must_use]
     pub fn max_message_size(mut self, octets: u64) -> Self {
         self.max_message_size = Some(octets);
+        self
+    }
+
+    /// The largest message accepted from peers, in octets, counting all its
+    /// frames, an empty one as one octet. A peer that sends a larger one
+    /// is disconnected. libzmq has no such limit: without it, as there, a
+    /// peer can send a message of frames without end, all of which are
+    /// held until the last. No limit by default.
+    #[must_use]
+    pub fn max_multipart_size(mut self, octets: u64) -> Self {
+        self.max_multipart_size = Some(octets);
         self
     }
 

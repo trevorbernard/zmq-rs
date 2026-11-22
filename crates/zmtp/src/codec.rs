@@ -27,6 +27,7 @@ pub struct Encoder {
 pub struct Decoder {
     version: Version,
     max_message_size: Option<u64>,
+    max_multipart_size: Option<u64>,
     /// Received octets in `buf[..filled]`, then space that is already zeroed
     /// (or holds stale input) up to `buf.len()`, so it is never zeroed twice.
     buf: BytesMut,
@@ -44,12 +45,17 @@ pub struct Decoder {
 /// Limits applied while decoding.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DecoderConfig {
+    /// The largest frame accepted, as libzmq's `ZMQ_MAXMSGSIZE`: a message
+    /// of several frames may be larger. A frame over it fails at its
+    /// header, before any of its body is buffered. `None` means unlimited.
+    pub max_message_size: Option<u64>,
     /// The largest message accepted: the sum of its frame bodies, where an
     /// empty frame counts as one octet so that a message of endless empty
     /// frames is bounded too. A command counts alone. A message fails at
     /// the header of the frame that takes it over, before any of that body
-    /// is buffered. `None` means unlimited.
-    pub max_message_size: Option<u64>,
+    /// is buffered. `None` means unlimited, as libzmq is: it has no such
+    /// limit.
+    pub max_multipart_size: Option<u64>,
 }
 
 /// A decoded unit of traffic.
@@ -64,12 +70,12 @@ pub enum Incoming {
 /// Why decoding failed. The connection must be closed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum DecodeError {
-    /// The message, counting its frames so far, is larger than
-    /// [`DecoderConfig::max_message_size`], or a frame is larger than this
-    /// platform can address.
+    /// A frame is larger than [`DecoderConfig::max_message_size`], or than
+    /// this platform can address, or the message, counting its frames so
+    /// far, is larger than [`DecoderConfig::max_multipart_size`].
     MessageTooLarge {
-        /// Octets in the message so far, counting the frame that crossed
-        /// the limit.
+        /// Octets in the frame that is too large, or in the message so far,
+        /// counting the frame that crossed its limit.
         size: u64,
     },
     /// A ZMTP 1.0 frame length of zero, which cannot hold the flags octet.
@@ -244,6 +250,7 @@ impl Decoder {
         Self {
             version,
             max_message_size: config.max_message_size,
+            max_multipart_size: config.max_multipart_size,
             buf: BytesMut::new(),
             filled: 0,
             state: State::Header,
@@ -459,9 +466,13 @@ impl Decoder {
         } else {
             counted_size(size)
         };
-        let too_large = self.max_message_size.is_some_and(|max| message_size > max);
+        let frame_too_large = self.max_message_size.is_some_and(|max| size > max);
+        let message_too_large = self
+            .max_multipart_size
+            .is_some_and(|max| message_size > max);
         let size = match usize::try_from(size) {
-            Ok(size) if !too_large => size,
+            Ok(_) if frame_too_large => return Err(DecodeError::MessageTooLarge { size }),
+            Ok(size) if !message_too_large => size,
             _ => return Err(DecodeError::MessageTooLarge { size: message_size }),
         };
         let body = State::Body {
@@ -477,7 +488,7 @@ fn read_u64(buf: &[u8]) -> Option<u64> {
     buf.first_chunk().copied().map(u64::from_be_bytes)
 }
 
-/// A frame's size towards [`DecoderConfig::max_message_size`].
+/// A frame's size towards [`DecoderConfig::max_multipart_size`].
 pub(crate) fn counted_size(size: u64) -> u64 {
     size.max(1)
 }
@@ -856,6 +867,7 @@ mod tests {
     fn max_message_size_is_enforced_from_the_header() {
         let config = DecoderConfig {
             max_message_size: Some(4),
+            ..DecoderConfig::default()
         };
         for version in ALL {
             let mut d = Decoder::new(version, config);
@@ -878,9 +890,27 @@ mod tests {
     }
 
     #[test]
-    fn max_message_size_counts_every_frame() {
+    fn max_message_size_limits_each_frame_alone() {
         let config = DecoderConfig {
             max_message_size: Some(4),
+            ..DecoderConfig::default()
+        };
+        for version in ALL {
+            let mut d = Decoder::new(version, config);
+            let input = encode(version, &message(&[b"ab", b"cd", b"wxyz"]));
+            assert_eq!(
+                decode_all(&mut d, &input),
+                [Incoming::Message(message(&[b"ab", b"cd", b"wxyz"]))],
+                "{version:?}: 8 octets in frames of at most 4"
+            );
+        }
+    }
+
+    #[test]
+    fn max_multipart_size_counts_every_frame() {
+        let config = DecoderConfig {
+            max_multipart_size: Some(4),
+            ..DecoderConfig::default()
         };
         for version in ALL {
             let mut d = Decoder::new(version, config);
@@ -911,7 +941,8 @@ mod tests {
     #[test]
     fn endless_empty_frames_reach_the_limit() {
         let config = DecoderConfig {
-            max_message_size: Some(1000),
+            max_multipart_size: Some(1000),
+            ..DecoderConfig::default()
         };
         for version in ALL {
             let mut d = Decoder::new(version, config);
@@ -929,7 +960,8 @@ mod tests {
     #[test]
     fn a_command_counts_alone() {
         let config = DecoderConfig {
-            max_message_size: Some(4),
+            max_multipart_size: Some(4),
+            ..DecoderConfig::default()
         };
         let mut input = b"\x01\x03abc".to_vec();
         Encoder::new(Version::V3_1)
@@ -1180,6 +1212,7 @@ mod tests {
             Version::V3_1,
             DecoderConfig {
                 max_message_size: Some(4),
+                ..DecoderConfig::default()
             },
         );
         d.extend_from_slice(b"\x02\x7f\xff\xff\xff\xff\xff\xff\xff");
