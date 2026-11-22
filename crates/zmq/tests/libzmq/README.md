@@ -9,15 +9,20 @@ cargo nextest run -p zmq --all-features --test libzmq
 cargo nextest run -p zmq --all-features --test libzmq spec_req   # one module
 ```
 
-Where zmq-rs differs from libzmq on purpose, a test asserts zmq-rs's
-behavior and cites [`docs/rfc-compliance.md`](../../../../docs/rfc-compliance.md).
+Where a test asserts something other than libzmq's expectation, its
+module's header says so, and the difference is a Divergence or an
+Exception in
+[`docs/libzmq-compatibility.md`](../../../../docs/libzmq-compatibility.md),
+which also says which of the features below are to be added.
 A test marked `#[ignore = "zmq-rs bug: ..."]` found a bug not yet fixed.
 
 ## Not ported
 
-Of 139 tests, these are left out.
+Of 139 tests, 80 are ported and these 59 are left out. Some of the
+ported ones lack cases, for the same reasons: `poller`, `monitor`,
+`security_zap`, `radio_dish` and `inproc_connect`.
 
-**Features zmq-rs does not have** (a to-do list as much as an exclusion):
+**Gaps**, features zmq-rs does not have yet:
 
 | Feature | Tests |
 |---|---|
@@ -25,8 +30,18 @@ Of 139 tests, these are left out.
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
+| A proxy with one socket as both ends, or a REP end | `proxy_single_socket` |
+| A limit on a context's sockets | `many_sockets`, `system` |
+| Context options: `BLOCKY`, `IPV6`, thread options | `ctx_options` |
+| `SNDBUF`, `RCVBUF`, `PRIORITY` | `setsockopt` |
+| Draft sockets used from several threads | `thread_safe` |
+| `zmq_has`, `zmq_version` | `capabilities`, `ancillaries` |
 
-**Not planned** unless someone asks for them, as there is too little call for them:
+**Portable, and not ported yet:** `issue_566` and `sodium`. `fork` and
+`ctx_destroy` are covered by tests of our own, `crates/zmq/tests/fork.rs`
+and `terminated.rs`, not by ports.
+
+**Exclusions**, not planned unless someone asks for them:
 
 | Feature | Tests |
 |---|---|
@@ -38,10 +53,7 @@ Of 139 tests, these are left out.
 | TCP and IPC accept filters, which libzmq deprecated for ZAP | `tcp_accept_filter`, `filter_ipc` |
 
 **libzmq's C API rather than behavior:** `msg_ffn`, `msg_flags`,
-`msg_init`, `ctx_options`, `ctx_destroy`, `setsockopt`,
-`getsockopt_memset`, `socket_null`, `iov`, `atomics`,
-`capabilities`, `ancillaries`, `system`, `sodium`, `fork`,
-`thread_safe`, `many_sockets`, `issue_566`.
+`msg_init`, `getsockopt_memset`, `socket_null`, `iov`, `atomics`.
 
 **Fuzzers,** covered by `fuzz/`: `bind_fuzzer`, `bind_null_fuzzer`,
 `bind_curve_fuzzer`, `connect_fuzzer`, `connect_null_fuzzer` and

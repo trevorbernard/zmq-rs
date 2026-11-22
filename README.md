@@ -9,11 +9,12 @@ An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
 - Own I/O threads (no async runtime required); blocking and executor-agnostic async APIs.
 - Invalid states are compile errors: each socket type exposes only the operations
   its pattern allows.
-- Every libzmq socket type but STREAM, which is not planned, the draft ones behind the `draft` feature, over
+- Every libzmq socket type but STREAM (not planned) and DGRAM (not yet), the draft ones behind the `draft` feature, over
   tcp, ipc and inproc, with libzmq's proxies, monitor events, `zmq_poll`
   and message properties (`zmq_msg_gets`).
 
-See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
+See [docs/libzmq-compatibility.md](docs/libzmq-compatibility.md) for what libzmq has that zmq-rs lacks and where the two differ,
+and [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
 [docs/architecture.md](docs/architecture.md) compares the runtime with libzmq's.
 [docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
 Requires Rust 1.99.
@@ -241,8 +242,9 @@ throughput ran up to three times as fast, for libzmq as well.
 
 ## Differences from libzmq
 
-Deliberate, beyond the API being typed. The full list, with reasons, is in
-[docs/rfc-compliance.md](docs/rfc-compliance.md).
+The ones an application meets first. The full list, with which are to
+stay and which are to go, is in
+[docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 
 - ROUTER `send` fails for an unknown routing id, as with libzmq's
   `ROUTER_MANDATORY`. Ignoring `try_send`'s error drops the message, which is
@@ -266,16 +268,19 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
   the last.
 - The PEER socket ignores `IMMEDIATE`; libzmq refuses `connect_peer` with it.
 
-Not planned unless someone asks, as there is too little call for them:
-STREAM sockets, WebSockets, TIPC, VMCI, GSSAPI and the TCP and IPC accept
-filters. Not yet: polling plain file descriptors beside sockets, UDP,
-timers and `USE_FD`. The full list is in
-[the libzmq test port](crates/zmq/tests/libzmq/README.md#not-ported).
+Not planned unless someone asks: STREAM sockets, WebSockets, TIPC, VMCI,
+GSSAPI, the TCP and IPC accept filters, PGM and NORM, and Windows. Not
+yet: UDP, a socket's file descriptor for another event loop, polling
+plain file descriptors, and libzmq's ZAP handler socket, among others.
+The full list is in
+[docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 
 ## Testing
 
-- **Against libzmq 4.3.5:** every pattern and security mechanism, over
-  tcp and ipc, with zmq-rs on either side (`tests/interop`).
+- **Against libzmq 4.3.5:** every pattern over tcp, and the NULL, PLAIN
+  and CURVE handshakes in both roles; over ipc, PUSH and PULL
+  (`tests/interop`). What is not yet tested against it is listed under
+  [Evidence](docs/libzmq-compatibility.md#evidence).
 - **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
   separate processes the Nix dev shell builds (`just test-legacy`).
 - **libzmq's own regression tests,** 80 of its 139 ported, the rest listed
