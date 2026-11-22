@@ -114,3 +114,26 @@ fn our_channel_drops_multipart_messages() {
         Frame::from("single")
     );
 }
+
+#[test]
+fn libzmq_refuses_connect_peer_with_immediate() {
+    if !libzmq::has_drafts() {
+        return;
+    }
+    let theirs = Socket::new(Kind::Peer);
+    theirs.set_immediate();
+    let refused = theirs.try_connect_peer(&free_endpoint()).unwrap_err();
+    assert!(refused.to_string().contains("Bad address"), "{refused}");
+}
+
+#[test]
+fn we_refuse_connect_peer_with_immediate() {
+    let context = Context::new().unwrap();
+    let mut ours = context.socket_with::<Peer>(zmq::SocketOptions::new().immediate(true));
+    assert!(matches!(
+        ours.connect_peer(free_endpoint()),
+        Err(zmq::Error::Immediate)
+    ));
+    ours.set_immediate(false);
+    ours.connect_peer(free_endpoint()).unwrap();
+}

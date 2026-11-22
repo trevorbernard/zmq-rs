@@ -30,6 +30,10 @@ pub enum Error {
     /// The context has no I/O thread, so only `inproc` can be bound or
     /// connected to (libzmq's `EMTHREAD`).
     NoIoThread,
+    /// The socket's `immediate` option is set, with which a peer cannot be
+    /// named before its connection is up, for `connect_peer` (libzmq's
+    /// `EFAULT`).
+    Immediate,
 }
 
 impl From<crate::Terminated> for Error {
@@ -367,6 +371,7 @@ impl fmt::Display for Error {
             Self::Terminated => crate::Terminated.fmt(f),
             Self::RoutingIdInUse => f.write_str("another peer has that routing id"),
             Self::NoIoThread => f.write_str("the context has no I/O thread"),
+            Self::Immediate => f.write_str("the socket's immediate option is set"),
         }
     }
 }

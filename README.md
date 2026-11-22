@@ -266,7 +266,6 @@ stay and which are to go, is in
 - PUB `send` returns how many subscribers the message was queued for.
 - With `CONFLATE`, subscriptions are never conflated; libzmq can lose all but
   the last.
-- The PEER socket ignores `IMMEDIATE`; libzmq refuses `connect_peer` with it.
 
 Not planned unless someone asks: STREAM sockets, WebSockets, TIPC, VMCI,
 GSSAPI, the TCP and IPC accept filters, PGM and NORM, and Windows. Not

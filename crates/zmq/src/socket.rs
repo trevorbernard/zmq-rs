@@ -726,16 +726,6 @@ pub struct Socket<T: SocketType> {
     _type: PhantomData<T>,
 }
 
-#[cfg(feature = "draft")]
-fn is_peer(kind: zmtp::SocketType) -> bool {
-    kind == zmtp::SocketType::Peer
-}
-
-#[cfg(not(feature = "draft"))]
-fn is_peer(_: zmtp::SocketType) -> bool {
-    false
-}
-
 /// libzmq's `xsub_t` and `dish_t` start with a linger of zero, so that a
 /// socket being closed does not wait for its subscriptions to be sent.
 fn default_linger<T: SocketType>() -> Linger {
@@ -752,8 +742,7 @@ impl<T: SocketType> Socket<T> {
             identity: options.identity,
             send_hwm: options.send_hwm,
             recv_hwm: options.recv_hwm,
-            // PEER's connect_peer names the peer at once.
-            immediate: options.immediate && !is_peer(T::KIND),
+            immediate: options.immediate,
             linger: SharedLinger::new(options.linger.unwrap_or_else(default_linger::<T>)),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
@@ -833,8 +822,7 @@ impl<T: SocketType> Socket<T> {
     /// Changes [`SocketOptions::immediate`] for binds and connects made from
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_immediate(&mut self, immediate: bool) {
-        // PEER's connect_peer names the peer at once.
-        self.peers.config_mut().immediate = immediate && !is_peer(T::KIND);
+        self.peers.config_mut().immediate = immediate;
     }
 
     /// Changes [`SocketOptions::max_message_size`] for binds and connects made from
@@ -1049,6 +1037,12 @@ impl<T: SocketType> Socket<T> {
     /// and ends for good when the bound socket is dropped.
     pub fn connect(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
         self.connect_key(&endpoint.written()).map(drop)
+    }
+
+    /// Whether [`SocketOptions::immediate`] is set for connects made now.
+    #[cfg(feature = "draft")]
+    pub(crate) fn is_immediate(&mut self) -> bool {
+        self.peers.config_mut().immediate
     }
 
     /// Fails if `target` needs an I/O thread and the context has none.

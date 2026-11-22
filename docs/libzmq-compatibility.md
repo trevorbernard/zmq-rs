@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D13 | `zmq_connect_peer` is refused under `ZMQ_IMMEDIATE` | `IMMEDIATE` is ignored |
 | D14 | `zmq_unbind` of an `inproc` name frees the name only | Also closes the connections accepted on it |
 | D15 | A ZMTP 2.0 peer's socket-type octet is not checked | Checked, and a mismatch refused |
 | D16 | An XSUB's send and an XPUB's receive read a subscription from any frame of a message, unless `ZMQ_ONLY_FIRST_SUBSCRIBE` | Read one only from a single-frame message; no option |
@@ -163,7 +162,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_LAST_ENDPOINT` | The `Endpoint` that `bind` returns; nothing after a connect | Same; Gap after a connect |
 | `ZMQ_ROUTER_MANDATORY` | Always on | Exception (API shape) |
 | `ZMQ_TCP_KEEPALIVE`, `_CNT`, `_IDLE`, `_INTVL` | `TcpKeepalive` | Same; Gap: forcing probes off |
-| `ZMQ_IMMEDIATE` | `SocketOptions::immediate`, `set_immediate` | Same; Divergence D13 |
+| `ZMQ_IMMEDIATE` | `SocketOptions::immediate`, `set_immediate` | Same; Verified for `connect_peer`'s refusal (`tests/interop/tests/peerchannel.rs`) |
 | `ZMQ_XPUB_VERBOSE`, `ZMQ_XPUB_VERBOSER` | `Verbosity` | Same |
 | `ZMQ_MECHANISM` | | Gap |
 | `ZMQ_PLAIN_SERVER`, `_USERNAME`, `_PASSWORD` | `Security::plain_server`, `Security::PlainClient` | Same |

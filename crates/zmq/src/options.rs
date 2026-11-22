@@ -138,7 +138,8 @@ impl SocketOptions {
     /// handshake completes, and stops being one whenever it breaks,
     /// discarding what was queued on it (`ZMQ_IMMEDIATE`, default off). Off,
     /// messages queue on it from [`connect`](crate::Socket::connect) on and
-    /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
+    /// across reconnections. `inproc` ignores it, and PEER's `connect_peer`
+    /// fails while it is set.
     #[must_use]
     pub fn immediate(mut self, immediate: bool) -> Self {
         self.immediate = immediate;
