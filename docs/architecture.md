@@ -108,9 +108,9 @@ signal again for data it has already reported.
   failed on a protocol error does, when a TCP connection attempt is
   refused, or when a connection breaks or times out before its handshake
   completes. `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` has no flag, as
-  `disconnect` always ends the session. The monitor reports no event for
-  giving up, where libzmq's reports the attempt's `CLOSED`: the last
-  `ConnectRetried` or `Disconnected` is followed by nothing.
+  `disconnect` always ends the session. Nothing follows the last event:
+  the `Closed` of a refused attempt, as in libzmq, or the `Disconnected`
+  of a failed handshake.
 - Dropping a connection's sender starts its linger: queued messages keep
   being delivered, across reconnects, until the queue is written or the
   `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at
@@ -289,15 +289,18 @@ makes or accepts shares its `ConnectionConfig::monitor` sink, so sessions
 and listeners on the I/O threads report straight to the socket's
 monitors; binding reports from the socket's thread.
 
-- `Listening`, `BindFailed`, `Accepted`, `AcceptFailed` and `Closed` come
-  from listeners, and carry the bound endpoint, as do the events of the
+- `Listening`, `BindFailed`, `Accepted`, `AcceptFailed` and a listener's
+  `Closed` come from listeners, and carry the bound endpoint, as do the events of the
   connections they accept.
 - `Connected` (connections we make), `HandshakeSucceeded`,
   `HandshakeFailed` and `Disconnected` come from sessions as their engine
   progresses. As in libzmq, a connection that was up reports
   `Disconnected` when it ends, after `HandshakeFailed` if its handshake
-  never finished. A connection attempt that never connected reports only
-  `ConnectRetried { interval }`.
+  never finished. A connection attempt that never connected reports
+  `Closed`, as libzmq does for the attempt's socket, and then
+  `ConnectRetried { interval }` if it is to be tried again. A `tcp`
+  attempt that fails before it has a socket, as on a host name that does
+  not resolve, reports only the latter.
 - `HandshakeFailure` is `Authentication { status }` (300, 400 or 500, from
   our authenticator, or from the server's ERROR for a client), `Protocol`
   with the typed error, or `NoDetail` for a broken connection or timeout.

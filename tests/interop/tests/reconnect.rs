@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{Context, EventKind, Monitor, Push, Reconnect, SocketOptions};
 use zmq_interop::libzmq::{self, Kind, Socket};
-use zmq_test_ports::{free_endpoint, free_port};
+use zmq_test_ports::free_endpoint;
 
 const MS: fn(u64) -> Duration = Duration::from_millis;
 
@@ -24,19 +24,33 @@ fn our_intervals(monitor: &mut Monitor, count: usize) -> Vec<Duration> {
     intervals
 }
 
+/// A `tcp` endpoint and an `ipc` one, with nothing listening at either.
+fn dead_endpoints() -> [String; 2] {
+    let path = std::env::temp_dir().join(format!("zmq-interop-nobody-{}", std::process::id()));
+    [free_endpoint(), format!("ipc://{}", path.display())]
+}
+
 fn our_push(reconnect: Reconnect) -> (zmq::Socket<Push>, Monitor) {
+    our_push_to(&free_endpoint(), reconnect)
+}
+
+fn our_push_to(endpoint: &str, reconnect: Reconnect) -> (zmq::Socket<Push>, Monitor) {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(reconnect));
     let monitor = push.monitor();
-    push.connect(free_endpoint()).unwrap();
+    push.connect(endpoint).unwrap();
     (push, monitor)
 }
 
 fn libzmq_push(interval: i32, max: i32) -> (Socket, libzmq::Monitor) {
+    libzmq_push_to(&free_endpoint(), interval, max)
+}
+
+fn libzmq_push_to(endpoint: &str, interval: i32, max: i32) -> (Socket, libzmq::Monitor) {
     let push = Socket::new(Kind::Push);
     push.set_reconnect(interval, max);
     let monitor = push.monitor();
-    push.connect(free_port());
+    push.connect_str(endpoint);
     (push, monitor)
 }
 
@@ -104,5 +118,47 @@ fn we_never_retry_with_an_interval_of_zero() {
                 .all(|kind| !matches!(kind, EventKind::ConnectRetried { .. })),
             "{reconnect:?}: {events:?}"
         );
+    }
+}
+
+#[test]
+fn libzmq_reports_closed_before_each_retry() {
+    for endpoint in dead_endpoints() {
+        let (_push, monitor) = libzmq_push_to(&endpoint, 10, 10);
+        let events: Vec<u16> = monitor
+            .during(MS(200))
+            .into_iter()
+            .map(|(event, _)| event)
+            .filter(|event| [libzmq::EVENT_CLOSED, libzmq::EVENT_CONNECT_RETRIED].contains(event))
+            .collect();
+        assert!(events.len() >= 4, "{endpoint}: {events:?}");
+        for pair in events.as_chunks::<2>().0 {
+            assert_eq!(
+                *pair,
+                [libzmq::EVENT_CLOSED, libzmq::EVENT_CONNECT_RETRIED],
+                "{endpoint}: {events:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn we_report_closed_before_each_retry() {
+    for endpoint in dead_endpoints() {
+        let (_push, mut monitor) = our_push_to(
+            &endpoint,
+            Reconnect::Backoff {
+                initial: MS(10),
+                max: MS(10),
+            },
+        );
+        let events = our_events(&mut monitor, MS(200));
+        assert!(events.len() >= 4, "{endpoint}: {events:?}");
+        for pair in events.as_chunks::<2>().0 {
+            assert!(
+                matches!(pair, [EventKind::Closed, EventKind::ConnectRetried { .. }]),
+                "{endpoint}: {events:?}"
+            );
+        }
     }
 }

@@ -48,7 +48,6 @@ sees, with no safety gain.
 | D1 | `ZMQ_MAXMSGSIZE` limits each frame | Limits the whole message, so a multipart message of small frames is refused |
 | D5 | Listen backlog of 100, set by `ZMQ_BACKLOG` | 128 for TCP, 1024 once a type of service, device or busy polling is set, the system's maximum for IPC; no option |
 | D6 | A local routing id is any 1 to 255 octets; an empty one is `EINVAL` | A leading `00` is refused; an empty one is accepted |
-| D7 | A failed connection attempt reports `CLOSED`, then `CONNECT_RETRIED` | Reports `ConnectRetried` only |
 | D8 | An XPUB reports a cancel for a topic the peer never held | Ignores it |
 | D9 | Application metadata (`ZMQ_METADATA`) is announced sorted by name | Announced in the order added |
 | D10 | A context may have no I/O threads, for `inproc` alone | Refused |
@@ -262,7 +261,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `CONNECTED`, `LISTENING`, `ACCEPTED`, `DISCONNECTED` | `Connected`, `Listening`, `Accepted`, `Disconnected` | Same |
 | `CONNECT_RETRIED` | `ConnectRetried` | Same |
 | `BIND_FAILED`, `ACCEPT_FAILED` | `BindFailed`, `AcceptFailed` | Same |
-| `CLOSED` | `Closed`, for a listener | Same; Divergence D7 |
+| `CLOSED` | `Closed`, for a listener and for a failed connection attempt | Same; Verified for an attempt (`tests/interop/tests/reconnect.rs`) |
 | `CONNECT_DELAYED`, `CLOSE_FAILED` | | Gap |
 | `MONITOR_STOPPED` | `MonitorStopped`, as `recv`'s error | Same |
 | `HANDSHAKE_SUCCEEDED`, `HANDSHAKE_FAILED_NO_DETAIL`, `_PROTOCOL`, `_AUTH` | `HandshakeSucceeded`, `HandshakeFailed` | Same |

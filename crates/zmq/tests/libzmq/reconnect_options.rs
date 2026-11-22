@@ -3,9 +3,9 @@
 //! (zmq-rs's `set_reconnect_stop`, with the `draft` feature) ends the
 //! retrying.
 //!
-//! zmq-rs's monitor reports neither `ZMQ_EVENT_CONNECT_DELAYED` nor a
-//! `ZMQ_EVENT_CLOSED` for a connection attempt, so where libzmq's test
-//! ends on a `CLOSED`, these check that no retry follows.
+//! zmq-rs's monitor does not report `ZMQ_EVENT_CONNECT_DELAYED`, which is
+//! left out of the events expected. Where libzmq's test ends on a `CLOSED`,
+//! these also check that no retry follows.
 
 use std::time::Duration;
 
@@ -104,6 +104,7 @@ mod stop {
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
         // The one retry is refused, and is the last.
+        expect(&mut monitor, EventKind::Closed);
         expect_nothing(&mut monitor, RETRIES);
     }
 
@@ -114,7 +115,9 @@ mod stop {
         let mut sub = context.socket_with::<Sub>(zero_linger());
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
     }
 
@@ -174,13 +177,17 @@ mod stop {
         let mut sub = context.socket_with::<Sub>(zero_linger());
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
 
         sub.disconnect(&endpoint).unwrap();
-        // One retry may have been on its way.
-        if let Ok(Some(event)) = monitor.recv_timeout(SETTLE) {
+        // One attempt may have been on its way.
+        while let Ok(Some(event)) = monitor.recv_timeout(SETTLE) {
             assert!(
-                matches!(event.kind, EventKind::ConnectRetried { .. }),
+                matches!(
+                    event.kind,
+                    EventKind::Closed | EventKind::ConnectRetried { .. }
+                ),
                 "{event:?}"
             );
         }

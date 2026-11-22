@@ -281,7 +281,7 @@ fn an_accepted_connection_is_not_also_reported_as_connected() {
 }
 
 #[test]
-fn an_attempt_that_never_connects_only_retries() {
+fn an_attempt_that_never_connects_closes_and_retries() {
     let context = Context::new().unwrap();
     let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(Reconnect::Fixed {
         interval: Duration::from_millis(10),
@@ -294,11 +294,14 @@ fn an_attempt_that_never_connects_only_retries() {
             matches!(kind, EventKind::ConnectRetried { .. })
         }));
     }
-    assert!(
-        seen.iter()
-            .all(|kind| matches!(kind, EventKind::ConnectRetried { .. })),
-        "{seen:?}"
-    );
+    // As libzmq reports them: neither `Connected` nor `Disconnected`.
+    assert_eq!(seen.len(), 6, "{seen:?}");
+    for pair in seen.as_chunks::<2>().0 {
+        assert!(
+            matches!(pair, [EventKind::Closed, EventKind::ConnectRetried { .. }]),
+            "{seen:?}"
+        );
+    }
 }
 
 /// Waits for `monitor` to report its socket gone, past any events.

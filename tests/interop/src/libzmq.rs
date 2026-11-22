@@ -343,6 +343,14 @@ impl Socket {
             .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
     }
 
+    /// Connects to `endpoint` as written, such as `ipc:///path`.
+    pub fn connect_str(&self, endpoint: &str) {
+        let c_endpoint = CString::new(endpoint).unwrap();
+        // SAFETY: `c_endpoint` is a valid C string for the call.
+        check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+    }
+
     /// Joins a DISH socket to `group`. Needs a libzmq with drafts.
     pub fn join(&self, group: &str) {
         let group = CString::new(group).unwrap();
