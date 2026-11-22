@@ -1227,7 +1227,8 @@ impl Drop for Inner {
 impl ConnectionConfig {
     /// Adds an application property, as libzmq's `ZMQ_METADATA` does: its
     /// name must start with `X-` and its value must not be empty. A name
-    /// already added keeps its first value, as in libzmq.
+    /// already added keeps its first value, and the properties are
+    /// announced sorted by name, as in libzmq.
     pub fn add_metadata(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -1245,9 +1246,22 @@ impl ConnectionConfig {
         if self.metadata.get(name.as_bytes()).is_some() {
             return Ok(());
         }
-        self.metadata
-            .insert(name, Frame::copy_from_slice(value))
-            .map_err(|_| InvalidMetadata::ValueTooLong)
+        // Announced sorted by name, as libzmq, which keeps them in a map.
+        let mut properties: Vec<_> = self
+            .metadata
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        properties.push((name, Frame::copy_from_slice(value)));
+        properties.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        let mut sorted = Metadata::new();
+        for (name, value) in properties {
+            sorted
+                .insert(name, value)
+                .map_err(|_| InvalidMetadata::ValueTooLong)?;
+        }
+        self.metadata = sorted;
+        Ok(())
     }
 }
 

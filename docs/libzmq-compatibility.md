@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D9 | Application metadata (`ZMQ_METADATA`) is announced sorted by name | Announced in the order added |
 | D10 | A context may have no I/O threads, for `inproc` alone | Refused |
 | D11 | `inproc` pairs any two socket types | Refuses a pair RFC 23 does not allow |
 | D12 | `ZMQ_HEARTBEAT_TTL` is truncated to deciseconds, and `EINVAL` above the maximum | Rounded up, and saturating |
@@ -193,7 +192,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_THREAD_SAFE` | | N/A |
 | `ZMQ_USE_FD` | | Gap |
 | `ZMQ_BINDTODEVICE` | `bind_to_device` | Same |
-| `ZMQ_METADATA` (d) | `add_metadata` | Same; Divergence D9 |
+| `ZMQ_METADATA` (d) | `add_metadata` | Same; Verified for the order announced (`tests/interop/tests/metadata.rs`) |
 | `ZMQ_ROUTER_NOTIFY` (d) | `set_notify` | Same |
 | `ZMQ_IN_BATCH_SIZE` (d), `ZMQ_OUT_BATCH_SIZE` (d) | | Gap |
 | `ZMQ_ONLY_FIRST_SUBSCRIBE` (d) | | Divergence D16 |

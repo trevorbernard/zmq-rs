@@ -124,7 +124,7 @@ downgrade off.
 - As libzmq: the name must start with `X-`, exactly so, and be at most 255 octets; the value must not be empty; a name added twice keeps its first value; a socket's binds and connects announce what it had when they were made.
 - libzmq takes one `name:value` string and splits it at the first colon; ours takes the two apart.
 - Unlike libzmq, which accepts any octets, the name must use RFC 37's characters, and two names differing only in case count as one, as the RFC has them.
-- They are announced in the order added, where libzmq sorts them by name.
+- They are announced sorted by name, octet by octet, as libzmq's are.
 - REQ and REP sockets' messages keep their connection's properties once the envelope is taken off, as libzmq's do.
 
 **Hello, disconnect and hiccup messages** (`ZMQ_HELLO_MSG`, `ZMQ_DISCONNECT_MSG`, `ZMQ_HICCUP_MSG`, draft options), with the `draft` feature, on the socket types libzmq honours them on. Each is one frame; empty, the default, turns it off.
