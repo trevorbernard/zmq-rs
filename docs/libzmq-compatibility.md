@@ -50,7 +50,7 @@ sees, with no safety gain.
 | D17 | A disconnect stops reconnection only with `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` | Always |
 | D18 | `ENODEV`, `ENAMETOOLONG`, `ENOCOMPATPROTO` and `EPROTONOSUPPORT` are distinct | `ENODEV` is `InvalidEndpoint`, `ENAMETOOLONG` an `Io` error, and the last two are both `UnsupportedTransport` |
 | D19 | `zmq_socket` fails with `ETERM` once the context is shut down | Succeeds; the socket's operations then fail |
-| D21 | A PAIR drops what a departed peer had delivered, with its pipe | Still delivers it, ahead of the next peer's |
+| D21 | A PAIR holds a departed peer's place until the application has read what it sent, and turns away a peer that arrives meanwhile, whose messages are lost | Frees the place when the departed peer's session ends, so the newcomer is let in. Found on 2026-11-22 in place of what was listed, that libzmq drops the departed peer's messages: it delivers them, as we do (`tests/interop/tests/pair.rs`). Not yet ruled a Divergence to close or an Exception |
 
 ## Exceptions
 
