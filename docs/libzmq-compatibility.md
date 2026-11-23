@@ -94,6 +94,7 @@ Divergences that stand.
 | A REQ waits forever if its peer closes before replying | `RequestError::PeerGone` | The typed `request` has no state to be stuck in |
 | A REQ is stuck (`EFSM`) after a receive times out, unless `ZMQ_REQ_RELAXED` | Takes a new request; `request_timeout` turns on correlation for good | As above; a ROUTER serving it then sees the request id frame |
 | `zmq_unbind` closes the listener in the background | Returns once it is closed | A stronger guarantee |
+| The socket file of an `ipc` path is left when its listener closes; only that of an `ipc://*` bind is removed | Removed, if it is still the file the listener made (`tests/interop/tests/ipc.rs`) | Nothing can connect to the file libzmq leaves, and its next bind removes it |
 | A source address or SOCKS proxy that cannot be resolved, or a host that is empty, is accepted by a connect and never connects | `InvalidEndpoint` at once | Never worked in libzmq |
 | Closes on a socket-type mismatch | Sends ERROR, then closes | RFC 37; Unverified that libzmq treats the two alike |
 | Application metadata names are any octets | RFC 37's characters, compared without case | Never valid on the wire |
@@ -163,8 +164,8 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_IMMEDIATE` | `SocketOptions::immediate`, `set_immediate` | Same; Verified for `connect_peer`'s refusal (`tests/interop/tests/peerchannel.rs`) |
 | `ZMQ_XPUB_VERBOSE`, `ZMQ_XPUB_VERBOSER` | `Verbosity` | Same |
 | `ZMQ_MECHANISM` | | Gap |
-| `ZMQ_PLAIN_SERVER`, `_USERNAME`, `_PASSWORD` | `Security::plain_server`, `Security::PlainClient` | Same |
-| `ZMQ_CURVE_SERVER`, `_PUBLICKEY`, `_SECRETKEY`, `_SERVERKEY` | `Security::curve_server`, `curve_client`, `Keypair` | Same |
+| `ZMQ_PLAIN_SERVER`, `_USERNAME`, `_PASSWORD` | `Security::plain_server`, `Security::PlainClient` | Same; Verified with either as the server, either binding, every transport (`tests/interop/tests/mechanisms.rs`) |
+| `ZMQ_CURVE_SERVER`, `_PUBLICKEY`, `_SECRETKEY`, `_SERVERKEY` | `Security::curve_server`, `curve_client`, `Keypair` | Same; Verified as PLAIN is (`mechanisms.rs`) |
 | `ZMQ_ZAP_DOMAIN`, `ZMQ_ZAP_ENFORCE_DOMAIN` (d) | A domain comes only with an `Authenticator` | Gap, with the ZAP handler socket |
 | `ZMQ_PROBE_ROUTER` | `set_probe` on DEALER and ROUTER | Same; Gap on REQ |
 | `ZMQ_REQ_CORRELATE` | `set_correlation` | Same |
@@ -270,9 +271,6 @@ that bar. A Divergence is taken off its list once it is closed. What is
 known to fall short of the bar:
 
 - **No test against libzmq** for:
-  - `ipc` and IPv6 under PLAIN or CURVE
-  - PLAIN succeeding through the typed sockets
-  - CURVE with ZAP when libzmq is the server
   - a ZMTP 3.0 peer (libzmq 4.0 or 4.1)
   - `XPUB_VERBOSE`, `XPUB_VERBOSER`, `XPUB_NODROP`, `INVERT_MATCHING`,
     `TOPICS_COUNT`, `XSUB_VERBOSE_UNSUBSCRIBE`
@@ -292,7 +290,6 @@ known to fall short of the bar:
 - **libzmq tests ported in part**: `poller` (6 of 49 cases), `monitor`
   (4 of 10), `security_zap` (12 of 30), `radio_dish` (9 of 16).
 - **Not settled by reading the sources**:
-  - which `ipc` socket files libzmq removes when a listener closes
   - whether libzmq's draft sockets talk to a ZMTP 1.0 or 2.0 peer: ours
     refuse one, having no RFC 15 socket-type number to announce
   - whether libzmq's proxy stalls both directions when one end is full

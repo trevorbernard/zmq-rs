@@ -2,144 +2,18 @@
 //! libzmq's: each as either type, with either of the two binding, over
 //! `tcp` on IPv4 and IPv6 and over `ipc`, by path and by abstract name.
 
-use std::net::TcpListener;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
     Context, Dealer, Frame, Message, Pair, Pub, Pull, Push, Rep, Req, Router, RoutingId,
-    SocketOptions, SocketType, Sub, XPub, XPubEvent, XSub,
+    SocketOptions, Sub, XPub, XPubEvent, XSub,
 };
 use zmq_interop::libzmq::{Kind, Socket};
-use zmq_test_ports::free_port;
+use zmq_interop::link::{Link, links};
 
 const FIVE: Duration = Duration::from_secs(5);
-
-#[derive(Debug, Clone, Copy)]
-enum Binds {
-    Ours,
-    Libzmq,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Transport {
-    Tcp,
-    Tcp6,
-    Ipc,
-    /// A name in Linux's abstract socket namespace.
-    IpcAbstract,
-}
-
-/// How a socket of ours and one of libzmq's are joined.
-#[derive(Debug, Clone, Copy)]
-struct Link {
-    binds: Binds,
-    transport: Transport,
-}
-
-/// Every link this host can make: IPv6 only where its loopback can be
-/// bound, `ipc` only on Unix.
-fn links() -> Vec<Link> {
-    let mut transports = vec![Transport::Tcp];
-    if TcpListener::bind("[::1]:0").is_ok() {
-        transports.push(Transport::Tcp6);
-    }
-    if cfg!(unix) {
-        transports.push(Transport::Ipc);
-    }
-    if cfg!(any(target_os = "linux", target_os = "android")) {
-        transports.push(Transport::IpcAbstract);
-    }
-    transports
-        .into_iter()
-        .flat_map(|transport| [Binds::Ours, Binds::Libzmq].map(|binds| Link { binds, transport }))
-        .collect()
-}
-
-/// The start of the `ipc` paths libzmq binds for this test.
-fn ipc_prefix() -> String {
-    format!("zmq-interop-pairs-{}-", std::process::id())
-}
-
-/// Removes, when dropped, the socket files libzmq leaves: its context
-/// outlives the test, and with it the listeners that would remove them.
-struct Sweep;
-
-impl Drop for Sweep {
-    fn drop(&mut self) {
-        let Ok(entries) = std::fs::read_dir(std::env::temp_dir()) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            if entry
-                .file_name()
-                .to_string_lossy()
-                .starts_with(&ipc_prefix())
-            {
-                let _ = std::fs::remove_file(entry.path());
-            }
-        }
-    }
-}
-
-impl Link {
-    /// What a socket of ours binds, to be told where it is bound.
-    fn wildcard(self) -> String {
-        match self.transport {
-            Transport::Tcp => "tcp://127.0.0.1:*".to_owned(),
-            Transport::Tcp6 => "tcp://[::1]:*".to_owned(),
-            Transport::Ipc => "ipc://*".to_owned(),
-            // An abstract name has no wildcard.
-            Transport::IpcAbstract => self.free(),
-        }
-    }
-
-    /// An endpoint nothing is bound to, for libzmq to bind.
-    fn free(self) -> String {
-        static NEXT: AtomicU32 = AtomicU32::new(0);
-        match self.transport {
-            Transport::Tcp => format!("tcp://{}", free_port()),
-            Transport::Tcp6 => format!("tcp://[::1]:{}", free_port().port()),
-            Transport::Ipc => format!(
-                "ipc://{}/{}{}",
-                std::env::temp_dir().display(),
-                ipc_prefix(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ),
-            Transport::IpcAbstract => format!(
-                "ipc://@{}{}",
-                ipc_prefix(),
-                NEXT.fetch_add(1, Ordering::Relaxed)
-            ),
-        }
-    }
-
-    /// A socket of libzmq's, able to use this link's transport.
-    fn theirs(self, kind: Kind) -> Socket {
-        let socket = Socket::new(kind);
-        if self.transport == Transport::Tcp6 {
-            socket.set_ipv6();
-        }
-        socket
-    }
-
-    /// Joins `ours` and `theirs`, neither bound nor connected yet.
-    fn join<T: SocketType>(self, ours: &mut zmq::Socket<T>, theirs: &Socket) {
-        match self.binds {
-            Binds::Ours => {
-                let bound = ours.bind(self.wildcard()).unwrap();
-                theirs.connect_str(&bound.to_string());
-            }
-            Binds::Libzmq => {
-                let endpoint = self.free();
-                theirs.bind(&endpoint);
-                ours.connect(&endpoint).unwrap();
-            }
-        }
-    }
-}
 
 /// Runs `f` on a thread of its own, for calls of ours that block.
 fn spawn<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> mpsc::Receiver<T> {
@@ -177,8 +51,8 @@ fn message<const N: usize>(frames: [&'static str; N]) -> Message {
 
 #[test]
 fn req_and_rep() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
 
         let rep = link.theirs(Kind::Rep);
@@ -206,8 +80,8 @@ fn req_and_rep() {
 
 #[test]
 fn req_and_router() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
 
         let router = link.theirs(Kind::Router);
@@ -240,8 +114,8 @@ fn req_and_router() {
 
 #[test]
 fn dealer_and_rep() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
 
         let rep = link.theirs(Kind::Rep);
@@ -269,8 +143,8 @@ fn dealer_and_rep() {
 
 #[test]
 fn dealer_and_router() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
 
         let router = link.theirs(Kind::Router);
@@ -303,8 +177,8 @@ fn dealer_and_router() {
 
 #[test]
 fn dealer_and_dealer() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
         let theirs = link.theirs(Kind::Dealer);
         let mut ours = context.socket::<Dealer>().unwrap();
@@ -324,8 +198,8 @@ fn dealer_and_dealer() {
 /// each tries until the other receives.
 #[test]
 fn router_and_router() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
         let theirs = link.theirs(Kind::Router);
         theirs.set_routing_id(b"theirs");
@@ -465,8 +339,8 @@ fn libzmq_publishes(link: Link, publisher: Publisher, subscriber: Subscriber) {
 
 #[test]
 fn publishers_and_subscribers() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         for publisher in [Publisher::Pub, Publisher::XPub] {
             for subscriber in [Subscriber::Sub, Subscriber::XSub] {
                 we_publish(link, publisher, subscriber);
@@ -478,8 +352,8 @@ fn publishers_and_subscribers() {
 
 #[test]
 fn push_and_pull() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
 
         let pull = link.theirs(Kind::Pull);
@@ -502,8 +376,8 @@ fn push_and_pull() {
 
 #[test]
 fn pair_and_pair() {
-    let _sweep = Sweep;
-    for link in links() {
+    let links = links();
+    for link in links.iter() {
         let context = Context::new().unwrap();
         let theirs = link.theirs(Kind::Pair);
         let mut ours = context.socket::<Pair>().unwrap();
@@ -523,6 +397,7 @@ fn pair_and_pair() {
 mod draft {
     use zmq::{Channel, Client, Dish, Gather, Group, Peer, Radio, Scatter, Server};
     use zmq_interop::libzmq;
+    use zmq_interop::link::Binds;
 
     use super::*;
 
@@ -531,8 +406,8 @@ mod draft {
         if !libzmq::has_drafts() {
             return;
         }
-        let _sweep = Sweep;
-        for link in links() {
+        let links = links();
+        for link in links.iter() {
             let context = Context::new().unwrap();
 
             let server = link.theirs(Kind::Server);
@@ -566,8 +441,8 @@ mod draft {
         }
         let weather = Group::new("weather").unwrap();
         let sports = Group::new("sports").unwrap();
-        let _sweep = Sweep;
-        for link in links() {
+        let links = links();
+        for link in links.iter() {
             let context = Context::new().unwrap();
 
             let dish = link.theirs(Kind::Dish);
@@ -609,8 +484,8 @@ mod draft {
         if !libzmq::has_drafts() {
             return;
         }
-        let _sweep = Sweep;
-        for link in links() {
+        let links = links();
+        for link in links.iter() {
             let context = Context::new().unwrap();
 
             let gather = link.theirs(Kind::Gather);
@@ -638,8 +513,8 @@ mod draft {
         if !libzmq::has_drafts() {
             return;
         }
-        let _sweep = Sweep;
-        for link in links() {
+        let links = links();
+        for link in links.iter() {
             let context = Context::new().unwrap();
             let theirs = link.theirs(Kind::Peer);
             let mut ours = context.socket::<Peer>().unwrap();
@@ -680,8 +555,8 @@ mod draft {
         if !libzmq::has_drafts() {
             return;
         }
-        let _sweep = Sweep;
-        for link in links() {
+        let links = links();
+        for link in links.iter() {
             let context = Context::new().unwrap();
             let theirs = link.theirs(Kind::Channel);
             let mut ours = context.socket::<Channel>().unwrap();

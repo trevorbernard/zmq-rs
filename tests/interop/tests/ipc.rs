@@ -136,3 +136,40 @@ fn a_libzmq_push_reaches_our_pull_over_an_abstract_name() {
         Message::from("hello abstract us")
     );
 }
+
+/// Whether `path` is gone within a second.
+fn removed(path: &std::path::Path) -> bool {
+    let started = std::time::Instant::now();
+    while path.exists() {
+        if started.elapsed() > Duration::from_secs(1) {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+/// libzmq removes the file of an `ipc://*` bind when its listener closes,
+/// and no other.
+#[test]
+fn libzmq_leaves_the_socket_file_of_a_path_it_was_given() {
+    let path = socket_path("left-by-libzmq");
+    let pull = Socket::new(Kind::Pull);
+    pull.bind(&format!("ipc://{}", path.display()));
+    assert!(path.exists());
+    // Its context goes with it, and so its listener.
+    drop(pull);
+    assert!(!removed(&path));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn we_remove_the_socket_file_of_a_path_we_were_given() {
+    let path = socket_path("removed-by-us");
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>().unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
+    assert!(path.exists());
+    drop(pull);
+    assert!(removed(&path));
+}

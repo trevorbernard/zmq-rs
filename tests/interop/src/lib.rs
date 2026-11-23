@@ -6,6 +6,7 @@
 use std::env;
 
 pub mod libzmq;
+pub mod link;
 mod peer;
 
 pub use peer::{ConnectError, Peer, Security};
