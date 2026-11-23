@@ -131,9 +131,10 @@ Divergences that stand.
 | `pgm://`, `epgm://`, `norm://`, `ws://`, `wss://`, `tipc://`, `vmci://` | | Exclusion |
 | `ZMQ_USE_FD`: a listener or connection from a file descriptor the application supplies | | Gap |
 
-Platforms: Linux is what CI runs. macOS is built on and benchmarked but
-has no CI: a Gap. Windows is an Exclusion. The others libzmq supports
-have not been judged.
+Platforms: Linux is what CI runs. macOS is built on and benchmarked, and
+has had a CI job since 2026-11-22 that runs the tests; until that job has
+run and passed, it stays a Gap. Windows is an Exclusion. The others
+libzmq supports have not been judged.
 
 ## Socket options
 

@@ -105,7 +105,9 @@
               pkgs.gdb
               pkgs.python3
             ]
-            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [pkgs.perf];
+            # iproute2 for `ss`, with which the interop tests read a
+            # listener's backlog.
+            ++ pkgs.lib.optionals pkgs.stdenv.isLinux [pkgs.perf pkgs.iproute2];
           shellHook = ''
             echo "Rust $(rustc --version)"
             echo "Cargo $(cargo --version)"
