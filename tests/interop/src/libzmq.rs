@@ -41,6 +41,8 @@ const ZMQ_XPUB_WELCOME_MSG: c_int = 72;
 /// Draft in libzmq 4.3, which the flake builds with drafts.
 const ZMQ_METADATA: c_int = 95;
 /// Draft.
+const ZMQ_ONLY_FIRST_SUBSCRIBE: c_int = 108;
+/// Draft.
 const ZMQ_RECONNECT_STOP: c_int = 109;
 const ZMQ_SNDMORE: c_int = 2;
 
@@ -334,6 +336,11 @@ impl Socket {
     pub fn set_reconnect(&self, interval: i32, max: i32) {
         self.set_int(ZMQ_RECONNECT_IVL, interval);
         self.set_int(ZMQ_RECONNECT_IVL_MAX, max);
+    }
+
+    /// The draft `ZMQ_ONLY_FIRST_SUBSCRIBE`. Needs a libzmq with drafts.
+    pub fn set_only_first_subscribe(&self) {
+        self.set_int(ZMQ_ONLY_FIRST_SUBSCRIBE, 1);
     }
 
     /// The draft `ZMQ_RECONNECT_STOP`, as its `ZMQ_RECONNECT_STOP_*` bits.

@@ -61,8 +61,8 @@ fn mode() -> impl Strategy<Value = Mode> {
 enum Upstream {
     Subscribe(Vec<u8>),
     Cancel(Vec<u8>),
-    /// Anything that is not a subscription: several frames, or one not
-    /// starting with 0 or 1.
+    /// Anything else: one frame not starting with 0 or 1, or several
+    /// frames, any of which may be a subscription.
     Other(Vec<Vec<u8>>),
 }
 
@@ -104,7 +104,16 @@ fn op(peers: usize, mode: Mode) -> BoxedStrategy<Op> {
             frame.insert(0, kind);
             vec![frame]
         }),
-        prop::collection::vec(prop::collection::vec(any::<u8>(), 0..3), 2..3),
+        prop::collection::vec(
+            prop_oneof![
+                prop::collection::vec(any::<u8>(), 0..3),
+                (0u8..3, topic()).prop_map(|(kind, mut frame)| {
+                    frame.insert(0, kind);
+                    frame
+                }),
+            ],
+            2..4
+        ),
     ]
     .prop_filter("not a subscription", |frames| {
         frames.len() > 1 || !matches!(frames[0].first(), Some(0 | 1))
@@ -212,15 +221,36 @@ impl Model {
                 match sent {
                     Upstream::Subscribe(topic) => self.subscribe(i, topic),
                     Upstream::Cancel(topic) => self.cancel(i, topic),
-                    Upstream::Other(frames) => {
-                        self.event(i, XPubEvent::Message(Upstream::Other(frames).message()));
-                    }
+                    Upstream::Other(frames) => self.other(i, frames),
                 }
             }
             if self.peers[i].closed {
                 self.peers[i].gone = true;
                 self.forget(i);
             }
+        }
+    }
+
+    /// Each frame that is a subscription is one; the frames before one
+    /// that is reported are a message of their own, as are those left at
+    /// the end.
+    fn other(&mut self, i: usize, frames: Vec<Vec<u8>>) {
+        let mut pending = Vec::new();
+        for frame in frames {
+            let reported = self.events.len();
+            match frame.split_first() {
+                Some((1, topic)) => self.subscribe(i, topic.to_vec()),
+                Some((0, topic)) => self.cancel(i, topic.to_vec()),
+                _ => pending.push(frame),
+            }
+            if self.events.len() > reported && !pending.is_empty() {
+                let message = Upstream::Other(std::mem::take(&mut pending)).message();
+                self.events
+                    .insert(reported, (i, XPubEvent::Message(message)));
+            }
+        }
+        if !pending.is_empty() {
+            self.event(i, XPubEvent::Message(Upstream::Other(pending).message()));
         }
     }
 

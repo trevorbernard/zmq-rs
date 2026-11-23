@@ -334,14 +334,10 @@ fn user_message() {
     );
 }
 
-/// libzmq's `test_user_message_multi`, which sets `ZMQ_ONLY_FIRST_SUBSCRIBE`
-/// so that a later frame starting with `00` or `01` stays part of a user
-/// message. Ours needs no option for that: a message of several frames is
-/// never a subscription (`docs/rfc-compliance.md`, PUBSUB).
-///
-/// Where the first frame starts with `00` or `01`, libzmq reads every
-/// frame as a subscription even with the option, and its test receives
-/// them as XPUB reports. Ours delivers the message.
+/// With `ZMQ_ONLY_FIRST_SUBSCRIBE`, a later frame starting with `00` or
+/// `01` stays part of a user message, unless the first frame is a
+/// subscription: then each is one, and the XPUB reports them.
+#[cfg(feature = "draft")]
 #[test]
 fn user_message_multi() {
     let context = Context::new().unwrap();
@@ -349,24 +345,39 @@ fn user_message_multi() {
     publisher
         .bind("inproc://libzmq-xpub-user-message-multi")
         .unwrap();
+    publisher.set_only_first_subscribe(true);
     let mut subscriber = context.socket::<XSub>();
     subscriber
         .connect("inproc://libzmq-xpub-user-message-multi")
         .unwrap();
+    subscriber.set_only_first_subscribe(true);
 
     let common: &[u8] = b"ABC";
-    for frames in [
-        [common, b"\x00BC"],
-        [common, b"\x01BC"],
-        [b"\x01BC", b"\x01CD"],
-        [b"\x00BC", b"\x00CD"],
-    ] {
-        let frames: Vec<Frame> = frames.into_iter().map(Frame::from).collect();
-        let message = Message::try_from(frames).unwrap();
+    for frames in [[common, b"\x00BC"], [common, b"\x01BC"]] {
+        let message = Message::from(frames);
         subscriber.send(message.clone()).unwrap();
         assert_eq!(
             publisher.recv_timeout(FIVE).unwrap(),
             Some(XPubEvent::Message(message))
+        );
+    }
+
+    subscriber
+        .send(Message::from([&b"\x01BC"[..], &b"\x01CD"[..]]))
+        .unwrap();
+    for topic in ["BC", "CD"] {
+        assert_eq!(
+            publisher.recv_timeout(FIVE).unwrap(),
+            Some(XPubEvent::Subscribe(Frame::from(topic)))
+        );
+    }
+    subscriber
+        .send(Message::from([&b"\x00BC"[..], &b"\x00CD"[..]]))
+        .unwrap();
+    for topic in ["BC", "CD"] {
+        assert_eq!(
+            publisher.recv_timeout(FIVE).unwrap(),
+            Some(XPubEvent::Cancel(Frame::from(topic)))
         );
     }
 }

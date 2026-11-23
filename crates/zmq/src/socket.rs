@@ -1403,6 +1403,15 @@ impl<T: Publishes> Socket<T> {
         T::publisher(&mut self.routing).set_invert_matching(on);
     }
 
+    /// Whether the later frames of a message a subscriber sends are read
+    /// as subscriptions only when its first frame is one, as libzmq's
+    /// `ZMQ_ONLY_FIRST_SUBSCRIBE`, a draft option. Off by default: every
+    /// frame that starts with `0x01` or `0x00` is read as one.
+    #[cfg(feature = "draft")]
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        T::publisher(&mut self.routing).set_only_first_subscribe(on);
+    }
+
     /// How many distinct topics its subscribers hold between them, as
     /// libzmq's `ZMQ_TOPICS_COUNT`, a draft option. Subscriptions take a
     /// moment to arrive; those that have are counted.
@@ -1633,6 +1642,15 @@ impl fmt::Debug for SubscriptionRequest<'_> {
 }
 
 impl Socket<XSub> {
+    /// Whether the later frames of a message [`send`](Self::send) is given
+    /// are read as subscriptions only when its first frame is one, as
+    /// libzmq's `ZMQ_ONLY_FIRST_SUBSCRIBE`, a draft option. Off by default:
+    /// every frame that starts with `0x01` or `0x00` is read as one.
+    #[cfg(feature = "draft")]
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        self.routing.set_only_first_subscribe(on);
+    }
+
     /// Whether every unsubscription goes to the publishers, as libzmq's
     /// `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE`, a draft option: even one of a topic
     /// subscribed more than once, or not at all. Off by default: only the
@@ -1668,8 +1686,12 @@ impl Socket<XSub> {
     }
 
     /// Sends `message` to every publisher. Never blocks. As in libzmq, a
-    /// single frame starting with `0x01` or `0x00` is a subscription and
-    /// subscribes or unsubscribes to the rest.
+    /// frame starting with `0x01` or `0x00` is a subscription and
+    /// subscribes or unsubscribes to the rest of it, so one message can
+    /// hold several; a publisher reads them the same way. An
+    /// unsubscription the publishers are not to hear of, there being
+    /// another subscription to its topic or none, is left out of what is
+    /// sent.
     ///
     /// `message` is anything a [`Message`] is made from. Bytes borrowed for
     /// less than `'static` are copied in with

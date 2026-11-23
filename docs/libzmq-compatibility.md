@@ -45,7 +45,6 @@ sees, with no safety gain.
 
 | # | libzmq | zmq-rs today |
 |---|---|---|
-| D16 | An XSUB's send and an XPUB's receive read a subscription from any frame of a message, unless `ZMQ_ONLY_FIRST_SUBSCRIBE` | Read one only from a single-frame message; no option |
 | D17 | With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, disconnected or not. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once. Found on 2026-11-22 in place of what was listed, that libzmq's disconnect stops the retrying only with the flag (`tests/interop/tests/reconnect.rs`). Not yet ruled a Divergence to close or an Exception |
 | D18 | `ENODEV`, `ENAMETOOLONG`, `ENOCOMPATPROTO` and `EPROTONOSUPPORT` are distinct | `ENODEV` is `InvalidEndpoint`, `ENAMETOOLONG` an `Io` error, and the last two are both `UnsupportedTransport` |
 | D19 | `zmq_socket` fails with `ETERM` once the context is shut down | Succeeds; the socket's operations then fail |
@@ -61,6 +60,7 @@ Divergences that stand.
 |---|---|
 | An `ipc` bind unlinks whatever is at the path, a live socket or a regular file included | Removes only a stale socket file; anything else is `AddrInUse` |
 | Subscriptions and joins are dropped at the HWM, and conflated under `ZMQ_CONFLATE` | Never dropped, never conflated |
+| An XSUB that leaves a cancel out of the end of a message it sends leaves the message unfinished, and the next is joined to it | Sends the frames that are left as a whole message |
 | Aborts on a `ZMQ_CONNECT_ROUTING_ID` already in use | `Error::RoutingIdInUse` |
 | Aborts on a peer's group name over 255 octets | Disconnects the peer |
 | Aborts if `ZMQ_TOS` or `ZMQ_BUSY_POLL` cannot be set | Ignores the failure |
@@ -75,6 +75,7 @@ Divergences that stand.
 |---|---|
 | `ZMQ_RCVTIMEO`, `ZMQ_SNDTIMEO` | `recv_timeout`, `send_timeout` per call |
 | `ZMQ_SNDMORE`, `ZMQ_RCVMORE`, `zmq_msg_more` | A `Message` is the whole multipart message |
+| An XPUB hands over a subscription read from a message of several frames as the last frame of the message the frames before it began | `XPubEvent::Message` of those frames, then the `Subscribe` or `Cancel` |
 | `ZMQ_ROUTER_MANDATORY` off drops silently | A send to an unknown routing id always reports it; ignoring the error is libzmq's default |
 | `ZMQ_XPUB_NODROP` | `send_all` and its variants, per call |
 | XPUB receives `01`/`00`-prefixed messages | `XPubEvent` |
@@ -189,7 +190,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_METADATA` (d) | `add_metadata` | Same; Verified for the order announced (`tests/interop/tests/metadata.rs`) |
 | `ZMQ_ROUTER_NOTIFY` (d) | `set_notify` | Same |
 | `ZMQ_IN_BATCH_SIZE` (d), `ZMQ_OUT_BATCH_SIZE` (d) | | Gap |
-| `ZMQ_ONLY_FIRST_SUBSCRIBE` (d) | | Divergence D16 |
+| `ZMQ_ONLY_FIRST_SUBSCRIBE` (d) | `set_only_first_subscribe` on PUB, XPUB, XSUB | Same; Verified, with it and without (`tests/interop/tests/xpubsub.rs`) |
 | `ZMQ_RECONNECT_STOP` (d) | `set_reconnect_stop` | Same, but for `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`: D17 |
 | `ZMQ_HELLO_MSG` (d), `ZMQ_DISCONNECT_MSG` (d), `ZMQ_HICCUP_MSG` (d) | `set_hello_message`, `set_disconnect_message`, `set_hiccup_message` | Same |
 | `ZMQ_PRIORITY` (d) | | Gap |
