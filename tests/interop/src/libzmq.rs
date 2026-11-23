@@ -47,6 +47,33 @@ const ZMQ_ONLY_FIRST_SUBSCRIBE: c_int = 108;
 const ZMQ_RECONNECT_STOP: c_int = 109;
 const ZMQ_SNDMORE: c_int = 2;
 
+const ZMQ_DONTWAIT: c_int = 1;
+
+/// Socket options by their numbers in `zmq.h`, for [`Socket::set`] and
+/// [`Socket::set_bytes_option`]; those marked draft need a libzmq with
+/// drafts.
+pub mod option {
+    pub const ROUTER_MANDATORY: i32 = 33;
+    pub const XPUB_VERBOSE: i32 = 40;
+    pub const REQ_CORRELATE: i32 = 52;
+    pub const REQ_RELAXED: i32 = 53;
+    pub const CONFLATE: i32 = 54;
+    pub const CONNECT_ROUTING_ID: i32 = 61;
+    pub const SOCKS_PROXY: i32 = 68;
+    pub const INVERT_MATCHING: i32 = 74;
+    pub const XPUB_VERBOSER: i32 = 78;
+    /// Draft.
+    pub const ROUTER_NOTIFY: i32 = 97;
+    /// Draft.
+    pub const HELLO_MSG: i32 = 110;
+    /// Draft.
+    pub const DISCONNECT_MSG: i32 = 111;
+    /// Draft.
+    pub const HICCUP_MSG: i32 = 114;
+    /// Draft.
+    pub const XSUB_VERBOSE_UNSUBSCRIBE: i32 = 115;
+}
+
 /// `zmq_msg_t`: 64 opaque octets, pointer-aligned.
 #[repr(C, align(8))]
 struct RawMsg([u8; 64]);
@@ -287,6 +314,16 @@ impl Socket {
 
     fn set_int(&self, option: c_int, value: c_int) {
         self.set_bytes(option, &value.to_ne_bytes());
+    }
+
+    /// Sets `option`, one of [`option`]'s, to `value`.
+    pub fn set(&self, option: i32, value: i32) {
+        self.set_int(option, value);
+    }
+
+    /// Sets `option`, one of [`option`]'s, to `value`.
+    pub fn set_bytes_option(&self, option: i32, value: &[u8]) {
+        self.set_bytes(option, value);
     }
 
     /// How long `recv` waits before failing.
@@ -667,6 +704,24 @@ impl Socket {
             let flags = if i + 1 < parts.len() { ZMQ_SNDMORE } else { 0 };
             // SAFETY: `part` is valid for `part.len()` octets for the call.
             check(unsafe { zmq_send(self.raw.as_ptr(), part.as_ptr().cast(), part.len(), flags) })?;
+        }
+        Ok(())
+    }
+
+    /// Sends `parts` as one message if that can be done at once, as with
+    /// `ZMQ_DONTWAIT`.
+    pub fn send_now(&self, parts: &[&[u8]]) -> io::Result<()> {
+        for (i, part) in parts.iter().enumerate() {
+            let more = if i + 1 < parts.len() { ZMQ_SNDMORE } else { 0 };
+            // SAFETY: `part` is valid for `part.len()` octets for the call.
+            check(unsafe {
+                zmq_send(
+                    self.raw.as_ptr(),
+                    part.as_ptr().cast(),
+                    part.len(),
+                    more | ZMQ_DONTWAIT,
+                )
+            })?;
         }
         Ok(())
     }

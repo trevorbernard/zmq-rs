@@ -161,25 +161,25 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_LAST_ENDPOINT` | The `Endpoint` that `bind` returns; nothing after a connect | Same; Gap after a connect |
 | `ZMQ_ROUTER_MANDATORY` | Always on | Exception (API shape) |
 | `ZMQ_TCP_KEEPALIVE`, `_CNT`, `_IDLE`, `_INTVL` | `TcpKeepalive` | Same; Gap: forcing probes off |
-| `ZMQ_IMMEDIATE` | `SocketOptions::immediate`, `set_immediate` | Same; Verified for `connect_peer`'s refusal (`tests/interop/tests/peerchannel.rs`) |
-| `ZMQ_XPUB_VERBOSE`, `ZMQ_XPUB_VERBOSER` | `Verbosity` | Same |
+| `ZMQ_IMMEDIATE` | `SocketOptions::immediate`, `set_immediate` | Same; Verified (`tests/interop/tests/options.rs`), and for `connect_peer`'s refusal (`tests/interop/tests/peerchannel.rs`) |
+| `ZMQ_XPUB_VERBOSE`, `ZMQ_XPUB_VERBOSER` | `Verbosity` | Same; Verified (`tests/interop/tests/options.rs`) |
 | `ZMQ_MECHANISM` | | Gap |
 | `ZMQ_PLAIN_SERVER`, `_USERNAME`, `_PASSWORD` | `Security::plain_server`, `Security::PlainClient` | Same; Verified with either as the server, either binding, every transport (`tests/interop/tests/mechanisms.rs`) |
 | `ZMQ_CURVE_SERVER`, `_PUBLICKEY`, `_SECRETKEY`, `_SERVERKEY` | `Security::curve_server`, `curve_client`, `Keypair` | Same; Verified as PLAIN is (`mechanisms.rs`) |
 | `ZMQ_ZAP_DOMAIN`, `ZMQ_ZAP_ENFORCE_DOMAIN` (d) | A domain comes only with an `Authenticator` | Gap, with the ZAP handler socket |
 | `ZMQ_PROBE_ROUTER` | `set_probe` on DEALER and ROUTER | Same; Gap on REQ |
-| `ZMQ_REQ_CORRELATE` | `set_correlation` | Same |
+| `ZMQ_REQ_CORRELATE` | `set_correlation` | Same; Verified for what is sent and which reply is taken (`tests/interop/tests/options.rs`) |
 | `ZMQ_REQ_RELAXED` | Always | Exception |
-| `ZMQ_CONFLATE` | `set_conflate` | Same; Exception: subscriptions |
-| `ZMQ_ROUTER_HANDOVER` | `set_handover` | Same |
+| `ZMQ_CONFLATE` | `set_conflate` | Same; Verified on a PULL (`tests/interop/tests/options.rs`). Exception: subscriptions |
+| `ZMQ_ROUTER_HANDOVER` | `set_handover` | Same; Verified (`tests/interop/tests/options.rs`, `tests/interop/tests/router.rs`) |
 | `ZMQ_TOS` | `type_of_service` | Same |
-| `ZMQ_CONNECT_ROUTING_ID` (`ZMQ_CONNECT_RID`) | `connect_with_routing_id` | Same |
+| `ZMQ_CONNECT_ROUTING_ID` (`ZMQ_CONNECT_RID`) | `connect_with_routing_id` | Same; Verified (`tests/interop/tests/options.rs`) |
 | `ZMQ_HANDSHAKE_IVL` | `handshake_timeout` | Same |
-| `ZMQ_SOCKS_PROXY`, `ZMQ_SOCKS_USERNAME` (d), `ZMQ_SOCKS_PASSWORD` (d) | `SocksProxy` | Same |
+| `ZMQ_SOCKS_PROXY`, `ZMQ_SOCKS_USERNAME` (d), `ZMQ_SOCKS_PASSWORD` (d) | `SocksProxy` | Same; Verified without a user name: a proxy is sent the same octets for an address, a name and an IPv6 address (`tests/interop/tests/options.rs`) |
 | `ZMQ_XPUB_NODROP` | `send_all` | Exception (API shape); Gap on RADIO |
 | `ZMQ_XPUB_MANUAL`, `ZMQ_XPUB_MANUAL_LAST_VALUE` (d) | `ManualXPub` | Exception (API shape) |
 | `ZMQ_XPUB_WELCOME_MSG` | `set_welcome` on XPUB | Same; Gap on PUB |
-| `ZMQ_INVERT_MATCHING` | `set_invert_matching` | Same |
+| `ZMQ_INVERT_MATCHING` | `set_invert_matching` | Same; Verified (`tests/interop/tests/options.rs`) |
 | `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Same; Verified for 0 (`tests/interop/tests/heartbeat.rs`), and for which older peers are sent a PING: a ZMTP 3.0 one, whose application is handed it as a message, and no ZMTP 1.0 or 2.0 one (`tests/interop/tests/legacy_peers.rs`) |
 | `ZMQ_HEARTBEAT_TTL` | `Heartbeat::ttl`, a `Ttl` | Same; Verified (`tests/interop/tests/heartbeat.rs`) |
 | `ZMQ_CONNECT_TIMEOUT` | | Gap |
@@ -188,14 +188,14 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_USE_FD` | | Gap |
 | `ZMQ_BINDTODEVICE` | `bind_to_device` | Same |
 | `ZMQ_METADATA` (d) | `add_metadata` | Same; Verified for the order announced (`tests/interop/tests/metadata.rs`) |
-| `ZMQ_ROUTER_NOTIFY` (d) | `set_notify` | Same |
+| `ZMQ_ROUTER_NOTIFY` (d) | `set_notify` | Same; Verified (`tests/interop/tests/options.rs`) |
 | `ZMQ_IN_BATCH_SIZE` (d), `ZMQ_OUT_BATCH_SIZE` (d) | | Gap |
 | `ZMQ_ONLY_FIRST_SUBSCRIBE` (d) | `set_only_first_subscribe` on PUB, XPUB, XSUB | Same; Verified, with it and without (`tests/interop/tests/xpubsub.rs`) |
-| `ZMQ_RECONNECT_STOP` (d) | `set_reconnect_stop` | Same, but for `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, an Exception |
-| `ZMQ_HELLO_MSG` (d), `ZMQ_DISCONNECT_MSG` (d), `ZMQ_HICCUP_MSG` (d) | `set_hello_message`, `set_disconnect_message`, `set_hiccup_message` | Same |
+| `ZMQ_RECONNECT_STOP` (d) | `set_reconnect_stop` | Same; Verified (`tests/interop/tests/reconnect.rs`), but for `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, an Exception |
+| `ZMQ_HELLO_MSG` (d), `ZMQ_DISCONNECT_MSG` (d), `ZMQ_HICCUP_MSG` (d) | `set_hello_message`, `set_disconnect_message`, `set_hiccup_message` | Same; Verified on DEALER and ROUTER (`tests/interop/tests/options.rs`) |
 | `ZMQ_PRIORITY` (d) | | Gap |
 | `ZMQ_BUSY_POLL` (d) | `set_busy_poll` | Same |
-| `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE` (d) | `set_verbose_unsubscribe` | Same |
+| `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE` (d) | `set_verbose_unsubscribe` | Same; Verified for what is sent (`tests/interop/tests/options.rs`) |
 | `ZMQ_TOPICS_COUNT` (d) | `topics_count` | Same |
 | Setting an option back to its default (`-1`, `0`, an empty string) | Not possible for the maximum message size, heartbeat, keepalive, device and SOCKS proxy setters | Gap |
 | `zmq_getsockopt` of a value the application set | | N/A |
@@ -221,7 +221,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_ctx_term`, `zmq_ctx_destroy`, `zmq_term`, `zmq_ctx_shutdown` | Drop, `Context::shutdown` | Exception (API shape) |
 | `zmq_socket` | `Context::socket`, `socket_with` | Same; Verified that none is made once the context is shut down (`terminated::a_socket_cannot_be_made_after_a_shutdown`, from libzmq's `test_ctx_destroy`; `tests/interop/tests/context.rs`) |
 | `zmq_close` | Drop | Same |
-| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`) and for why an endpoint is refused: `EINVAL` is `Error::InvalidEndpoint`, `ENODEV` `NoSuchDevice`, `ENAMETOOLONG` `NameTooLong`, `EPROTONOSUPPORT` `UnsupportedTransport`, `ENOCOMPATPROTO` `IncompatibleTransport` (`tests/interop/tests/endpoint_errors.rs`) |
+| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`), for a `tcp` unbind, which closes the connections its listener accepted, and a disconnect (`tests/interop/tests/options.rs`), and for why an endpoint is refused: `EINVAL` is `Error::InvalidEndpoint`, `ENODEV` `NoSuchDevice`, `ENAMETOOLONG` `NameTooLong`, `EPROTONOSUPPORT` `UnsupportedTransport`, `ENOCOMPATPROTO` `IncompatibleTransport` (`tests/interop/tests/endpoint_errors.rs`) |
 | `zmq_send`, `zmq_recv`, `zmq_msg_send`, `zmq_msg_recv`, `zmq_send_const` | `send`, `recv`, their `try_`, `_timeout` and `_async` forms | Same |
 | `zmq_sendiov`, `zmq_recviov` | | N/A |
 | `zmq_msg_init*`, `_close`, `_move`, `_copy`, `_data`, `_size` | `Frame`, `Message` | Same |
@@ -271,17 +271,10 @@ that bar. A Divergence is taken off its list once it is closed. What is
 known to fall short of the bar:
 
 - **No test against libzmq** for:
-  - `XPUB_VERBOSE`, `XPUB_VERBOSER`, `XPUB_NODROP`, `INVERT_MATCHING`,
-    `TOPICS_COUNT`, `XSUB_VERBOSE_UNSUBSCRIBE`
-  - `ROUTER_NOTIFY`, `CONNECT_ROUTING_ID`
-  - `unbind` and `disconnect`
-  - `RECONNECT_STOP` for a refused connection and a failed handshake
-  - `DISCONNECT_MSG`, `HICCUP_MSG`
-  - the HWM of a typed socket
-  - the SOCKS proxy
-  - an option set on the libzmq side with zmq-rs as its peer: `CONFLATE`,
-    `IMMEDIATE`, `ROUTER_HANDOVER`, `REQ_CORRELATE`, `REQ_RELAXED`,
-    `HELLO_MSG`
+  - `TOPICS_COUNT` and the HWM of a typed socket, which only the
+    application sees: libzmq's own tests of them are ported
+  - a SOCKS proxy that asks for a user name and password
+  - an option on any socket type but the one named in its row
 - **Ported tests that assert something other than libzmq's expectation.**
   Each is a Divergence or an Exception above, or has yet to be recorded
   as one: about thirty, listed in the headers of the modules in

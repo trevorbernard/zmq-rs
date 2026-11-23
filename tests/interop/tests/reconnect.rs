@@ -290,3 +290,101 @@ fn we_stop_retrying_the_disconnected_endpoint_alone_and_at_once() {
         );
     }
 }
+
+/// libzmq's `ZMQ_RECONNECT_STOP_CONN_REFUSED` and
+/// `ZMQ_RECONNECT_STOP_HANDSHAKE_FAILED`.
+#[cfg(feature = "draft")]
+mod stop {
+    use std::net::TcpListener;
+    use std::thread;
+
+    use zmq::ReconnectStop;
+
+    use super::*;
+
+    const CONN_REFUSED: i32 = 0x1;
+    const HANDSHAKE_FAILED: i32 = 0x2;
+
+    #[test]
+    fn a_refused_connection_is_retried_unless_asked_not_to() {
+        if !libzmq::has_drafts() {
+            return;
+        }
+        for stop in [false, true] {
+            let push = Socket::new(Kind::Push);
+            push.set_reconnect(10, 10);
+            push.set_reconnect_stop(if stop { CONN_REFUSED } else { 0 });
+            let monitor = push.monitor();
+            push.connect_str(&free_endpoint());
+            let events = monitor.during(MS(200));
+            let retried = events
+                .iter()
+                .any(|(event, _)| *event == libzmq::EVENT_CONNECT_RETRIED);
+            assert_eq!(retried, !stop, "libzmq: {events:?}");
+            assert!(
+                events
+                    .iter()
+                    .any(|(event, _)| *event == libzmq::EVENT_CLOSED),
+                "libzmq: {events:?}"
+            );
+
+            let context = Context::new().unwrap();
+            let mut push = context
+                .socket_with::<Push>(
+                    SocketOptions::new().reconnect(Reconnect::Fixed { interval: MS(10) }),
+                )
+                .unwrap();
+            push.set_reconnect_stop(ReconnectStop::default().connection_refused(stop));
+            let mut monitor = push.monitor();
+            push.connect(free_endpoint()).unwrap();
+            let events = our_events(&mut monitor, MS(200));
+            let retried = events
+                .iter()
+                .any(|kind| matches!(kind, EventKind::ConnectRetried { .. }));
+            assert_eq!(retried, !stop, "ours: {events:?}");
+            assert!(events.contains(&EventKind::Closed), "ours: {events:?}");
+        }
+    }
+
+    /// How many connections reach a listener that closes each at once,
+    /// within 300 ms of `connect` being given its endpoint.
+    fn accepted(connect: impl FnOnce(&str)) -> usize {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!("tcp://{}", listener.local_addr().unwrap());
+        listener.set_nonblocking(true).unwrap();
+        connect(&endpoint);
+        let until = Instant::now() + MS(300);
+        let mut accepted = 0;
+        while Instant::now() < until {
+            match listener.accept() {
+                Ok(_) => accepted += 1,
+                Err(_) => thread::sleep(MS(1)),
+            }
+        }
+        accepted
+    }
+
+    #[test]
+    fn a_failed_handshake_is_retried_unless_asked_not_to() {
+        if !libzmq::has_drafts() {
+            return;
+        }
+        for stop in [false, true] {
+            let push = Socket::new(Kind::Push);
+            push.set_reconnect(10, 10);
+            push.set_reconnect_stop(if stop { HANDSHAKE_FAILED } else { 0 });
+            let theirs = accepted(|endpoint| push.connect_str(endpoint));
+            assert_eq!(theirs == 1, stop, "libzmq connected {theirs} times");
+
+            let context = Context::new().unwrap();
+            let mut push = context
+                .socket_with::<Push>(
+                    SocketOptions::new().reconnect(Reconnect::Fixed { interval: MS(10) }),
+                )
+                .unwrap();
+            push.set_reconnect_stop(ReconnectStop::default().handshake_failed(stop));
+            let ours = accepted(|endpoint| push.connect(endpoint).unwrap());
+            assert_eq!(ours == 1, stop, "we connected {ours} times");
+        }
+    }
+}

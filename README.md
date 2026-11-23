@@ -276,10 +276,11 @@ The full list is in
 
 ## Testing
 
-- **Against libzmq 4.3.5:** every pattern over tcp, and the NULL, PLAIN
-  and CURVE handshakes in both roles; over ipc, PUSH and PULL
-  (`tests/interop`). What is not yet tested against it is listed under
-  [Evidence](docs/libzmq-compatibility.md#evidence).
+- **Against libzmq 4.3.5:** every pair of socket types, with either side
+  binding, over tcp on IPv4 and IPv6 and over ipc; PLAIN and CURVE with
+  either as the server; and the socket options, each held by one library
+  and then the other (`tests/interop`). What is not yet tested against it
+  is listed under [Evidence](docs/libzmq-compatibility.md#evidence).
 - **Against libzmq 2.2, 3.2 and 4.1,** which speak ZMTP 1.0, 2.0 and
   3.0, as separate processes the Nix dev shell builds
   (`just test-legacy`).
