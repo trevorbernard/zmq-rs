@@ -43,10 +43,9 @@ Not planned unless someone asks for them.
 Each breaks an application that works on libzmq, or changes what a peer
 sees, with no safety gain.
 
-| # | libzmq | zmq-rs today |
-|---|---|---|
-| D17 | With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, disconnected or not. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once. Found on 2026-11-22 in place of what was listed, that libzmq's disconnect stops the retrying only with the flag (`tests/interop/tests/reconnect.rs`). Not yet ruled a Divergence to close or an Exception |
-| D21 | A PAIR holds a departed peer's place until the application has read what it sent, and turns away a peer that arrives meanwhile, whose messages are lost | Frees the place when the departed peer's session ends, so the newcomer is let in. Found on 2026-11-22 in place of what was listed, that libzmq drops the departed peer's messages: it delivers them, as we do (`tests/interop/tests/pair.rs`). Not yet ruled a Divergence to close or an Exception |
+None are open. Each was closed from a test that libzmq passed and zmq-rs
+failed; two turned out not to be what was listed, and stand as
+Exceptions.
 
 ## Exceptions
 
@@ -59,6 +58,8 @@ Divergences that stand.
 | An `ipc` bind unlinks whatever is at the path, a live socket or a regular file included | Removes only a stale socket file; anything else is `AddrInUse` |
 | Subscriptions and joins are dropped at the HWM, and conflated under `ZMQ_CONFLATE` | Never dropped, never conflated |
 | An XSUB that leaves a cancel out of the end of a message it sends leaves the message unfinished, and the next is joined to it | Sends the frames that are left as a whole message |
+| A PAIR holds a departed peer's place until the application has read what it sent, and turns away a peer that arrives meanwhile, whose messages are lost | Frees the place when the departed peer's session ends, so the newcomer is let in; both deliver the departed peer's messages (`tests/interop/tests/pair.rs`) |
+| With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, the ones still connected to included. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once (`tests/interop/tests/reconnect.rs`) |
 | Aborts on a `ZMQ_CONNECT_ROUTING_ID` already in use | `Error::RoutingIdInUse` |
 | Aborts on a peer's group name over 255 octets | Disconnects the peer |
 | Aborts if `ZMQ_TOS` or `ZMQ_BUSY_POLL` cannot be set | Ignores the failure |
@@ -189,7 +190,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_ROUTER_NOTIFY` (d) | `set_notify` | Same |
 | `ZMQ_IN_BATCH_SIZE` (d), `ZMQ_OUT_BATCH_SIZE` (d) | | Gap |
 | `ZMQ_ONLY_FIRST_SUBSCRIBE` (d) | `set_only_first_subscribe` on PUB, XPUB, XSUB | Same; Verified, with it and without (`tests/interop/tests/xpubsub.rs`) |
-| `ZMQ_RECONNECT_STOP` (d) | `set_reconnect_stop` | Same, but for `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`: D17 |
+| `ZMQ_RECONNECT_STOP` (d) | `set_reconnect_stop` | Same, but for `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, an Exception |
 | `ZMQ_HELLO_MSG` (d), `ZMQ_DISCONNECT_MSG` (d), `ZMQ_HICCUP_MSG` (d) | `set_hello_message`, `set_disconnect_message`, `set_hiccup_message` | Same |
 | `ZMQ_PRIORITY` (d) | | Gap |
 | `ZMQ_BUSY_POLL` (d) | `set_busy_poll` | Same |
