@@ -5,7 +5,9 @@
 //! libzmq stops `zmq_proxy` by terminating its context; here the proxy is
 //! stopped through its `ProxyControl`. libzmq hands each client the
 //! frontend's endpoint over an inproc PAIR so as not to fix a port; here
-//! the endpoint is passed to the thread directly.
+//! the endpoint is passed to the thread directly. libzmq runs for 500 ms
+//! and checks nothing of the traffic; this port checks that requests
+//! crossed, so it also runs until one has.
 
 use std::hash::{BuildHasher, RandomState};
 use std::thread;
@@ -159,8 +161,12 @@ fn proxy() {
         let mut proxy = Proxy::new(&mut frontend, &mut backend);
         let proxy_control = proxy.control();
         let steering = thread::spawn(move || {
-            // Run for 500 ms, then stop and terminate everyone
+            // Run for 500 ms, and until a request has crossed, then stop
+            // and terminate everyone
             thread::sleep(Duration::from_millis(500));
+            while proxy_control.statistics().frontend.received.messages == 0 {
+                thread::sleep(Duration::from_millis(10));
+            }
             control.send("STOP").unwrap();
             thread::sleep(Duration::from_millis(500));
             control.send("TERMINATE").unwrap();
