@@ -1,11 +1,16 @@
 /*
  * A socket of an old libzmq, driven over stdin, so the interop tests can
- * talk to the ZMTP 1.0 (libzmq 2.x) and ZMTP 2.0 (libzmq 3.x) protocols.
- * A process apart, as two libzmqs cannot share one: they export the same
- * symbols.
+ * talk to the ZMTP 1.0 (libzmq 2.x), ZMTP 2.0 (libzmq 3.x) and ZMTP 3.0
+ * (libzmq 4.0 and 4.1) protocols. A process apart, as two libzmqs cannot
+ * share one: they export the same symbols.
  *
  *   zmq-legacy-peer <type> <bind|connect> <endpoint>
  *                   [--identity <hex>] [--subscribe <hex>]...
+ *
+ * and, with libzmq 4.x, the security options, each with its value in hex:
+ * --plain-server (any value), --plain-username, --plain-password,
+ * --curve-server (any value), --curve-publickey, --curve-secretkey and
+ * --curve-serverkey.
  *
  * Prints "ready" once bound or connected, then reads one command a line:
  *
@@ -157,16 +162,39 @@ int main (int argc, char *argv[])
         fail ("ZMQ_LINGER");
     for (i = 4; i + 1 < argc; i += 2) {
         size_t len = unhex (argv[i + 1], frames[0]);
+        int on = 1;
+        int flag = 0;
         int option;
         if (strcmp (argv[i], "--identity") == 0)
             option = ZMQ_IDENTITY;
         else if (strcmp (argv[i], "--subscribe") == 0)
             option = ZMQ_SUBSCRIBE;
+#if ZMQ_VERSION_MAJOR >= 4
+        else if (strcmp (argv[i], "--plain-server") == 0) {
+            option = ZMQ_PLAIN_SERVER;
+            flag = 1;
+        } else if (strcmp (argv[i], "--plain-username") == 0)
+            option = ZMQ_PLAIN_USERNAME;
+        else if (strcmp (argv[i], "--plain-password") == 0)
+            option = ZMQ_PLAIN_PASSWORD;
+        else if (strcmp (argv[i], "--curve-server") == 0) {
+            option = ZMQ_CURVE_SERVER;
+            flag = 1;
+        } else if (strcmp (argv[i], "--curve-publickey") == 0)
+            option = ZMQ_CURVE_PUBLICKEY;
+        else if (strcmp (argv[i], "--curve-secretkey") == 0)
+            option = ZMQ_CURVE_SECRETKEY;
+        else if (strcmp (argv[i], "--curve-serverkey") == 0)
+            option = ZMQ_CURVE_SERVERKEY;
+#endif
         else {
             printf ("error unknown option %s\n", argv[i]);
             return 1;
         }
-        if (zmq_setsockopt (socket, option, frames[0], len) != 0)
+        if (flag) {
+            if (zmq_setsockopt (socket, option, &on, sizeof on) != 0)
+                fail (argv[i]);
+        } else if (zmq_setsockopt (socket, option, frames[0], len) != 0)
             fail (argv[i]);
     }
     if (strcmp (argv[2], "bind") == 0) {

@@ -62,7 +62,8 @@ mutants crate *args:
         --test-tool nextest --profile mutants --all-features \
         --output target/mutants/{{crate}} {{args}}
 
-# Interop tests against libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0).
+# Interop tests against libzmq 2.2 (ZMTP 1.0), 3.2 (ZMTP 2.0) and 4.1
+# (ZMTP 3.0).
 test-legacy *args:
     cargo nextest run -p zmq-interop --test legacy_peers {{args}}
 

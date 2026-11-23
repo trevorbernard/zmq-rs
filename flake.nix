@@ -82,10 +82,12 @@
         legacy = pkgs.callPackage ./nix/legacy-zeromq.nix {};
       in {
         default = pkgs.mkShell {
-          # Peers on libzmq 2.2 (ZMTP 1.0) and 3.2 (ZMTP 2.0), for the
-          # interop tests of downgrading. They skip without these.
+          # Peers on libzmq 2.2 (ZMTP 1.0), 3.2 (ZMTP 2.0) and 4.1
+          # (ZMTP 3.0), for the interop tests of the older protocols. They
+          # skip without these.
           ZMQ_LEGACY_PEER_2 = "${legacy.peer2}/bin/zmq-legacy-peer";
           ZMQ_LEGACY_PEER_3 = "${legacy.peer3}/bin/zmq-legacy-peer";
+          ZMQ_LEGACY_PEER_4 = "${legacy.peer4}/bin/zmq-legacy-peer";
           # The shell has the legacy peers and a libzmq with drafts, so an
           # interop test that would skip for want of them fails instead.
           ZMQ_INTEROP_STRICT = "1";

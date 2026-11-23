@@ -280,8 +280,9 @@ The full list is in
   and CURVE handshakes in both roles; over ipc, PUSH and PULL
   (`tests/interop`). What is not yet tested against it is listed under
   [Evidence](docs/libzmq-compatibility.md#evidence).
-- **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
-  separate processes the Nix dev shell builds (`just test-legacy`).
+- **Against libzmq 2.2, 3.2 and 4.1,** which speak ZMTP 1.0, 2.0 and
+  3.0, as separate processes the Nix dev shell builds
+  (`just test-legacy`).
 - **libzmq's own regression tests,** 80 of its 139 ported, the rest listed
   with why (`crates/zmq/tests/libzmq`).
 - **Property tests against models:** subscription matching, XPUB events,
@@ -300,7 +301,7 @@ The full list is in
 nix develop        # or `direnv allow`
 just               # lists the workflows
 just ci            # rustfmt, clippy, tests, loom, as CI runs them
-just test-legacy   # against libzmq 2.2 and 3.2
+just test-legacy   # against libzmq 2.2, 3.2 and 4.1
 just loom          # zmq-pipe's queue, every interleaving; also miri, tsan
 just mutants zmtp  # changes to a crate's code that no test notices
 just perf          # throughput and latency next to libzmq

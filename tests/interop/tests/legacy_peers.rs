@@ -1,11 +1,11 @@
-//! Our sockets against real old libzmqs: 2.2, which speaks ZMTP 1.0, and
-//! 3.2, which speaks ZMTP 2.0, so we downgrade to each protocol with the
-//! implementation that defined it.
+//! Our sockets against real old libzmqs: 2.2, which speaks ZMTP 1.0, 3.2,
+//! which speaks ZMTP 2.0, and 4.1, which speaks ZMTP 3.0, so we speak each
+//! protocol with the implementation that defined it.
 //!
 //! Each runs as a process, `tests/interop/legacy/peer.c`, as two libzmqs
-//! cannot share one. The Nix dev shell sets `ZMQ_LEGACY_PEER_2` and
-//! `ZMQ_LEGACY_PEER_3` to them; without those, the tests skip, or fail
-//! under `ZMQ_INTEROP_STRICT`.
+//! cannot share one. The Nix dev shell sets `ZMQ_LEGACY_PEER_2`,
+//! `ZMQ_LEGACY_PEER_3` and `ZMQ_LEGACY_PEER_4` to them; without those,
+//! the tests skip, or fail under `ZMQ_INTEROP_STRICT`.
 
 use std::env;
 use std::io::{BufRead, BufReader, Write};
@@ -16,8 +16,9 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq::{
-    Context, Dealer, Identity, Message, Pub, Pull, Push, Rep, Req, Router, RoutingId, Security,
-    SocketOptions, Sub, XPub, XPubEvent, ZapReply, ZapRequest,
+    Context, Credential, Dealer, Identity, Keypair, Message, PlainCredentials, Pub, Pull, Push,
+    Rep, Req, Router, RoutingId, Security, SocketOptions, Sub, XPub, XPubEvent, ZapCredentials,
+    ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
 
@@ -30,6 +31,8 @@ enum Libzmq {
     V2,
     /// libzmq 3.2, speaking ZMTP 2.0.
     V3,
+    /// libzmq 4.1, speaking ZMTP 3.0.
+    V4,
 }
 
 impl Libzmq {
@@ -37,6 +40,7 @@ impl Libzmq {
         match self {
             Self::V2 => "ZMQ_LEGACY_PEER_2",
             Self::V3 => "ZMQ_LEGACY_PEER_3",
+            Self::V4 => "ZMQ_LEGACY_PEER_4",
         }
     }
 }
@@ -168,8 +172,8 @@ fn message(frames: &[&'static str]) -> Message {
     Message::try_from(frames).unwrap()
 }
 
-/// Runs each case against both old libzmqs.
-macro_rules! against_both {
+/// Runs each case against every old libzmq.
+macro_rules! against_each {
     ($($case:ident),* $(,)?) => {
         mod libzmq2 {
             $(#[test] fn $case() { super::$case(super::Libzmq::V2) })*
@@ -177,10 +181,13 @@ macro_rules! against_both {
         mod libzmq3 {
             $(#[test] fn $case() { super::$case(super::Libzmq::V3) })*
         }
+        mod libzmq4 {
+            $(#[test] fn $case() { super::$case(super::Libzmq::V4) })*
+        }
     };
 }
 
-against_both!(
+against_each!(
     we_pull_from_an_old_push,
     an_old_pull_takes_from_our_push,
     our_req_asks_an_old_rep,
@@ -190,6 +197,7 @@ against_both!(
     an_old_sub_gets_only_its_topic_from_our_pub,
     our_sub_gets_only_its_topic_from_an_old_pub,
     an_old_peer_is_refused_where_we_require_security,
+    heartbeats_reach_only_a_zmtp_3_0_application,
 );
 
 /// A ZMTP 1.0 SUB never sends its subscriptions, so it is subscribed to
@@ -219,7 +227,8 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
 }
 
 /// Messages, multipart ones included, reach us, over a connection that
-/// announced no properties: there is no READY before ZMTP 3.0.
+/// announced its socket type only if it speaks ZMTP 3.0: there is no READY
+/// before it.
 fn we_pull_from_an_old_push(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut pull = context.socket::<Pull>().unwrap();
@@ -231,11 +240,11 @@ fn we_pull_from_an_old_push(libzmq: Libzmq) {
     push.send(&[b"two", b"", b"parts"]);
     let first = pull.recv_timeout(FIVE).unwrap().expect("the first message");
     assert_eq!(first, message(&["one"]));
-    assert_eq!(
-        first.property("Socket-Type"),
-        None,
-        "no READY before ZMTP 3.0"
-    );
+    let announced = match libzmq {
+        Libzmq::V2 | Libzmq::V3 => None,
+        Libzmq::V4 => Some(b"PUSH".as_slice()),
+    };
+    assert_eq!(first.property("Socket-Type"), announced);
     assert_eq!(
         first.property("Peer-Address"),
         Some(b"127.0.0.1".as_slice())
@@ -393,7 +402,8 @@ fn our_sub_gets_only_its_topic_from_an_old_pub(libzmq: Libzmq) {
 
 /// RFC 37: a peer speaking ZMTP 1.0 or 2.0 has no security handshake, so
 /// where a mechanism other than NULL is required its connection MUST be
-/// closed. Nothing it sends arrives.
+/// closed, as that of a ZMTP 3.0 peer that offers NULL is. Nothing it
+/// sends arrives.
 fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
     let context = Context::new().unwrap();
     let mut pull = context
@@ -411,4 +421,217 @@ fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
     };
     push.send(&[b"unauthenticated"]);
     assert_eq!(pull.recv_timeout(Duration::from_millis(500)).unwrap(), None);
+}
+
+/// No protocol before ZMTP 3.1 has PING. libzmq sends none to a ZMTP 1.0
+/// or 2.0 peer, but does to a ZMTP 3.0 one, whose application is handed
+/// each as a message; and so do we. Either way our own messages arrive.
+fn heartbeats_reach_only_a_zmtp_3_0_application(libzmq: Libzmq) {
+    let beat = Duration::from_millis(20);
+    let heartbeat = zmq::Heartbeat {
+        interval: beat,
+        timeout: beat * 5,
+        ttl: zmq::Ttl::try_from(beat * 10).unwrap(),
+    };
+    for ours in [false, true] {
+        let endpoint = free_endpoint();
+        let Some(mut pull) = Peer::start(libzmq, "PULL", "bind", &endpoint, &[]) else {
+            return;
+        };
+        let context = Context::new().unwrap();
+        let mut send: Box<dyn FnMut(&'static str)> = if ours {
+            let mut push = context
+                .socket_with::<Push>(SocketOptions::new().heartbeat(heartbeat))
+                .unwrap();
+            push.connect(&endpoint).unwrap();
+            Box::new(move |body| push.send(body).unwrap())
+        } else {
+            let push = zmq_interop::libzmq::Socket::new(zmq_interop::libzmq::Kind::Push);
+            push.set_heartbeat(heartbeat.interval, heartbeat.timeout, beat * 10);
+            push.connect_str(&endpoint);
+            Box::new(move |body| push.send(&[body.as_bytes()]).unwrap())
+        };
+        send("before");
+        // Long enough for several heartbeats.
+        thread::sleep(beat * 4);
+        send("after");
+        let mut pings = 0;
+        let mut bodies = Vec::new();
+        while bodies.len() < 2 {
+            let received = pull.recv().expect("a message or a PING");
+            if received == [&b"\x04PING\x00\x02"[..]] {
+                pings += 1;
+            } else {
+                bodies.push(received);
+            }
+        }
+        assert_eq!(bodies, [message(&["before"]), message(&["after"])]);
+        assert_eq!(
+            pings > 0,
+            matches!(libzmq, Libzmq::V4),
+            "{pings} PINGs from {}",
+            if ours { "us" } else { "libzmq" }
+        );
+    }
+}
+
+/// A ZMTP 3.0 SUB sends its subscriptions as messages, having no
+/// SUBSCRIBE command, and takes ours the same way.
+#[test]
+fn subscriptions_cross_zmtp_3_0_as_messages() {
+    let context = Context::new().unwrap();
+    let mut xpub = context.socket::<XPub>().unwrap();
+    let endpoint = xpub.bind(free_endpoint()).unwrap().to_string();
+    let Some(_sub) = Peer::start(
+        Libzmq::V4,
+        "SUB",
+        "connect",
+        &endpoint,
+        &["--subscribe", &hex(b"news")],
+    ) else {
+        return;
+    };
+    assert_eq!(
+        xpub.recv_timeout(FIVE).unwrap(),
+        Some(XPubEvent::Subscribe(zmq::Frame::from("news")))
+    );
+
+    let endpoint = free_endpoint();
+    let mut old_xpub = Peer::start(Libzmq::V4, "XPUB", "bind", &endpoint, &[]).unwrap();
+    let mut sub = context.socket::<Sub>().unwrap();
+    sub.subscribe("news");
+    sub.connect(&endpoint).unwrap();
+    assert_eq!(old_xpub.recv(), Some(Message::from(&b"\x01news"[..])));
+}
+
+fn admin() -> PlainCredentials {
+    PlainCredentials {
+        username: Credential::new("admin").unwrap(),
+        password: Credential::new("hunter2").unwrap(),
+    }
+}
+
+#[test]
+fn plain_over_zmtp_3_0() {
+    // Ours is the client.
+    let endpoint = free_endpoint();
+    let Some(mut pull) = Peer::start(
+        Libzmq::V4,
+        "PULL",
+        "bind",
+        &endpoint,
+        &["--plain-server", "01"],
+    ) else {
+        return;
+    };
+    let context = Context::new().unwrap();
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().security(Security::PlainClient(admin())))
+        .unwrap();
+    push.connect(&endpoint).unwrap();
+    push.send("to the old server").unwrap();
+    assert_eq!(pull.recv(), Some(message(&["to the old server"])));
+
+    // Ours is the server.
+    let (seen, shown) = mpsc::channel();
+    let authenticator = move |request: &ZapRequest| {
+        let _ = seen.send(request.credentials.clone());
+        ZapReply::Ok {
+            user_id: zmq::Frame::from("admin"),
+            metadata: zmq::Metadata::new(),
+        }
+    };
+    let mut pull = context
+        .socket_with::<Pull>(
+            SocketOptions::new().security(Security::plain_server("", authenticator)),
+        )
+        .unwrap();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
+    let mut push = Peer::start(
+        Libzmq::V4,
+        "PUSH",
+        "connect",
+        &endpoint,
+        &[
+            "--plain-username",
+            &hex(b"admin"),
+            "--plain-password",
+            &hex(b"hunter2"),
+        ],
+    )
+    .unwrap();
+    push.send(&[b"from the old client"]);
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(message(&["from the old client"]))
+    );
+    assert_eq!(shown.try_recv(), Ok(ZapCredentials::Plain(admin())));
+}
+
+#[test]
+fn curve_over_zmtp_3_0() {
+    let (server, client) = (Keypair::generate(), Keypair::generate());
+    let (server_key, client_key) = (server.public(), client.public());
+
+    // Ours is the client.
+    let endpoint = free_endpoint();
+    let Some(mut pull) = Peer::start(
+        Libzmq::V4,
+        "PULL",
+        "bind",
+        &endpoint,
+        &[
+            "--curve-server",
+            "01",
+            "--curve-secretkey",
+            &hex(server.secret().expose()),
+        ],
+    ) else {
+        return;
+    };
+    let context = Context::new().unwrap();
+    let ours = Security::curve_client(Keypair::generate(), server_key);
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().security(ours))
+        .unwrap();
+    push.connect(&endpoint).unwrap();
+    push.send("to the old server").unwrap();
+    assert_eq!(pull.recv(), Some(message(&["to the old server"])));
+
+    // Ours is the server.
+    let (seen, shown) = mpsc::channel();
+    let authenticator = move |request: &ZapRequest| {
+        let _ = seen.send(request.credentials.clone());
+        ZapReply::Ok {
+            user_id: zmq::Frame::from("old"),
+            metadata: zmq::Metadata::new(),
+        }
+    };
+    let secret = hex(client.secret().expose());
+    let ours = Security::curve_server_authenticated(server, "", authenticator);
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().security(ours))
+        .unwrap();
+    let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
+    let mut push = Peer::start(
+        Libzmq::V4,
+        "PUSH",
+        "connect",
+        &endpoint,
+        &[
+            "--curve-publickey",
+            &hex(client_key.as_bytes()),
+            "--curve-secretkey",
+            &secret,
+            "--curve-serverkey",
+            &hex(server_key.as_bytes()),
+        ],
+    )
+    .unwrap();
+    push.send(&[b"from the old client"]);
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(message(&["from the old client"]))
+    );
+    assert_eq!(shown.try_recv(), Ok(ZapCredentials::Curve(client_key)));
 }

@@ -180,7 +180,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_XPUB_MANUAL`, `ZMQ_XPUB_MANUAL_LAST_VALUE` (d) | `ManualXPub` | Exception (API shape) |
 | `ZMQ_XPUB_WELCOME_MSG` | `set_welcome` on XPUB | Same; Gap on PUB |
 | `ZMQ_INVERT_MATCHING` | `set_invert_matching` | Same |
-| `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Same; Verified for 0 (`tests/interop/tests/heartbeat.rs`) |
+| `ZMQ_HEARTBEAT_IVL`, `ZMQ_HEARTBEAT_TIMEOUT` | `Heartbeat` | Same; Verified for 0 (`tests/interop/tests/heartbeat.rs`), and for which older peers are sent a PING: a ZMTP 3.0 one, whose application is handed it as a message, and no ZMTP 1.0 or 2.0 one (`tests/interop/tests/legacy_peers.rs`) |
 | `ZMQ_HEARTBEAT_TTL` | `Heartbeat::ttl`, a `Ttl` | Same; Verified (`tests/interop/tests/heartbeat.rs`) |
 | `ZMQ_CONNECT_TIMEOUT` | | Gap |
 | `ZMQ_TCP_MAXRT` | | Gap |
@@ -271,7 +271,6 @@ that bar. A Divergence is taken off its list once it is closed. What is
 known to fall short of the bar:
 
 - **No test against libzmq** for:
-  - a ZMTP 3.0 peer (libzmq 4.0 or 4.1)
   - `XPUB_VERBOSE`, `XPUB_VERBOSER`, `XPUB_NODROP`, `INVERT_MATCHING`,
     `TOPICS_COUNT`, `XSUB_VERBOSE_UNSUBSCRIBE`
   - `ROUTER_NOTIFY`, `CONNECT_ROUTING_ID`
