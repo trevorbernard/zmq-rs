@@ -85,8 +85,12 @@ jobs:
           key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
           restore-keys: cargo-${{ runner.os }}-
 
+      # As `just test`, running past a failure: one run shows everything
+      # that differs here.
       - name: Test
-        run: nix develop -c just test
+        run: |
+          nix develop -c cargo nextest run --workspace --all-features --no-fail-fast
+          nix develop -c cargo test --workspace --all-features --doc
 
   nightly:
     name: Miri and ThreadSanitizer
