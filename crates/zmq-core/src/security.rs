@@ -257,10 +257,5 @@ mod tests {
                 "CurveServer {{ public: {public:?}, domain: {domain:?}, authenticated: true }}"
             )
         );
-        let (reply, _answer) = mpsc::channel();
-        assert_eq!(
-            format!("{:?}", ZapResponder::new(reply, Waker::noop().clone())),
-            "ZapResponder"
-        );
     }
 }

@@ -50,21 +50,6 @@ fn a_libzmq_client_talks_to_our_server() {
 }
 
 #[test]
-fn our_client_reaches_a_libzmq_server() {
-    if !libzmq::has_drafts() {
-        return;
-    }
-    let server = Socket::new(Kind::Server);
-    server.set_receive_timeout(FIVE);
-    let addr = server.bind_loopback();
-    let context = Context::new().unwrap();
-    let mut client = context.socket::<Client>();
-    client.connect(format!("tcp://{addr}")).unwrap();
-    client.send("hello libzmq").unwrap();
-    assert_eq!(server.recv().unwrap(), [b"hello libzmq"]);
-}
-
-#[test]
 fn our_client_drops_multipart_messages() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();

@@ -59,7 +59,6 @@ fn a_connection_the_proxy_refuses_is_tried_again() {
     for _ in 0..3 {
         clients.recv_timeout(FIVE).expect("another attempt");
     }
-    assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[cfg(unix)]

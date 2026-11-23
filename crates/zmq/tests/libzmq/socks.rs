@@ -227,13 +227,12 @@ fn socks_userpass_options() {
     use zmq::Credential;
 
     let buffer: Vec<u8> = (0..1024).map(|i| b'a' + (i % 26) as u8).collect();
-    for _option in ["username", "password"] {
-        // Empty value is allowed: for the user name, no authentication.
-        Credential::new("").unwrap();
-        Credential::new("someuser").unwrap();
-        Credential::new(&buffer[..255]).unwrap();
-        assert!(Credential::new(&buffer[..256]).is_err());
-    }
+    // A user name and a password are both a `Credential`. An empty one is
+    // allowed: for the user name, no authentication.
+    Credential::new("").unwrap();
+    Credential::new("someuser").unwrap();
+    Credential::new(&buffer[..255]).unwrap();
+    assert!(Credential::new(&buffer[..256]).is_err());
 }
 
 #[test]

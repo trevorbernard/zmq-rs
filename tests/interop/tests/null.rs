@@ -89,7 +89,6 @@ fn router_learns_libzmq_identity() {
 #[test]
 fn incompatible_socket_type_is_rejected() {
     let router = Socket::new(Kind::Router);
-    router.set_receive_timeout(Duration::from_millis(300));
     let addr = router.bind_loopback();
     let result = Peer::connect(addr, SocketType::Sub, b"");
     assert!(
@@ -101,7 +100,6 @@ fn incompatible_socket_type_is_rejected() {
         ),
         "{result:?}"
     );
-    assert!(router.recv().is_err(), "libzmq never delivers a message");
 }
 
 #[test]

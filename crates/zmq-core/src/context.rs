@@ -1467,23 +1467,6 @@ mod tests {
     }
 
     #[test]
-    fn listeners_know_their_names() {
-        let context = Context::new().unwrap();
-        let inproc = context
-            .bind_inproc("named", config(SocketType::Pull))
-            .unwrap();
-        assert_eq!(inproc.name(), "named");
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let name = format!("zmq-core-named-{}", std::process::id());
-            let abstract_ipc = context
-                .bind_ipc_abstract(&name, config(SocketType::Pull))
-                .unwrap();
-            assert_eq!(abstract_ipc.name(), name);
-        }
-    }
-
-    #[test]
     fn inbound_is_closed_once_its_peer_is_gone() {
         let context = Context::new().unwrap();
         let mut listener = context

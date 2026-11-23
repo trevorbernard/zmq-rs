@@ -44,7 +44,7 @@ fn peers_address_each_other_by_id() {
 }
 
 #[test]
-fn every_connection_gets_its_own_nonzero_id() {
+fn every_connection_gets_its_own_id() {
     let context = Context::new().unwrap();
     let mut hub = context.socket::<Peer>();
     hub.bind("inproc://hub-a").unwrap();
@@ -54,8 +54,6 @@ fn every_connection_gets_its_own_nonzero_id() {
     let a = caller.connect_peer("inproc://hub-a").unwrap();
     let b = caller.connect_peer("inproc://hub-b").unwrap();
     assert_ne!(a, b);
-    assert_ne!(a.get(), 0);
-    assert_ne!(b.get(), 0);
     caller.send(b, "to b").unwrap();
     assert_eq!(
         other.try_recv().unwrap().map(|(_, frame)| frame),

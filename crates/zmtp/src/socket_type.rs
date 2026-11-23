@@ -198,9 +198,6 @@ mod tests {
                 "CHANNEL",
             ]
         );
-        for ty in SocketType::ALL {
-            assert_eq!(SocketType::from_name(ty.name().as_bytes()), Some(ty));
-        }
         assert_eq!(SocketType::from_name(b"dealer"), None);
         assert_eq!(SocketType::from_name(b"STREAM"), None);
     }

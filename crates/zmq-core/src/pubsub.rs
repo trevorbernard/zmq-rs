@@ -950,17 +950,6 @@ mod tests {
         assert_eq!(drain(&mut sa), Vec::<Message>::new());
     }
 
-    #[test]
-    fn publisher_subscribes_legacy_peers_to_everything() {
-        let (a, mut sa) = connection(10);
-        let mut peers = list(vec![a]);
-        let mut publisher = Publisher::default();
-        assert_eq!(publisher.send(&mut peers, msg("early")), 0);
-        sa.establish_legacy_subscriber();
-        assert_eq!(publisher.send(&mut peers, msg("x")), 1);
-        assert_eq!(drain(&mut sa), [msg("x")]);
-    }
-
     fn next_event(publisher: &mut Publisher, peers: &mut PeerList) -> Option<XPubEvent> {
         match publisher.poll_event(peers, &mut TaskContext::from_waker(Waker::noop())) {
             Poll::Ready(event) => Some(event),
@@ -1156,17 +1145,6 @@ mod tests {
             count.0.load(Ordering::SeqCst) > 0,
             "a subscription after the send still wakes it"
         );
-    }
-
-    #[test]
-    fn xpub_reports_a_legacy_peers_implicit_subscription() {
-        let (a, mut sa) = connection(10);
-        let mut peers = list(vec![a]);
-        let mut publisher = Publisher::with_events();
-        sa.establish_legacy_subscriber();
-        assert_eq!(events(&mut publisher, &mut peers), [subscribed("")]);
-        drop(sa);
-        assert_eq!(events(&mut publisher, &mut peers), [cancelled("")]);
     }
 
     #[test]

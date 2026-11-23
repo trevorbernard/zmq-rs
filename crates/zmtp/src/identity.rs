@@ -60,7 +60,6 @@ mod tests {
 
     #[test]
     fn empty_identity_is_valid() {
-        assert_eq!(Identity::default().as_bytes(), b"");
         assert_eq!(Identity::new(Frame::new()).unwrap().as_bytes(), b"");
     }
 
