@@ -7,7 +7,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
-/// Why binding or connecting failed.
+/// Why making a socket, binding or connecting failed.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {

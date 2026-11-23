@@ -26,9 +26,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn scatter_and_gather_over_tcp() {
     let context = Context::new().unwrap();
-    let mut gather = context.socket::<Gather>();
+    let mut gather = context.socket::<Gather>().unwrap();
     let bound = gather.bind(free_endpoint()).unwrap();
-    let mut scatter = context.socket::<Scatter>();
+    let mut scatter = context.socket::<Scatter>().unwrap();
     scatter.connect(&bound).unwrap();
     for i in 0..10 {
         scatter.send(format!("{i}")).unwrap();
@@ -45,12 +45,12 @@ fn scatter_round_robins_across_gathers() {
     let context = Context::new().unwrap();
     let mut gathers: Vec<_> = (0..2)
         .map(|n| {
-            let mut gather = context.socket::<Gather>();
+            let mut gather = context.socket::<Gather>().unwrap();
             gather.bind(format!("inproc://gather-{n}")).unwrap();
             gather
         })
         .collect();
-    let mut scatter = context.socket::<Scatter>();
+    let mut scatter = context.socket::<Scatter>().unwrap();
     for n in 0..2 {
         scatter.connect(format!("inproc://gather-{n}")).unwrap();
     }
@@ -66,11 +66,11 @@ fn scatter_round_robins_across_gathers() {
 #[test]
 fn gather_fair_queues_from_scatters() {
     let context = Context::new().unwrap();
-    let mut gather = context.socket::<Gather>();
+    let mut gather = context.socket::<Gather>().unwrap();
     gather.bind("inproc://fair").unwrap();
     let mut scatters: Vec<_> = (0..2)
         .map(|_| {
-            let mut scatter = context.socket::<Scatter>();
+            let mut scatter = context.socket::<Scatter>().unwrap();
             scatter.connect("inproc://fair").unwrap();
             scatter
         })
@@ -93,7 +93,7 @@ fn gather_fair_queues_from_scatters() {
 #[test]
 fn a_scatter_without_gathers_hands_the_frame_back() {
     let context = Context::new().unwrap();
-    let mut scatter = context.socket::<Scatter>();
+    let mut scatter = context.socket::<Scatter>().unwrap();
     assert_eq!(
         scatter.try_send("nobody"),
         Err(zmq::TrySendError::Full(Frame::from("nobody")))
@@ -104,9 +104,9 @@ fn a_scatter_without_gathers_hands_the_frame_back() {
 fn inproc_pairs_a_gather_with_any_socket_type() {
     // As in libzmq, where only a handshake checks socket types.
     let context = Context::new().unwrap();
-    let mut gather = context.socket::<Gather>();
+    let mut gather = context.socket::<Gather>().unwrap();
     gather.bind("inproc://strangers").unwrap();
-    let mut push = context.socket::<zmq::Push>();
+    let mut push = context.socket::<zmq::Push>().unwrap();
     push.connect("inproc://strangers").unwrap();
     push.try_send("not a scatter").unwrap();
     let frame = gather

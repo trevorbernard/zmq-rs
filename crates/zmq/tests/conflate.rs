@@ -22,10 +22,10 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn a_conflating_pull_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     pull.bind("inproc://latest").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://latest").unwrap();
     for i in 1..=10 {
         push.send(i.to_string()).unwrap();
@@ -37,13 +37,13 @@ fn a_conflating_pull_keeps_only_the_latest_message() {
 #[test]
 fn a_conflating_push_queues_only_the_latest_message() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.set_conflate(true);
     push.connect("inproc://later").unwrap();
     for i in 1..=10 {
         push.try_send(i.to_string()).expect("never full");
     }
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://later").unwrap();
     assert_eq!(pull.recv().unwrap(), Message::from("10"));
     thread::sleep(Duration::from_millis(50));
@@ -53,10 +53,10 @@ fn a_conflating_push_queues_only_the_latest_message() {
 #[test]
 fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
     for i in 1..=100 {
         push.send(i.to_string()).unwrap();
@@ -70,9 +70,9 @@ fn a_conflating_pull_over_tcp_keeps_only_the_latest_message() {
 #[test]
 fn a_conflating_pull_that_connects_keeps_only_the_latest_message() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let bound = push.bind(free_endpoint()).unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     pull.connect(&bound).unwrap();
     for i in 1..=100 {
@@ -86,11 +86,11 @@ fn a_conflating_pull_that_connects_keeps_only_the_latest_message() {
 #[test]
 fn conflating_can_be_turned_off_again() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     pull.set_conflate(false);
     pull.bind("inproc://every").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://every").unwrap();
     push.send("1").unwrap();
     push.send("2").unwrap();
@@ -101,9 +101,9 @@ fn conflating_can_be_turned_off_again() {
 #[test]
 fn conflating_never_loses_a_subscription() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://topics").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.set_conflate(true);
     subscriber.subscribe("a");
     subscriber.subscribe("b");

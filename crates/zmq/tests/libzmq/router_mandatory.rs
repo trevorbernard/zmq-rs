@@ -18,13 +18,15 @@ fn dealer_called(
     identity: &'static str,
     options: SocketOptions,
 ) -> Socket<Dealer> {
-    context.socket_with::<Dealer>(options.identity(Identity::new(identity).unwrap()))
+    context
+        .socket_with::<Dealer>(options.identity(Identity::new(identity).unwrap()))
+        .unwrap()
 }
 
 #[test]
 fn basic() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     // libzmq's default silently drops a message for an unknown peer;
@@ -54,7 +56,9 @@ fn basic() {
 fn get_peer_state() {
     let hwm = Hwm::from(100);
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm));
+    let mut router = context
+        .socket_with::<Router>(SocketOptions::new().send_hwm(hwm))
+        .unwrap();
     router.bind("inproc://test_get_peer_state").unwrap();
     let low_hwm = || SocketOptions::new().recv_hwm(hwm);
     let mut dealer1 = dealer_called(&context, "X", low_hwm());

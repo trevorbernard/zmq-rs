@@ -33,7 +33,7 @@ fn a_libzmq_peer_and_ours_address_each_other() {
         return;
     }
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Peer>();
+    let mut ours = context.socket::<Peer>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Peer);
     theirs.set_receive_timeout(FIVE);
@@ -60,7 +60,7 @@ fn our_peer_connects_to_a_libzmq_peer() {
     theirs.set_receive_timeout(FIVE);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Peer>();
+    let mut ours = context.socket::<Peer>().unwrap();
     let to_theirs = ours.connect_peer(format!("tcp://{addr}")).unwrap();
     ours.send(to_theirs, "queued before the connection is up")
         .unwrap();
@@ -79,7 +79,7 @@ fn a_libzmq_channel_talks_to_ours() {
         return;
     }
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Channel>();
+    let mut ours = context.socket::<Channel>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Channel);
     theirs.set_receive_timeout(FIVE);
@@ -95,7 +95,7 @@ fn a_libzmq_channel_talks_to_ours() {
 fn our_channel_drops_multipart_messages() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
-    let mut channel = context.socket::<Channel>();
+    let mut channel = context.socket::<Channel>().unwrap();
     channel
         .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
@@ -129,7 +129,9 @@ fn libzmq_refuses_connect_peer_with_immediate() {
 #[test]
 fn we_refuse_connect_peer_with_immediate() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket_with::<Peer>(zmq::SocketOptions::new().immediate(true));
+    let mut ours = context
+        .socket_with::<Peer>(zmq::SocketOptions::new().immediate(true))
+        .unwrap();
     assert!(matches!(
         ours.connect_peer(free_endpoint()),
         Err(zmq::Error::Immediate)

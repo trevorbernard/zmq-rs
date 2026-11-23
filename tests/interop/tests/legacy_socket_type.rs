@@ -49,7 +49,7 @@ fn we_pull_from_an_old_peer_of_any_announced_type() {
     for revision in [0, 1] {
         for socket_type in ANNOUNCED {
             let context = Context::new().unwrap();
-            let mut pull = context.socket::<Pull>();
+            let mut pull = context.socket::<Pull>().unwrap();
             let addr = pull.bind("tcp://127.0.0.1:0").unwrap().to_string();
             let addr = addr.strip_prefix("tcp://").unwrap().parse().unwrap();
             let _peer = old_peer(addr, revision, socket_type);

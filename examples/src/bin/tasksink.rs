@@ -7,7 +7,7 @@ use zmq::{Context, Pull};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut receiver = context.socket::<Pull>();
+    let mut receiver = context.socket::<Pull>()?;
     receiver.bind("tcp://*:5558")?;
 
     // Wait for start of batch

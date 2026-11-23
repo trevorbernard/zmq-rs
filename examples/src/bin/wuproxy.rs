@@ -10,11 +10,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // This is where the weather server sits
-    let mut frontend = context.socket::<XSub>();
+    let mut frontend = context.socket::<XSub>()?;
     frontend.connect("tcp://localhost:5556")?;
 
     // This is our public endpoint for subscribers
-    let mut backend = context.socket::<XPub>();
+    let mut backend = context.socket::<XPub>()?;
     backend.bind("tcp://*:8100")?;
 
     // Run the proxy until the user interrupts us

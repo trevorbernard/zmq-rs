@@ -32,7 +32,7 @@ fn a_peer_that_pings_without_reading_is_owed_one_pong_not_one_for_each() {
     const PONG: usize = 2 + 5 + 4;
 
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
     let done = Arc::new(AtomicBool::new(false));
     // A bound socket takes up its peers when called.

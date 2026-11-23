@@ -17,8 +17,8 @@ fn hwm(messages: usize) -> Hwm {
 #[test]
 fn change_before_connected() {
     let context = Context::new().unwrap();
-    let mut bind_socket = context.socket::<Push>();
-    let mut connect_socket = context.socket::<Pull>();
+    let mut bind_socket = context.socket::<Push>().unwrap();
+    let mut connect_socket = context.socket::<Pull>().unwrap();
 
     connect_socket.set_recv_hwm(hwm(2));
     bind_socket.set_send_hwm(hwm(2));
@@ -38,8 +38,8 @@ fn change_before_connected() {
 #[test]
 fn change_after_connected() {
     let context = Context::new().unwrap();
-    let mut bind_socket = context.socket::<Push>();
-    let mut connect_socket = context.socket::<Pull>();
+    let mut bind_socket = context.socket::<Push>().unwrap();
+    let mut connect_socket = context.socket::<Pull>().unwrap();
 
     connect_socket.set_recv_hwm(hwm(1));
     bind_socket.set_send_hwm(hwm(1));
@@ -80,8 +80,8 @@ fn fill_up_to_hwm(socket: &mut Socket<Push>, sndhwm: usize) -> usize {
 #[test]
 fn decrease_when_full() {
     let context = Context::new().unwrap();
-    let mut bind_socket = context.socket::<Push>();
-    let mut connect_socket = context.socket::<Pull>();
+    let mut bind_socket = context.socket::<Push>().unwrap();
+    let mut connect_socket = context.socket::<Pull>().unwrap();
 
     connect_socket.set_recv_hwm(hwm(1));
     let mut sndhwm = 100;

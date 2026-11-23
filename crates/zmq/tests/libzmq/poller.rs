@@ -20,9 +20,9 @@ use zmq_test_ports::free_endpoint;
 use crate::support::FIVE;
 
 fn pipeline(context: &Context) -> (zmq::Socket<Push>, zmq::Socket<Pull>) {
-    let mut vent = context.socket::<Push>();
+    let mut vent = context.socket::<Push>().unwrap();
     let endpoint = vent.bind(free_endpoint()).unwrap().to_string();
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>().unwrap();
     sink.connect(&endpoint).unwrap();
     (vent, sink)
 }
@@ -104,9 +104,9 @@ fn poll_client_server() {
     use zmq::{Client, Frame, Server};
 
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect(&endpoint).unwrap();
 
     client.send("I").unwrap();

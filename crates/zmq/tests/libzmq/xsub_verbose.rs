@@ -26,9 +26,9 @@ fn xsub_verbose_unsubscribe() {
     let cancelled = || XPubEvent::Cancel(TOPIC_A.into());
 
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher.bind("inproc://soketto").unwrap();
-    let mut subscriber = context.socket::<XSub>();
+    let mut subscriber = context.socket::<XSub>().unwrap();
     subscriber.connect("inproc://soketto").unwrap();
 
     // To be told of every subscription and unsubscription.

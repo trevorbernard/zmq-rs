@@ -76,9 +76,9 @@ fn check<S>(
 #[test]
 fn push() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(tiny());
+    let mut pull = context.socket_with::<Pull>(tiny()).unwrap();
     pull.bind("inproc://push").unwrap();
-    let mut push = context.socket_with::<Push>(tiny());
+    let mut push = context.socket_with::<Push>(tiny()).unwrap();
     push.connect("inproc://push").unwrap();
     check(
         push,
@@ -91,9 +91,9 @@ fn push() {
 #[test]
 fn pair() {
     let context = Context::new().unwrap();
-    let mut left = context.socket_with::<Pair>(tiny());
+    let mut left = context.socket_with::<Pair>(tiny()).unwrap();
     left.bind("inproc://pair").unwrap();
-    let mut right = context.socket_with::<Pair>(tiny());
+    let mut right = context.socket_with::<Pair>(tiny()).unwrap();
     right.connect("inproc://pair").unwrap();
     check(
         left,
@@ -106,9 +106,9 @@ fn pair() {
 #[test]
 fn dealer() {
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(tiny());
+    let mut dealer = context.socket_with::<Dealer>(tiny()).unwrap();
     dealer.bind("inproc://dealer").unwrap();
-    let mut other = context.socket_with::<Dealer>(tiny());
+    let mut other = context.socket_with::<Dealer>(tiny()).unwrap();
     other.connect("inproc://dealer").unwrap();
     check(
         dealer,
@@ -125,10 +125,11 @@ fn dealer_id() -> RoutingId {
 #[test]
 fn router() {
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(tiny());
+    let mut router = context.socket_with::<Router>(tiny()).unwrap();
     router.bind("inproc://router").unwrap();
-    let mut dealer =
-        context.socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()));
+    let mut dealer = context
+        .socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()))
+        .unwrap();
     dealer.connect("inproc://router").unwrap();
     dealer.send("hello").unwrap();
     assert_eq!(
@@ -146,7 +147,7 @@ fn router() {
 #[test]
 fn router_reports_an_unknown_peer_at_once() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let start = Instant::now();
     assert_eq!(
         router.send_timeout(&RoutingId::new("nobody").unwrap(), "x", FIVE),
@@ -158,10 +159,11 @@ fn router_reports_an_unknown_peer_at_once() {
 #[test]
 fn router_reports_a_full_peer_after_the_timeout() {
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(tiny());
+    let mut router = context.socket_with::<Router>(tiny()).unwrap();
     router.bind("inproc://full").unwrap();
-    let mut dealer =
-        context.socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()));
+    let mut dealer = context
+        .socket_with::<Dealer>(tiny().identity(Identity::new("dealer").unwrap()))
+        .unwrap();
     dealer.connect("inproc://full").unwrap();
     dealer.send("hello").unwrap();
     assert!(router.recv_timeout(FIVE).unwrap().is_some());
@@ -175,7 +177,7 @@ fn router_reports_a_full_peer_after_the_timeout() {
 #[test]
 fn a_timed_out_send_hands_the_message_back() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     assert_eq!(
         push.send_timeout("kept", SHORT),
         Err(zmq::TrySendError::Full(Message::from("kept")))
@@ -185,9 +187,9 @@ fn a_timed_out_send_hands_the_message_back() {
 #[test]
 fn xpub_send_all() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket_with::<XPub>(tiny());
+    let mut xpub = context.socket_with::<XPub>(tiny()).unwrap();
     xpub.bind("inproc://nodrop").unwrap();
-    let mut sub = context.socket_with::<Sub>(tiny());
+    let mut sub = context.socket_with::<Sub>(tiny()).unwrap();
     sub.subscribe("");
     sub.connect("inproc://nodrop").unwrap();
     assert!(
@@ -210,9 +212,9 @@ mod draft {
     #[test]
     fn client() {
         let context = Context::new().unwrap();
-        let mut server = context.socket_with::<Server>(tiny());
+        let mut server = context.socket_with::<Server>(tiny()).unwrap();
         server.bind("inproc://client").unwrap();
-        let mut client = context.socket_with::<Client>(tiny());
+        let mut client = context.socket_with::<Client>(tiny()).unwrap();
         client.connect("inproc://client").unwrap();
         check(
             client,
@@ -225,9 +227,9 @@ mod draft {
     #[test]
     fn scatter() {
         let context = Context::new().unwrap();
-        let mut gather = context.socket_with::<Gather>(tiny());
+        let mut gather = context.socket_with::<Gather>(tiny()).unwrap();
         gather.bind("inproc://scatter").unwrap();
-        let mut scatter = context.socket_with::<Scatter>(tiny());
+        let mut scatter = context.socket_with::<Scatter>(tiny()).unwrap();
         scatter.connect("inproc://scatter").unwrap();
         check(
             scatter,
@@ -240,9 +242,9 @@ mod draft {
     #[test]
     fn channel() {
         let context = Context::new().unwrap();
-        let mut left = context.socket_with::<Channel>(tiny());
+        let mut left = context.socket_with::<Channel>(tiny()).unwrap();
         left.bind("inproc://channel").unwrap();
-        let mut right = context.socket_with::<Channel>(tiny());
+        let mut right = context.socket_with::<Channel>(tiny()).unwrap();
         right.connect("inproc://channel").unwrap();
         check(
             left,
@@ -255,9 +257,9 @@ mod draft {
     #[test]
     fn server() {
         let context = Context::new().unwrap();
-        let mut server = context.socket_with::<Server>(tiny());
+        let mut server = context.socket_with::<Server>(tiny()).unwrap();
         server.bind("inproc://server").unwrap();
-        let mut client = context.socket_with::<Client>(tiny());
+        let mut client = context.socket_with::<Client>(tiny()).unwrap();
         client.connect("inproc://server").unwrap();
         client.send("hello").unwrap();
         let (id, _) = server
@@ -275,9 +277,9 @@ mod draft {
     #[test]
     fn peer() {
         let context = Context::new().unwrap();
-        let mut peer = context.socket_with::<Peer>(tiny());
+        let mut peer = context.socket_with::<Peer>(tiny()).unwrap();
         peer.bind("inproc://peer").unwrap();
-        let mut other = context.socket_with::<Peer>(tiny());
+        let mut other = context.socket_with::<Peer>(tiny()).unwrap();
         let id = other.connect_peer("inproc://peer").unwrap();
         check(
             (other, id),
@@ -290,9 +292,9 @@ mod draft {
     #[test]
     fn peer_reports_a_full_peer_after_the_timeout() {
         let context = Context::new().unwrap();
-        let mut peer = context.socket_with::<Peer>(tiny());
+        let mut peer = context.socket_with::<Peer>(tiny()).unwrap();
         peer.bind("inproc://full").unwrap();
-        let mut other = context.socket_with::<Peer>(tiny());
+        let mut other = context.socket_with::<Peer>(tiny()).unwrap();
         let id = other.connect_peer("inproc://full").unwrap();
         while other.try_send(id, "fill").is_ok() {}
         assert_eq!(
@@ -304,7 +306,7 @@ mod draft {
     #[test]
     fn peer_reports_an_unknown_peer_at_once() {
         let context = Context::new().unwrap();
-        let mut peer = context.socket::<Peer>();
+        let mut peer = context.socket::<Peer>().unwrap();
         let nobody = PeerId::new(12345).unwrap();
         let start = Instant::now();
         assert_eq!(

@@ -10,9 +10,9 @@ use zmq::{Client, Context, Frame, Server, Socket};
 use crate::support::{FIVE, within};
 
 fn inproc_client_server_pair(context: &Context, name: &str) -> (Socket<Server>, Socket<Client>) {
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.bind(format!("inproc://{name}")).unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect(format!("inproc://{name}")).unwrap();
     (server, client)
 }

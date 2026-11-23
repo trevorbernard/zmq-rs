@@ -17,10 +17,10 @@ fn serviced(type_of_service: u8) -> SocketOptions {
 #[test]
 fn diffserv() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket_with::<Pair>(serviced(0x28));
+    let mut sb = context.socket_with::<Pair>(serviced(0x28)).unwrap();
     let my_endpoint = sb.bind(free_endpoint()).unwrap().to_string();
 
-    let mut sc = context.socket_with::<Pair>(serviced(0x58));
+    let mut sc = context.socket_with::<Pair>(serviced(0x58)).unwrap();
     sc.connect(&my_endpoint).unwrap();
 
     bounce_pair(&mut sb, &mut sc);

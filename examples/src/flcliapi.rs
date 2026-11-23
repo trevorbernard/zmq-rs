@@ -40,11 +40,11 @@ impl Flcliapi {
             "inproc://flcliapi-{}",
             PIPES.fetch_add(1, Ordering::Relaxed)
         );
-        let mut pipe = context.socket::<Pair>();
+        let mut pipe = context.socket::<Pair>().unwrap();
         pipe.bind(&endpoint)?;
-        let mut agent_pipe = context.socket::<Pair>();
+        let mut agent_pipe = context.socket::<Pair>().unwrap();
         agent_pipe.connect(&endpoint)?;
-        let router = context.socket::<Router>();
+        let router = context.socket::<Router>().unwrap();
         thread::spawn(move || Agent::new(agent_pipe, router).run());
         Ok(Self { pipe })
     }

@@ -20,7 +20,7 @@ fn libzmq_takes_a_message_whose_frames_are_each_under_its_limit() {
     pull.set_max_message_size(LIMIT as i64);
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("tcp://{addr}")).unwrap();
     let [first, second] = two_frames();
     push.send(Message::from([
@@ -38,7 +38,7 @@ fn libzmq_drops_a_peer_that_sends_a_frame_over_its_limit() {
     pull.set_receive_timeout(SHORT);
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("tcp://{addr}")).unwrap();
     push.send(vec![3; LIMIT as usize + 1]).unwrap();
     assert!(pull.recv().is_err());
@@ -47,7 +47,9 @@ fn libzmq_drops_a_peer_that_sends_a_frame_over_its_limit() {
 #[test]
 fn we_take_a_message_whose_frames_are_each_under_our_limit() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().max_message_size(LIMIT));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().max_message_size(LIMIT))
+        .unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
@@ -62,7 +64,9 @@ fn we_take_a_message_whose_frames_are_each_under_our_limit() {
 #[test]
 fn we_drop_a_peer_that_sends_a_frame_over_our_limit() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().max_message_size(LIMIT));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().max_message_size(LIMIT))
+        .unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);

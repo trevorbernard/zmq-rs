@@ -6,7 +6,7 @@ use zmq::{Context, Error, Pub};
 
 fn connect(endpoint: &str) -> Result<(), Error> {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect(endpoint)
 }
 

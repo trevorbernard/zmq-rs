@@ -9,8 +9,8 @@ use crate::support::{FIVE, Requesting, msg, zero_linger};
 fn invalid_rep() {
     // Create REQ/ROUTER wiring.
     let context = Context::new().unwrap();
-    let mut router_socket = context.socket_with::<Router>(zero_linger());
-    let mut req_socket = context.socket_with::<Req>(zero_linger());
+    let mut router_socket = context.socket_with::<Router>(zero_linger()).unwrap();
+    let mut req_socket = context.socket_with::<Req>(zero_linger()).unwrap();
     router_socket.bind("inproc://invalid_rep").unwrap();
     req_socket.connect("inproc://invalid_rep").unwrap();
 

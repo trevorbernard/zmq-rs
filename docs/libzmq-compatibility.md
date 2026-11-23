@@ -46,7 +46,6 @@ sees, with no safety gain.
 | # | libzmq | zmq-rs today |
 |---|---|---|
 | D17 | With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, disconnected or not. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once. Found on 2026-11-22 in place of what was listed, that libzmq's disconnect stops the retrying only with the flag (`tests/interop/tests/reconnect.rs`). Not yet ruled a Divergence to close or an Exception |
-| D19 | `zmq_socket` fails with `ETERM` once the context is shut down | Succeeds; the socket's operations then fail |
 | D21 | A PAIR holds a departed peer's place until the application has read what it sent, and turns away a peer that arrives meanwhile, whose messages are lost | Frees the place when the departed peer's session ends, so the newcomer is let in. Found on 2026-11-22 in place of what was listed, that libzmq drops the departed peer's messages: it delivers them, as we do (`tests/interop/tests/pair.rs`). Not yet ruled a Divergence to close or an Exception |
 
 ## Exceptions
@@ -218,7 +217,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 |---|---|---|
 | `zmq_ctx_new`, `zmq_init` | `Context::new`, `with_io_threads` | Same |
 | `zmq_ctx_term`, `zmq_ctx_destroy`, `zmq_term`, `zmq_ctx_shutdown` | Drop, `Context::shutdown` | Exception (API shape) |
-| `zmq_socket` | `Context::socket`, `socket_with` | Same; Divergence D19 |
+| `zmq_socket` | `Context::socket`, `socket_with` | Same; Verified that none is made once the context is shut down (`terminated::a_socket_cannot_be_made_after_a_shutdown`, from libzmq's `test_ctx_destroy`; `tests/interop/tests/context.rs`) |
 | `zmq_close` | Drop | Same |
 | `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`) and for why an endpoint is refused: `EINVAL` is `Error::InvalidEndpoint`, `ENODEV` `NoSuchDevice`, `ENAMETOOLONG` `NameTooLong`, `EPROTONOSUPPORT` `UnsupportedTransport`, `ENOCOMPATPROTO` `IncompatibleTransport` (`tests/interop/tests/endpoint_errors.rs`) |
 | `zmq_send`, `zmq_recv`, `zmq_msg_send`, `zmq_msg_recv`, `zmq_send_const` | `send`, `recv`, their `try_`, `_timeout` and `_async` forms | Same |
@@ -293,8 +292,7 @@ known to fall short of the bar:
   as one: about thirty, listed in the headers of the modules in
   `crates/zmq/tests/libzmq/`.
 - **libzmq tests ported in part**: `poller` (6 of 49 cases), `monitor`
-  (4 of 10), `security_zap` (12 of 30), `radio_dish` (9 of 16),
-  `inproc_connect` (lacks `shutdown_during_pend`).
+  (4 of 10), `security_zap` (12 of 30), `radio_dish` (9 of 16).
 - **Not settled by reading the sources**:
   - which `ipc` socket files libzmq removes when a listener closes
   - whether libzmq's draft sockets talk to a ZMTP 1.0 or 2.0 peer: ours

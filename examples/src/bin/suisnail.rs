@@ -19,7 +19,7 @@ fn now_ms() -> u128 {
 // The subscriber connects to the publisher and reads timestamps. If one
 // is more than a second old, it gives up and tells the main thread so.
 fn subscriber(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error> {
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("");
     subscriber.connect("tcp://localhost:5556")?;
 
@@ -42,7 +42,7 @@ fn subscriber(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error
 
 // The publisher sends a timestamp every millisecond, until told to stop.
 fn publisher(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error> {
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("tcp://*:5556")?;
 
     loop {
@@ -58,9 +58,9 @@ fn publisher(context: Context, mut pipe: Socket<Pair>) -> Result<(), zmq::Error>
 // A pipe to a child thread: a pair of PAIR sockets over inproc, as CZMQ's
 // zthread_fork makes.
 fn pipe(context: &Context, name: &str) -> Result<(Socket<Pair>, Socket<Pair>), zmq::Error> {
-    let mut parent = context.socket::<Pair>();
+    let mut parent = context.socket::<Pair>().unwrap();
     parent.bind(format!("inproc://{name}"))?;
-    let mut child = context.socket::<Pair>();
+    let mut child = context.socket::<Pair>().unwrap();
     child.connect(format!("inproc://{name}"))?;
     Ok((parent, child))
 }

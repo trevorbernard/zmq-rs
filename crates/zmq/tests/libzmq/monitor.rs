@@ -44,8 +44,8 @@ fn monitor_basic(bind: &str) {
         let context = Context::new().unwrap();
         // libzmq closes them with zero linger.
         let options = SocketOptions::new().linger(Linger::For(Duration::ZERO));
-        let mut client = context.socket_with::<Dealer>(options.clone());
-        let mut server = context.socket_with::<Dealer>(options);
+        let mut client = context.socket_with::<Dealer>(options.clone()).unwrap();
+        let mut server = context.socket_with::<Dealer>(options).unwrap();
         let mut client_monitor = client.monitor();
         let mut server_monitor = server.monitor();
 

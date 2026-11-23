@@ -61,9 +61,9 @@ pub trait Capture: sealed::Sealed + Send {
 /// use zmq::{Context, Dealer, Proxy, Router};
 ///
 /// let context = Context::new()?;
-/// let mut frontend = context.socket::<Router>();
+/// let mut frontend = context.socket::<Router>()?;
 /// frontend.bind("tcp://*:5559")?;
-/// let mut backend = context.socket::<Dealer>();
+/// let mut backend = context.socket::<Dealer>()?;
 /// backend.bind("tcp://*:5560")?;
 /// let mut proxy = Proxy::new(&mut frontend, &mut backend);
 /// let control = proxy.control();

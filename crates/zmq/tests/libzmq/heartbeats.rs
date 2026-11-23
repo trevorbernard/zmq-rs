@@ -71,7 +71,7 @@ fn server<T: SocketType>(
     if heartbeats {
         options = options.heartbeat(Heartbeat::every(Duration::from_millis(50)));
     }
-    let mut server = context.socket_with::<T>(options);
+    let mut server = context.socket_with::<T>(options).unwrap();
     let monitor = server.monitor();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, monitor, endpoint)
@@ -146,11 +146,13 @@ fn heartbeat_timeout_router_mock_ping() {
 fn heartbeat_ttl<C: SocketType, S: SocketType>() {
     let context = Context::new().unwrap();
     let (_server, mut monitor, endpoint) = server::<S>(&context, false, false);
-    let mut client = context.socket_with::<C>(SocketOptions::new().heartbeat(Heartbeat {
-        interval: Duration::from_millis(250),
-        timeout: Duration::from_millis(250),
-        ttl: Ttl::from_deciseconds(1),
-    }));
+    let mut client = context
+        .socket_with::<C>(SocketOptions::new().heartbeat(Heartbeat {
+            interval: Duration::from_millis(250),
+            timeout: Duration::from_millis(250),
+            ttl: Ttl::from_deciseconds(1),
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
 
     assert_eq!(next_event(&mut monitor, FIVE), Some(EventKind::Accepted));
@@ -165,14 +167,16 @@ fn heartbeat_ttl<C: SocketType, S: SocketType>() {
 fn heartbeat_notimeout<C: SocketType, S: SocketType>(curve: bool) {
     let context = Context::new().unwrap();
     let (_server, mut monitor, endpoint) = server::<S>(&context, true, curve);
-    let mut client = context.socket_with::<C>(SocketOptions::new().security(if curve {
-        Security::curve_client(
-            keypair(CLIENT_SECRET),
-            PublicKey::from_z85(SERVER_PUBLIC).unwrap(),
-        )
-    } else {
-        Security::Null
-    }));
+    let mut client = context
+        .socket_with::<C>(SocketOptions::new().security(if curve {
+            Security::curve_client(
+                keypair(CLIENT_SECRET),
+                PublicKey::from_z85(SERVER_PUBLIC).unwrap(),
+            )
+        } else {
+            Security::Null
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
     settle();
 
@@ -241,10 +245,12 @@ fn announced_ttl(ttl: Ttl) -> u16 {
     let listener = TcpListener::bind(free_port()).unwrap();
     let endpoint = format!("tcp://{}", listener.local_addr().unwrap());
     let context = Context::new().unwrap();
-    let mut client = context.socket_with::<Pair>(SocketOptions::new().heartbeat(Heartbeat {
-        ttl,
-        ..Heartbeat::every(Duration::from_millis(10))
-    }));
+    let mut client = context
+        .socket_with::<Pair>(SocketOptions::new().heartbeat(Heartbeat {
+            ttl,
+            ..Heartbeat::every(Duration::from_millis(10))
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
 
     let (mut stream, _) = listener.accept().unwrap();

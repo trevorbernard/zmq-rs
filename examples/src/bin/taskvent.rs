@@ -8,9 +8,9 @@ use zmq::{Context, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut sender = context.socket::<Push>();
+    let mut sender = context.socket::<Push>()?;
     sender.bind("tcp://*:5557")?;
-    let mut sink = context.socket::<Push>();
+    let mut sink = context.socket::<Push>()?;
     sink.connect("tcp://localhost:5558")?;
 
     println!("Press Enter when the workers are ready: ");

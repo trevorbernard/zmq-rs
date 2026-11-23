@@ -26,9 +26,9 @@ fn forever() -> SocketOptions {
 /// A PUSH and a PULL with `options`, connected over TCP, exchange a
 /// message.
 fn exchange(context: &Context, options: &SocketOptions) {
-    let mut pull = context.socket_with::<Pull>(options.clone());
+    let mut pull = context.socket_with::<Pull>(options.clone()).unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(options.clone());
+    let mut push = context.socket_with::<Push>(options.clone()).unwrap();
     push.connect(&bound).unwrap();
     push.send("through").unwrap();
     assert_eq!(
@@ -41,7 +41,7 @@ fn exchange(context: &Context, options: &SocketOptions) {
 fn durations_too_long_to_reach_mean_never() {
     let context = Context::new().unwrap();
     // Refused, so it waits out a backoff too long to reach.
-    let mut refused = context.socket_with::<Push>(forever());
+    let mut refused = context.socket_with::<Push>(forever()).unwrap();
     refused.connect(free_endpoint()).unwrap();
     // Connected: it heartbeats, times its handshake and lingers.
     exchange(&context, &forever());

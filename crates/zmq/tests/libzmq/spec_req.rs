@@ -17,13 +17,13 @@ fn inproc(name: &str) -> String {
 /// strategy.
 fn round_robin_out(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     let connect_address = req.bind(bind_address).unwrap().to_string();
 
     // Connected one at a time, so that they reach REQ in this order
     let mut reps: Vec<_> = (0..5)
         .map(|_| {
-            let mut rep = context.socket::<Rep>();
+            let mut rep = context.socket::<Rep>().unwrap();
             rep.connect(&connect_address).unwrap();
             thread::sleep(SETTLE);
             rep
@@ -57,9 +57,9 @@ fn round_robin_out_tcp() {
 /// frames, the message visible to the application.
 fn req_message_format(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     let connect_address = req.bind(bind_address).unwrap().to_string();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.connect(&connect_address).unwrap();
 
     // Send a multi-part request.
@@ -92,7 +92,7 @@ fn req_message_format_tcp() {
 #[test]
 fn block_on_send_no_peers() {
     let context = Context::new().unwrap();
-    let mut sc = context.socket::<Req>();
+    let mut sc = context.socket::<Req>().unwrap();
     assert_eq!(
         sc.request_timeout(Message::new(""), Duration::from_millis(250)),
         Err(RequestError::TimedOut)
@@ -111,15 +111,16 @@ fn block_on_send_no_peers() {
 /// discarded.
 fn req_only_listens_to_current_peer(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut req =
-        context.socket_with::<Req>(SocketOptions::new().identity(Identity::new("A").unwrap()));
+    let mut req = context
+        .socket_with::<Req>(SocketOptions::new().identity(Identity::new("A").unwrap()))
+        .unwrap();
     let connect_address = req.bind(bind_address).unwrap().to_string();
 
     // libzmq sets ZMQ_ROUTER_MANDATORY here; a zmq-rs ROUTER's `send`
     // always fails for an unknown peer.
     let mut routers: Vec<_> = (0..3)
         .map(|_| {
-            let mut router = context.socket::<Router>();
+            let mut router = context.socket::<Router>().unwrap();
             router.connect(&connect_address).unwrap();
             thread::sleep(SETTLE);
             router

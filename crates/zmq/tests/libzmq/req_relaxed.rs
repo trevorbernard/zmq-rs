@@ -46,11 +46,11 @@ fn finish<T: Send + 'static>(asking: JoinHandle<(Socket<Req>, T)>) -> (Socket<Re
 /// in turn, each connection settling before the next so that requests go
 /// to them in order.
 fn set_up(context: &Context) -> (Socket<Req>, [Socket<Rep>; SERVICES]) {
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.set_correlation(true);
     let endpoint = req.bind(free_endpoint()).unwrap().to_string();
     let rep = [(); SERVICES].map(|()| {
-        let mut rep = context.socket::<Rep>();
+        let mut rep = context.socket::<Rep>().unwrap();
         rep.connect(&endpoint).unwrap();
         settle();
         rep
@@ -149,11 +149,11 @@ fn case_3_abandoned_peers_stay_in_turn() {
 fn case_4_replies_to_earlier_requests_are_discarded() {
     let endpoint = free_endpoint();
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.set_correlation(true);
     req.connect(&endpoint).unwrap();
     // The router is not bound yet.
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
 
     // Two requests: the first is given up on, the second waited for.
     let asking = in_background(req, |req| {

@@ -10,7 +10,7 @@ use zmq::{Context, Pair, Proxy, Pub, Sub, XPub, XSub};
 // The subscriber thread requests messages starting with A and B, then
 // reads and counts incoming messages.
 fn subscriber_thread(context: Context) -> Result<(), zmq::Error> {
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("tcp://localhost:6001")?;
     subscriber.subscribe("A");
     subscriber.subscribe("B");
@@ -23,7 +23,7 @@ fn subscriber_thread(context: Context) -> Result<(), zmq::Error> {
 
 // The publisher sends random messages starting with A-J.
 fn publisher_thread(context: Context) -> Result<(), zmq::Error> {
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("tcp://*:6000")?;
 
     loop {
@@ -53,14 +53,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || subscriber_thread(context)
     });
 
-    let mut subscriber = context.socket::<XSub>();
+    let mut subscriber = context.socket::<XSub>()?;
     subscriber.connect("tcp://localhost:6000")?;
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>()?;
     publisher.bind("tcp://*:6001")?;
 
-    let mut listener = context.socket::<Pair>();
+    let mut listener = context.socket::<Pair>()?;
     listener.bind("inproc://listener")?;
-    let mut pipe = context.socket::<Pair>();
+    let mut pipe = context.socket::<Pair>()?;
     pipe.connect("inproc://listener")?;
     thread::spawn(move || listener_thread(pipe));
 

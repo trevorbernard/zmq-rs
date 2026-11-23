@@ -8,9 +8,9 @@
 //! use zmq::{Context, Pull, Push};
 //!
 //! let context = Context::new()?;
-//! let mut pull = context.socket::<Pull>();
+//! let mut pull = context.socket::<Pull>()?;
 //! let bound = pull.bind("tcp://127.0.0.1:*")?;
-//! let mut push = context.socket::<Push>();
+//! let mut push = context.socket::<Push>()?;
 //! push.connect(&bound)?;
 //! push.send("hello")?;
 //! assert_eq!(pull.recv()?, "hello");
@@ -21,7 +21,7 @@
 //!
 //! ```compile_fail,E0599
 //! let context = zmq::Context::new().unwrap();
-//! let mut push = context.socket::<zmq::Push>();
+//! let mut push = context.socket::<zmq::Push>().unwrap();
 //! push.recv();
 //! ```
 //!
@@ -30,7 +30,7 @@
 //!
 //! ```compile_fail,E0499
 //! let context = zmq::Context::new().unwrap();
-//! let mut rep = context.socket::<zmq::Rep>();
+//! let mut rep = context.socket::<zmq::Rep>().unwrap();
 //! let first = rep.recv().unwrap();
 //! let second = rep.recv().unwrap();
 //! first.reply("a").unwrap();
@@ -40,7 +40,7 @@
 //!
 //! ```compile_fail,E0382
 //! let context = zmq::Context::new().unwrap();
-//! let mut rep = context.socket::<zmq::Rep>();
+//! let mut rep = context.socket::<zmq::Rep>().unwrap();
 //! let request = rep.recv().unwrap();
 //! request.reply("a").unwrap();
 //! request.reply("b").unwrap();
@@ -50,13 +50,13 @@
 //!
 //! ```compile_fail,E0599
 //! let context = zmq::Context::new().unwrap();
-//! let mut publisher = context.socket::<zmq::Pub>();
+//! let mut publisher = context.socket::<zmq::Pub>().unwrap();
 //! publisher.recv();
 //! ```
 //!
 //! ```compile_fail,E0599
 //! let context = zmq::Context::new().unwrap();
-//! let mut subscriber = context.socket::<zmq::Sub>();
+//! let mut subscriber = context.socket::<zmq::Sub>().unwrap();
 //! subscriber.send("upstream");
 //! ```
 //!
@@ -65,9 +65,9 @@
 //!
 //! ```compile_fail,E0277
 //! let context = zmq::Context::new().unwrap();
-//! let mut frontend = context.socket::<zmq::Router>();
-//! let mut backend = context.socket::<zmq::Dealer>();
-//! let mut capture = context.socket::<zmq::Sub>();
+//! let mut frontend = context.socket::<zmq::Router>().unwrap();
+//! let mut backend = context.socket::<zmq::Dealer>().unwrap();
+//! let mut capture = context.socket::<zmq::Sub>().unwrap();
 //! zmq::Proxy::new(&mut frontend, &mut backend).capture(&mut capture);
 //! ```
 //!
@@ -75,8 +75,8 @@
 //!
 //! ```compile_fail,E0277
 //! let context = zmq::Context::new().unwrap();
-//! let mut frontend = context.socket::<zmq::Req>();
-//! let mut backend = context.socket::<zmq::Dealer>();
+//! let mut frontend = context.socket::<zmq::Req>().unwrap();
+//! let mut backend = context.socket::<zmq::Dealer>().unwrap();
 //! zmq::Proxy::new(&mut frontend, &mut backend);
 //! ```
 //!
@@ -84,7 +84,7 @@
 //!
 //! ```compile_fail,E0599
 //! let context = zmq::Context::new().unwrap();
-//! let mut router = context.socket::<zmq::Router>();
+//! let mut router = context.socket::<zmq::Router>().unwrap();
 //! router.set_conflate(true);
 //! ```
 //!
@@ -92,7 +92,7 @@
 //!
 //! ```compile_fail,E0061
 //! let context = zmq::Context::new().unwrap();
-//! let mut router = context.socket::<zmq::Router>();
+//! let mut router = context.socket::<zmq::Router>().unwrap();
 //! router.send("to nobody in particular");
 //! ```
 //!
@@ -215,7 +215,8 @@ impl Context {
     ///
     /// At once, every send and receive on its sockets fails with
     /// [`Terminated`], and those waiting are woken to fail, so that threads
-    /// blocked on a socket can stop. Then every listener and connection is
+    /// blocked on a socket can stop; no socket can be made from then on.
+    /// Then every listener and connection is
     /// closed, each connection delivering what it had queued for up to
     /// `timeout` (or less, by its [`linger`](SocketOptions::linger)), and
     /// the I/O threads stop. Fails if connections were cut off with
@@ -226,7 +227,7 @@ impl Context {
     /// use zmq::{Context, Pull, Terminated};
     ///
     /// let context = Context::new()?;
-    /// let mut jobs = context.socket::<Pull>();
+    /// let mut jobs = context.socket::<Pull>()?;
     /// jobs.bind("inproc://jobs")?;
     /// let worker = std::thread::spawn(move || {
     ///     while let Ok(job) = jobs.recv() {
@@ -246,13 +247,19 @@ impl Context {
         self.core.is_terminated()
     }
 
-    /// A new socket of type `T` with libzmq's default options.
-    pub fn socket<T: SocketType>(&self) -> Socket<T> {
+    /// A new socket of type `T` with libzmq's default options. Fails with
+    /// [`Error::Terminated`] once the context is shut down, as libzmq's
+    /// `zmq_socket` does (`ETERM`).
+    pub fn socket<T: SocketType>(&self) -> Result<Socket<T>, Error> {
         self.socket_with(SocketOptions::default())
     }
 
-    /// A new socket of type `T` with `options`.
-    pub fn socket_with<T: SocketType>(&self, options: SocketOptions) -> Socket<T> {
-        Socket::new(self.core.clone(), options)
+    /// A new socket of type `T` with `options`. Fails as
+    /// [`socket`](Self::socket) does.
+    pub fn socket_with<T: SocketType>(&self, options: SocketOptions) -> Result<Socket<T>, Error> {
+        if self.core.is_terminated() {
+            return Err(Error::Terminated);
+        }
+        Ok(Socket::new(self.core.clone(), options))
     }
 }

@@ -20,7 +20,7 @@ A test marked `#[ignore = "zmq-rs bug: ..."]` found a bug not yet fixed.
 
 Of 139 tests, 80 are ported and these 59 are left out. Some of the
 ported ones lack cases, for the same reasons: `poller`, `monitor`,
-`security_zap`, `radio_dish` and `inproc_connect`.
+`security_zap` and `radio_dish`.
 
 **Gaps**, features zmq-rs does not have yet:
 

@@ -30,7 +30,7 @@ pub(crate) fn no_linger() -> SocketOptions {
 }
 
 fn control_socket(control_context: &Context) -> zmq::Socket<Sub> {
-    let mut control = control_context.socket_with::<Sub>(no_linger());
+    let mut control = control_context.socket_with::<Sub>(no_linger()).unwrap();
     control.subscribe("");
     control.connect("inproc://control").unwrap();
     control
@@ -42,9 +42,11 @@ pub(crate) fn client_task(context: Context, control_context: Context, endpoint: 
     // A random routing id, to make tracing easier; libzmq's includes the
     // terminating NUL, making it ROUTING_ID_SIZE octets.
     let routing_id = format!("{:04X}-{:04X}\0", rand(0xFFFF), rand(0xFFFF));
-    let mut client = context.socket_with::<Dealer>(
-        no_linger().identity(Identity::new(routing_id.into_bytes()).unwrap()),
-    );
+    let mut client = context
+        .socket_with::<Dealer>(
+            no_linger().identity(Identity::new(routing_id.into_bytes()).unwrap()),
+        )
+        .unwrap();
     client.connect(&endpoint).unwrap();
     let mut control = control_socket(&control_context);
 
@@ -91,7 +93,7 @@ pub(crate) fn client_task(context: Context, control_context: Context, endpoint: 
 /// Handles one request at a time, sending 0 to 4 replies back with random
 /// delays, until told to STOP replying and then to TERMINATE.
 pub(crate) fn server_worker(context: Context, control_context: Context) {
-    let mut worker = context.socket_with::<Dealer>(no_linger());
+    let mut worker = context.socket_with::<Dealer>(no_linger()).unwrap();
     worker.connect("inproc://backend").unwrap();
     let mut control = control_socket(&control_context);
 
@@ -131,13 +133,13 @@ fn proxy() {
     within(Duration::from_secs(30), || {
         let context = Context::new().unwrap();
         let control_context = Context::new().unwrap();
-        let mut control = control_context.socket_with::<Pub>(no_linger());
+        let mut control = control_context.socket_with::<Pub>(no_linger()).unwrap();
         control.bind("inproc://control").unwrap();
 
         // Frontend talks to clients over TCP, backend to workers over inproc
-        let mut frontend = context.socket_with::<Router>(no_linger());
+        let mut frontend = context.socket_with::<Router>(no_linger()).unwrap();
         let endpoint = frontend.bind(free_endpoint()).unwrap().to_string();
-        let mut backend = context.socket_with::<Dealer>(no_linger());
+        let mut backend = context.socket_with::<Dealer>(no_linger()).unwrap();
         backend.bind("inproc://backend").unwrap();
 
         let workers: Vec<_> = (0..QT_WORKERS)

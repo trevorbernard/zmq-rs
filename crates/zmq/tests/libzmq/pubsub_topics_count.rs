@@ -27,9 +27,9 @@ fn expect_count(publisher: &mut Socket<Pub>, subscriber: &Socket<Sub>, count: us
 }
 
 fn pair(context: &Context) -> (Socket<Pub>, Socket<Sub>) {
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://soname").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://soname").unwrap();
     (publisher, subscriber)
 }

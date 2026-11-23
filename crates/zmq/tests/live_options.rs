@@ -52,7 +52,7 @@ fn drain(pull: &mut Socket<Pull>) -> usize {
 fn a_linger_set_to_zero_before_the_drop_abandons_what_is_queued() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         // Nothing listens there: the message would linger forever.
         push.connect(free_endpoint()).unwrap();
         push.send("never delivered").unwrap();
@@ -64,7 +64,7 @@ fn a_linger_set_to_zero_before_the_drop_abandons_what_is_queued() {
 fn a_linger_raised_before_the_drop_delivers_what_is_queued() {
     const COUNT: usize = 20_000;
     let receiving = Context::new().unwrap();
-    let mut pull = receiving.socket::<Pull>();
+    let mut pull = receiving.socket::<Pull>().unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let receiver = thread::spawn(move || {
         let mut count = 0;
@@ -78,7 +78,7 @@ fn a_linger_raised_before_the_drop_delivers_what_is_queued() {
         let options = SocketOptions::new()
             .send_hwm(Hwm::Unlimited)
             .linger(Linger::For(Duration::ZERO));
-        let mut push = context.socket_with::<Push>(options);
+        let mut push = context.socket_with::<Push>(options).unwrap();
         push.connect(&endpoint).unwrap();
         // Too much for the kernel's socket buffers to take at once.
         for _ in 0..COUNT {
@@ -94,7 +94,9 @@ fn a_linger_raised_before_the_drop_delivers_what_is_queued() {
 #[test]
 fn a_send_mark_changed_on_a_connected_socket_is_the_connections() {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)));
+    let mut push = context
+        .socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)))
+        .unwrap();
     // Nothing listens there, so everything sent stays queued.
     push.connect(free_endpoint()).unwrap();
     assert_eq!(fill(&mut push), 2);
@@ -111,7 +113,9 @@ fn a_send_mark_changed_on_a_connected_socket_is_the_connections() {
 #[test]
 fn a_send_mark_changed_is_that_of_later_connects() {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)));
+    let mut push = context
+        .socket_with::<Push>(marks(2, 2).linger(Linger::For(Duration::ZERO)))
+        .unwrap();
     push.set_send_hwm(hwm(4));
     push.connect(free_endpoint()).unwrap();
     assert_eq!(fill(&mut push), 4);
@@ -122,8 +126,8 @@ fn an_inproc_connection_holds_each_sockets_mark_as_it_is_now() {
     for bind_first in [true, false] {
         let context = Context::new().unwrap();
         let endpoint = format!("inproc://live-options-hwm-{bind_first}");
-        let mut pull = context.socket_with::<Pull>(marks(1, 1));
-        let mut push = context.socket_with::<Push>(marks(1, 1));
+        let mut pull = context.socket_with::<Pull>(marks(1, 1)).unwrap();
+        let mut push = context.socket_with::<Push>(marks(1, 1)).unwrap();
         if bind_first {
             pull.bind(&endpoint).unwrap();
             push.connect(&endpoint).unwrap();
@@ -151,10 +155,10 @@ fn an_inproc_connection_holds_each_sockets_mark_as_it_is_now() {
 fn a_mark_set_before_the_inproc_name_is_bound_is_the_one_added_to() {
     let context = Context::new().unwrap();
     let endpoint = "inproc://live-options-hwm-pending";
-    let mut push = context.socket_with::<Push>(marks(1, 1));
+    let mut push = context.socket_with::<Push>(marks(1, 1)).unwrap();
     push.connect(endpoint).unwrap();
     push.set_send_hwm(hwm(3));
-    let mut pull = context.socket_with::<Pull>(marks(1, 2));
+    let mut pull = context.socket_with::<Pull>(marks(1, 2)).unwrap();
     pull.bind(endpoint).unwrap();
     assert_eq!(fill(&mut push), 5);
 }
@@ -162,13 +166,15 @@ fn a_mark_set_before_the_inproc_name_is_bound_is_the_one_added_to() {
 #[test]
 fn an_identity_changed_between_connects_is_that_of_the_later_one() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Router>();
-    let mut second = context.socket::<Router>();
+    let mut first = context.socket::<Router>().unwrap();
+    let mut second = context.socket::<Router>().unwrap();
     let first_endpoint = first.bind(free_endpoint()).unwrap().to_string();
     let second_endpoint = second.bind(free_endpoint()).unwrap().to_string();
 
     let named = |name: &str| Identity::new(name.to_owned()).unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions::new().identity(named("one")));
+    let mut dealer = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(named("one")))
+        .unwrap();
     dealer.connect(&first_endpoint).unwrap();
     dealer.set_identity(named("two"));
     dealer.connect(&second_endpoint).unwrap();

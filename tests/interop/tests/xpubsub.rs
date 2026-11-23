@@ -27,7 +27,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn our_xpub_hears_a_libzmq_sub() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     let bound = xpub.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
@@ -59,7 +59,7 @@ fn our_xpub_hears_a_libzmq_sub() {
 #[test]
 fn our_xpub_hears_what_a_libzmq_xsub_sends_upstream() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     let bound = xpub.bind(free_endpoint()).unwrap();
     let xsub = Socket::new(Kind::XSub);
     xsub.connect(bound);
@@ -77,7 +77,7 @@ fn our_xsub_talks_to_a_libzmq_xpub() {
     xpub.set_receive_timeout(FIVE);
     let addr = xpub.bind_loopback();
     let context = Context::new().unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect(format!("tcp://{addr}")).unwrap();
     xsub.subscribe("a");
     xsub.send("hello").unwrap();
@@ -135,7 +135,7 @@ fn libzmq_reports_a_cancel_for_a_topic_its_peer_never_held() {
 #[test]
 fn we_report_a_cancel_for_a_topic_our_peer_never_held() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     let addr = xpub.bind("tcp://127.0.0.1:*").unwrap().tcp_addr().unwrap();
     let cancel = |topic: &'static str| Some(XPubEvent::Cancel(Frame::from(topic)));
     let _first = cancel_unheld(addr, None, "never");
@@ -199,7 +199,7 @@ fn our_xpub_hears(
     configure: impl FnOnce(&mut zmq::Socket<XPub>),
 ) -> (Vec<XPubEvent>, Received) {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     configure(&mut xpub);
     let bound = xpub.bind(free_endpoint()).unwrap();
     let xsub = Socket::new(Kind::XSub);
@@ -317,7 +317,7 @@ fn libzmq_xsub_holds_a_subscription_sent_in_any_frame() {
 #[test]
 fn our_xsub_holds_a_subscription_sent_in_any_frame() {
     let context = Context::new().unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.send(Message::from([
         &b"\x01A"[..],
         &b"hello"[..],
@@ -350,7 +350,7 @@ fn libzmq_xsub_holds_later_frames_only_after_a_first_that_subscribes() {
 #[test]
 fn our_xsub_holds_later_frames_only_after_a_first_that_subscribes() {
     let context = Context::new().unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.set_only_first_subscribe(true);
     xsub.send(Message::from([&b"hello"[..], &b"\x01A"[..]]))
         .unwrap();
@@ -382,7 +382,7 @@ fn our_xsub_sends_what_libzmqs_does_of_a_message_that_subscribes() {
     let xpub = Socket::new(Kind::XPub);
     let addr = xpub.bind_loopback();
     let context = Context::new().unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect(format!("tcp://{addr}")).unwrap();
     xsub.send(Message::from(sent)).unwrap();
     assert_eq!(drain(&xpub), expected, "ours");

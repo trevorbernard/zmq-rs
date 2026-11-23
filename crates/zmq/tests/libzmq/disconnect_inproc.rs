@@ -13,8 +13,8 @@ use crate::support::{FIVE, settle, within};
 fn disconnect_inproc() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut publisher = context.socket::<XPub>();
-        let mut subscriber = context.socket::<Sub>();
+        let mut publisher = context.socket::<XPub>().unwrap();
+        let mut subscriber = context.socket::<Sub>().unwrap();
         subscriber.subscribe("foo");
         publisher.bind("inproc://someInProcDescriptor").unwrap();
 

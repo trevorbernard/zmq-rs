@@ -10,10 +10,10 @@ use crate::support::{FIVE, within};
 #[test]
 fn peer() {
     let context = Context::new().unwrap();
-    let mut peer1 = context.socket::<Peer>();
+    let mut peer1 = context.socket::<Peer>().unwrap();
     let endpoint = peer1.bind(free_endpoint()).unwrap().to_string();
 
-    let mut peer2 = context.socket::<Peer>();
+    let mut peer2 = context.socket::<Peer>().unwrap();
     let peer1_id = peer2.connect_peer(&endpoint).unwrap();
     peer2.send(peer1_id, vec![1]).unwrap();
 

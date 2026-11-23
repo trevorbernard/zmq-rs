@@ -37,13 +37,15 @@ fn expect_nothing(monitor: &mut Monitor, wait: Duration) {
 }
 
 fn publisher(context: &Context, endpoint: &str) -> Socket<Pub> {
-    let mut publisher = context.socket_with::<Pub>(zero_linger());
+    let mut publisher = context.socket_with::<Pub>(zero_linger()).unwrap();
     publisher.bind(endpoint).unwrap();
     publisher
 }
 
 fn subscriber(context: &Context, interval: Duration) -> Socket<Sub> {
-    context.socket_with::<Sub>(zero_linger().reconnect(Reconnect::Fixed { interval }))
+    context
+        .socket_with::<Sub>(zero_linger().reconnect(Reconnect::Fixed { interval }))
+        .unwrap()
 }
 
 /// Connects to a publisher at `endpoint` that then goes away, as each of
@@ -99,7 +101,7 @@ mod stop {
     #[test]
     fn reconnect_stop_on_refused() {
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         sub.set_reconnect_stop(ReconnectStop::default().connection_refused(true));
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
@@ -112,7 +114,7 @@ mod stop {
     #[test]
     fn a_refusal_is_retried_by_default() {
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
         expect(&mut monitor, EventKind::Closed);
@@ -128,8 +130,9 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub =
-            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
+        let mut sub = context
+            .socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)))
+            .unwrap();
         sub.set_reconnect_stop(ReconnectStop::default().handshake_failed(true));
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
@@ -150,8 +153,9 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub =
-            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
+        let mut sub = context
+            .socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)))
+            .unwrap();
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
 
@@ -173,9 +177,14 @@ mod stop {
         let context = Context::new().unwrap();
         // An endpoint that cannot be connected to: nothing is bound to it
         // any more.
-        let endpoint = context.socket::<Pub>().bind("ipc://*").unwrap().to_string();
+        let endpoint = context
+            .socket::<Pub>()
+            .unwrap()
+            .bind("ipc://*")
+            .unwrap()
+            .to_string();
 
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
         expect(&mut monitor, EventKind::Closed);

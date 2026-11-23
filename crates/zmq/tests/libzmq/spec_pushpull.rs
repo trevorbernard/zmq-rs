@@ -26,11 +26,11 @@ fn tight() -> SocketOptions {
 /// round-robin strategy.
 fn push_round_robin_out(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let connect_address = push.bind(bind_address).unwrap().to_string();
     let mut pulls: Vec<_> = (0..5)
         .map(|_| {
-            let mut pull = context.socket::<Pull>();
+            let mut pull = context.socket::<Pull>().unwrap();
             pull.connect(&connect_address).unwrap();
             pull
         })
@@ -67,11 +67,11 @@ fn push_round_robin_out_tcp() {
 /// fair-queuing strategy.
 fn pull_fair_queue_in(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let connect_address = pull.bind(bind_address).unwrap().to_string();
     let mut pushes: Vec<_> = (0..5)
         .map(|_| {
-            let mut push = context.socket::<Push>();
+            let mut push = context.socket::<Push>().unwrap();
             push.connect(&connect_address).unwrap();
             push
         })
@@ -120,7 +120,7 @@ fn pull_fair_queue_in_tcp() {
 #[test]
 fn push_block_on_send_no_peers() {
     let context = Context::new().unwrap();
-    let mut sc = context.socket::<Push>();
+    let mut sc = context.socket::<Push>().unwrap();
     assert!(sc.try_send(Message::new("")).is_err());
     assert!(
         sc.send_timeout(Message::new(""), Duration::from_millis(250))
@@ -140,9 +140,9 @@ fn push_block_on_send_no_peers() {
 fn destroy_queue_on_disconnect_inproc() {
     let endpoint = inproc("destroy_queue");
     let context = Context::new().unwrap();
-    let mut a = context.socket_with::<Push>(tight());
+    let mut a = context.socket_with::<Push>(tight()).unwrap();
     a.bind(&endpoint).unwrap();
-    let mut b = context.socket_with::<Pull>(tight());
+    let mut b = context.socket_with::<Pull>(tight()).unwrap();
     b.connect(&endpoint).unwrap();
 
     // Send two messages, one should be stuck in A's outgoing queue, the
@@ -187,9 +187,9 @@ fn with_large_frame(parts: &[&str], fill: u8) -> Message {
 /// same sequence checks that what arrives around a reconnect is whole.
 fn push_multipart_atomic_drop(bind_address: &str, block: bool) {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(tight());
+    let mut push = context.socket_with::<Push>(tight()).unwrap();
     let connect_address = push.bind(bind_address).unwrap().to_string();
-    let mut pull = context.socket_with::<Pull>(tight());
+    let mut pull = context.socket_with::<Pull>(tight()).unwrap();
     pull.connect(&connect_address).unwrap();
     // Wait for connections.
     settle();

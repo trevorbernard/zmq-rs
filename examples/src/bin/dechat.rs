@@ -12,7 +12,7 @@ use zguide::body;
 use zmq::{Context, Pub, Sub};
 
 fn listener_task(context: Context, network: String) -> Result<(), zmq::Error> {
-    let mut listener = context.socket::<Sub>();
+    let mut listener = context.socket::<Sub>().unwrap();
     for address in 1..255 {
         listener.connect(format!("tcp://{network}{address}:9000"))?;
     }
@@ -42,7 +42,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || listener_task(context, network)
     });
 
-    let mut broadcaster = context.socket::<Pub>();
+    let mut broadcaster = context.socket::<Pub>()?;
     broadcaster.bind(format!("tcp://{interface}:9000"))?;
     let mut message = String::new();
     while io::stdin().read_line(&mut message)? > 0 {

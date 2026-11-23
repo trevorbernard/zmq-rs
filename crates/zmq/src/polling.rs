@@ -56,9 +56,9 @@ impl<'a> PollItem<'a> {
     /// # use zmq::{Context, Dealer, Router};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// # let context = Context::new()?;
-    /// # let mut frontend = context.socket::<Router>();
-    /// # let mut backend = context.socket::<Router>();
-    /// # let mut idle = context.socket::<Dealer>();
+    /// # let mut frontend = context.socket::<Router>()?;
+    /// # let mut backend = context.socket::<Router>()?;
+    /// # let mut idle = context.socket::<Dealer>()?;
     /// # frontend.bind("inproc://frontend")?;
     /// # idle.connect("inproc://frontend")?;
     /// # idle.send("request")?;
@@ -157,11 +157,11 @@ impl fmt::Debug for PollItem<'_> {
 /// # use zmq::{Context, Pull, Push};
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let context = Context::new()?;
-/// let mut jobs = context.socket::<Pull>();
-/// let mut control = context.socket::<Pull>();
+/// let mut jobs = context.socket::<Pull>()?;
+/// let mut control = context.socket::<Pull>()?;
 /// jobs.bind("inproc://jobs")?;
 /// control.bind("inproc://control")?;
-/// let mut boss = context.socket::<Push>();
+/// let mut boss = context.socket::<Push>()?;
 /// boss.connect("inproc://control")?;
 /// boss.send("stop")?;
 ///

@@ -11,11 +11,11 @@ use crate::support::{FIVE, within};
 #[test]
 fn scatter_gather() {
     let context = Context::new().unwrap();
-    let mut scatter = context.socket::<Scatter>();
+    let mut scatter = context.socket::<Scatter>().unwrap();
     scatter.bind("inproc://test-scatter-gather").unwrap();
-    let mut gather = context.socket::<Gather>();
+    let mut gather = context.socket::<Gather>().unwrap();
     gather.connect("inproc://test-scatter-gather").unwrap();
-    let mut gather2 = context.socket::<Gather>();
+    let mut gather2 = context.socket::<Gather>().unwrap();
     gather2.connect("inproc://test-scatter-gather").unwrap();
 
     scatter.send("1").unwrap();

@@ -34,11 +34,11 @@ fn cancelled(topic: &'static str) -> XPubEvent {
 #[test]
 fn xpub_hears_subscriptions_once_per_topic() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://hear").unwrap();
-    let mut first = context.socket::<Sub>();
+    let mut first = context.socket::<Sub>().unwrap();
     first.connect("inproc://hear").unwrap();
-    let mut second = context.socket::<Sub>();
+    let mut second = context.socket::<Sub>().unwrap();
     second.connect("inproc://hear").unwrap();
     first.subscribe("x");
     second.subscribe("x");
@@ -57,9 +57,9 @@ fn xpub_hears_subscriptions_once_per_topic() {
 #[test]
 fn xpub_hears_a_departing_subscriber_cancel() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://depart").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://depart").unwrap();
     subscriber.subscribe("x");
     assert_eq!(xpub.try_recv().unwrap(), Some(subscribed("x")));
@@ -70,9 +70,9 @@ fn xpub_hears_a_departing_subscriber_cancel() {
 #[test]
 fn xpub_publishes_like_pub() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://publish").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://publish").unwrap();
     subscriber.subscribe("news");
     assert_eq!(xpub.send("sports").unwrap(), 0);
@@ -83,9 +83,9 @@ fn xpub_publishes_like_pub() {
 #[test]
 fn xsub_talks_upstream_and_filters_downstream() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://upstream").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect("inproc://upstream").unwrap();
     xsub.send("hello upstream").unwrap();
     xsub.subscribe("a");
@@ -101,9 +101,9 @@ fn xsub_talks_upstream_and_filters_downstream() {
 #[test]
 fn xsub_sending_a_subscription_subscribes() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://raw-subscription").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect("inproc://raw-subscription").unwrap();
     xsub.send(&b"\x01a"[..]).unwrap();
     assert_eq!(publisher.send("a1").unwrap(), 1);
@@ -117,11 +117,11 @@ fn xsub_sending_a_subscription_subscribes() {
 #[test]
 fn a_proxy_forwards_subscriptions_up_and_messages_down() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let upstream = publisher.bind(free_endpoint()).unwrap();
-    let mut frontend = context.socket::<XSub>();
+    let mut frontend = context.socket::<XSub>().unwrap();
     frontend.connect(&upstream).unwrap();
-    let mut backend = context.socket::<XPub>();
+    let mut backend = context.socket::<XPub>().unwrap();
     backend.bind("inproc://proxy").unwrap();
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -145,7 +145,7 @@ fn a_proxy_forwards_subscriptions_up_and_messages_down() {
         }
     });
 
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://proxy").unwrap();
     subscriber.subscribe("news");
     let started = Instant::now();
@@ -172,9 +172,9 @@ fn a_proxy_forwards_subscriptions_up_and_messages_down() {
 #[test]
 fn forwarding_a_cancel_unsubscribes() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://forward-cancel").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect("inproc://forward-cancel").unwrap();
     xsub.forward(subscribed("x")).unwrap();
     assert_eq!(publisher.send("x1").unwrap(), 1);
@@ -185,9 +185,9 @@ fn forwarding_a_cancel_unsubscribes() {
 #[test]
 fn forwarding_a_message_sends_it_upstream() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://forward-message").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect("inproc://forward-message").unwrap();
     xsub.forward(XPubEvent::Message(Message::from("from below")))
         .unwrap();
@@ -200,9 +200,9 @@ fn forwarding_a_message_sends_it_upstream() {
 #[test]
 fn xsub_waits_for_a_message() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.subscribe("a");
     xsub.connect(&bound).unwrap();
     let receiving = thread::spawn(move || xsub.recv().unwrap());
@@ -221,7 +221,7 @@ fn xsub_waits_for_a_message() {
 #[test]
 fn xsub_counts_its_distinct_topics() {
     let context = Context::new().unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     assert_eq!(xsub.topics_count(), 0);
     xsub.subscribe("a");
     xsub.subscribe("a");
@@ -243,9 +243,9 @@ fn xsub_counts_its_distinct_topics() {
 #[test]
 fn xsub_subscriptions_are_never_dropped_however_many() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://xsub-many-topics").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     for i in 0..3000 {
         xsub.subscribe(format!("topic {i}"));
     }
@@ -263,9 +263,9 @@ fn xsub_subscriptions_are_never_dropped_however_many() {
 #[test]
 fn a_flooding_subscriber_cannot_keep_xpub_from_returning() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://flood").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.connect("inproc://flood").unwrap();
     let stop = Arc::new(AtomicBool::new(false));
     let flooding = {
@@ -296,9 +296,9 @@ fn xsub_drops_messages_at_the_hwm_but_never_subscriptions() {
             .recv_hwm(zmq::Hwm::from(n))
     };
     let context = Context::new().unwrap();
-    let mut xpub = context.socket_with::<XPub>(marks(1));
+    let mut xpub = context.socket_with::<XPub>(marks(1)).unwrap();
     xpub.bind("inproc://xsub-hwm").unwrap();
-    let mut xsub = context.socket_with::<XSub>(marks(2));
+    let mut xsub = context.socket_with::<XSub>(marks(2)).unwrap();
     xsub.connect("inproc://xsub-hwm").unwrap();
     for i in 0..10 {
         xsub.send(format!("upstream {i}")).unwrap();

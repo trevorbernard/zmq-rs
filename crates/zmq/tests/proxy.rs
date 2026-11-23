@@ -37,16 +37,16 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn a_router_dealer_proxy_is_a_shared_queue() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>().unwrap();
     frontend.bind("inproc://clients").unwrap();
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     backend.bind("inproc://workers").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
 
     let workers: Vec<_> = (0..2)
         .map(|n| {
-            let mut rep = context.socket::<Rep>();
+            let mut rep = context.socket::<Rep>().unwrap();
             rep.connect("inproc://workers").unwrap();
             thread::spawn(move || {
                 for _ in 0..2 {
@@ -60,7 +60,7 @@ fn a_router_dealer_proxy_is_a_shared_queue() {
         .collect();
     let clients: Vec<_> = (0..4)
         .map(|n| {
-            let mut req = context.socket::<Req>();
+            let mut req = context.socket::<Req>().unwrap();
             req.connect("inproc://clients").unwrap();
             thread::spawn(move || req.request(format!("request {n}")).unwrap())
         })
@@ -94,11 +94,11 @@ fn a_router_dealer_proxy_is_a_shared_queue() {
 #[test]
 fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://upstream").unwrap();
-    let mut frontend = context.socket::<XSub>();
+    let mut frontend = context.socket::<XSub>().unwrap();
     frontend.connect("inproc://upstream").unwrap();
-    let mut backend = context.socket::<XPub>();
+    let mut backend = context.socket::<XPub>().unwrap();
     backend.bind("inproc://downstream").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
@@ -106,7 +106,7 @@ fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
     thread::scope(|scope| {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
-        let mut subscriber = context.socket::<Sub>();
+        let mut subscriber = context.socket::<Sub>().unwrap();
         subscriber.connect("inproc://downstream").unwrap();
         subscriber.subscribe("news");
         let started = Instant::now();
@@ -138,9 +138,9 @@ fn an_xsub_xpub_proxy_forwards_subscriptions_up_and_messages_down() {
 #[test]
 fn a_publisher_connecting_after_a_subscription_still_hears_it() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<XSub>();
+    let mut frontend = context.socket::<XSub>().unwrap();
     frontend.bind("inproc://late-upstream").unwrap();
-    let mut backend = context.socket::<XPub>();
+    let mut backend = context.socket::<XPub>().unwrap();
     backend.bind("inproc://late-downstream").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
@@ -148,7 +148,7 @@ fn a_publisher_connecting_after_a_subscription_still_hears_it() {
     thread::scope(|scope| {
         let running = scope.spawn(|| proxy.run());
         let _stop = StopOnDrop(control.clone());
-        let mut subscriber = context.socket::<Sub>();
+        let mut subscriber = context.socket::<Sub>().unwrap();
         subscriber.subscribe("news");
         subscriber.connect("inproc://late-downstream").unwrap();
         // Let the proxy forward the subscription to a frontend with no
@@ -158,7 +158,7 @@ fn a_publisher_connecting_after_a_subscription_still_hears_it() {
             assert!(started.elapsed() < FIVE, "never forwarded");
             thread::sleep(Duration::from_millis(1));
         }
-        let mut publisher = context.socket::<XPub>();
+        let mut publisher = context.socket::<XPub>().unwrap();
         publisher.connect("inproc://late-upstream").unwrap();
         assert_eq!(
             within(FIVE, move || publisher.recv().unwrap()),
@@ -172,13 +172,13 @@ fn a_publisher_connecting_after_a_subscription_still_hears_it() {
 #[test]
 fn a_pull_push_proxy_is_a_streamer() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Pull>();
+    let mut frontend = context.socket::<Pull>().unwrap();
     frontend.bind("inproc://in").unwrap();
-    let mut backend = context.socket::<Push>();
+    let mut backend = context.socket::<Push>().unwrap();
     backend.bind("inproc://out").unwrap();
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>().unwrap();
     source.connect("inproc://in").unwrap();
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>().unwrap();
     sink.connect("inproc://out").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
@@ -204,18 +204,18 @@ fn a_pull_push_proxy_is_a_streamer() {
 #[test]
 fn capture_sees_both_directions() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Pair>();
+    let mut frontend = context.socket::<Pair>().unwrap();
     frontend.bind("inproc://left").unwrap();
-    let mut backend = context.socket::<Pair>();
+    let mut backend = context.socket::<Pair>().unwrap();
     backend.bind("inproc://right").unwrap();
-    let mut capture = context.socket::<Pub>();
+    let mut capture = context.socket::<Pub>().unwrap();
     capture.bind("inproc://tap").unwrap();
-    let mut tap = context.socket::<Sub>();
+    let mut tap = context.socket::<Sub>().unwrap();
     tap.subscribe("");
     tap.connect("inproc://tap").unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.connect("inproc://left").unwrap();
-    let mut right = context.socket::<Pair>();
+    let mut right = context.socket::<Pair>().unwrap();
     right.connect("inproc://right").unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend).capture(&mut capture);
@@ -254,13 +254,13 @@ fn captured_by(
     capture: &mut impl Capture,
     tap: impl FnOnce() -> Message + Send + 'static,
 ) -> Message {
-    let mut frontend = context.socket::<Pull>();
+    let mut frontend = context.socket::<Pull>().unwrap();
     frontend.bind(format!("inproc://{name}-in")).unwrap();
-    let mut backend = context.socket::<Push>();
+    let mut backend = context.socket::<Push>().unwrap();
     backend.bind(format!("inproc://{name}-out")).unwrap();
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>().unwrap();
     source.connect(format!("inproc://{name}-in")).unwrap();
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>().unwrap();
     sink.connect(format!("inproc://{name}-out")).unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend).capture(capture);
@@ -283,9 +283,9 @@ fn captured_by(
 #[test]
 fn a_push_captures() {
     let context = Context::new().unwrap();
-    let mut capture = context.socket::<Push>();
+    let mut capture = context.socket::<Push>().unwrap();
     capture.bind("inproc://push-tap").unwrap();
-    let mut tap = context.socket::<Pull>();
+    let mut tap = context.socket::<Pull>().unwrap();
     tap.connect("inproc://push-tap").unwrap();
     assert_eq!(
         captured_by(&context, "push-tapped", &mut capture, move || tap
@@ -298,9 +298,9 @@ fn a_push_captures() {
 #[test]
 fn a_dealer_captures() {
     let context = Context::new().unwrap();
-    let mut capture = context.socket::<Dealer>();
+    let mut capture = context.socket::<Dealer>().unwrap();
     capture.bind("inproc://dealer-tap").unwrap();
-    let mut tap = context.socket::<Dealer>();
+    let mut tap = context.socket::<Dealer>().unwrap();
     tap.connect("inproc://dealer-tap").unwrap();
     assert_eq!(
         captured_by(&context, "dealer-tapped", &mut capture, move || tap
@@ -313,9 +313,9 @@ fn a_dealer_captures() {
 #[test]
 fn a_pair_captures() {
     let context = Context::new().unwrap();
-    let mut capture = context.socket::<Pair>();
+    let mut capture = context.socket::<Pair>().unwrap();
     capture.bind("inproc://pair-tap").unwrap();
-    let mut tap = context.socket::<Pair>();
+    let mut tap = context.socket::<Pair>().unwrap();
     tap.connect("inproc://pair-tap").unwrap();
     assert_eq!(
         captured_by(&context, "pair-tapped", &mut capture, move || tap
@@ -329,8 +329,8 @@ fn a_pair_captures() {
 fn a_capture_with_no_room_does_not_hold_up_the_proxy() {
     let context = Context::new().unwrap();
     // No peer, so nowhere to send a copy.
-    let mut capture = context.socket::<Push>();
-    let mut never = context.socket::<Pull>();
+    let mut capture = context.socket::<Push>().unwrap();
+    let mut never = context.socket::<Pull>().unwrap();
     assert_eq!(
         captured_by(&context, "untapped", &mut capture, move || {
             assert_eq!(never.try_recv().unwrap(), None);
@@ -344,16 +344,16 @@ fn a_capture_with_no_room_does_not_hold_up_the_proxy() {
 /// subscriber downstream, forwarding five messages.
 fn forwards_from_a_sub_to_a_pub(name: &str, no_drop: bool) {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind(format!("inproc://{name}-upstream")).unwrap();
-    let mut frontend = context.socket::<Sub>();
+    let mut frontend = context.socket::<Sub>().unwrap();
     frontend.subscribe("");
     frontend
         .connect(format!("inproc://{name}-upstream"))
         .unwrap();
-    let mut backend = context.socket::<Pub>();
+    let mut backend = context.socket::<Pub>().unwrap();
     backend.bind(format!("inproc://{name}-downstream")).unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("");
     subscriber
         .connect(format!("inproc://{name}-downstream"))
@@ -410,13 +410,13 @@ fn backend_received(control: &ProxyControl, count: u64) {
 #[test]
 fn what_comes_back_to_a_pull_is_dropped() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Pull>();
+    let mut frontend = context.socket::<Pull>().unwrap();
     frontend.bind("inproc://one-way-in").unwrap();
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     backend.bind("inproc://one-way-out").unwrap();
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>().unwrap();
     source.connect("inproc://one-way-in").unwrap();
-    let mut worker = context.socket::<Dealer>();
+    let mut worker = context.socket::<Dealer>().unwrap();
     worker.connect("inproc://one-way-out").unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
@@ -439,14 +439,14 @@ fn what_comes_back_to_a_pull_is_dropped() {
 #[test]
 fn what_comes_back_to_a_sub_is_dropped() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://sub-one-way-in").unwrap();
-    let mut frontend = context.socket::<Sub>();
+    let mut frontend = context.socket::<Sub>().unwrap();
     frontend.subscribe("");
     frontend.connect("inproc://sub-one-way-in").unwrap();
-    let mut backend = context.socket::<Pair>();
+    let mut backend = context.socket::<Pair>().unwrap();
     backend.bind("inproc://sub-one-way-out").unwrap();
-    let mut listener = context.socket::<Pair>();
+    let mut listener = context.socket::<Pair>().unwrap();
     listener.connect("inproc://sub-one-way-out").unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
@@ -469,13 +469,13 @@ fn what_comes_back_to_a_sub_is_dropped() {
 #[test]
 fn pausing_holds_messages_until_resumed() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Pull>();
+    let mut frontend = context.socket::<Pull>().unwrap();
     frontend.bind("inproc://paused-in").unwrap();
-    let mut backend = context.socket::<Push>();
+    let mut backend = context.socket::<Push>().unwrap();
     backend.bind("inproc://paused-out").unwrap();
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>().unwrap();
     source.connect("inproc://paused-in").unwrap();
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>().unwrap();
     sink.connect("inproc://paused-out").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
@@ -506,8 +506,8 @@ fn pausing_holds_messages_until_resumed() {
 #[test]
 fn terminating_an_idle_proxy_returns_at_once() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Router>();
-    let mut backend = context.socket::<Dealer>();
+    let mut frontend = context.socket::<Router>().unwrap();
+    let mut backend = context.socket::<Dealer>().unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();
     let started = Instant::now();
@@ -526,13 +526,17 @@ fn a_slow_backend_holds_up_only_its_own_direction() {
     // Replies keep flowing frontwards while the backend cannot take more.
     let context = Context::new().unwrap();
     let one = zmq::Hwm::from(1);
-    let mut frontend = context.socket::<Pair>();
+    let mut frontend = context.socket::<Pair>().unwrap();
     frontend.bind("inproc://busy-left").unwrap();
-    let mut backend = context.socket_with::<Pair>(zmq::SocketOptions::new().send_hwm(one));
+    let mut backend = context
+        .socket_with::<Pair>(zmq::SocketOptions::new().send_hwm(one))
+        .unwrap();
     backend.bind("inproc://busy-right").unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.connect("inproc://busy-left").unwrap();
-    let mut right = context.socket_with::<Pair>(zmq::SocketOptions::new().recv_hwm(one));
+    let mut right = context
+        .socket_with::<Pair>(zmq::SocketOptions::new().recv_hwm(one))
+        .unwrap();
     right.connect("inproc://busy-right").unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();

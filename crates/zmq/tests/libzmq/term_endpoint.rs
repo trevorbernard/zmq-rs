@@ -21,9 +21,9 @@ fn pass_one(
 #[test]
 fn send_after_unbind_fails() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let endpoint = push.bind("tcp://127.0.0.1:*").unwrap().to_string();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.connect(&endpoint).unwrap();
     let (mut push, _pull) = pass_one(push, pull);
 
@@ -35,9 +35,9 @@ fn send_after_unbind_fails() {
 #[test]
 fn send_after_disconnect_fails() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let endpoint = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     let (mut push, _pull) = pass_one(push, pull);
 
@@ -50,9 +50,9 @@ fn send_after_disconnect_fails() {
 #[test]
 fn unbind_via_last_endpoint() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let tcp = push.bind("tcp://127.0.0.1:*").unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let ipc = pull.bind("ipc://*").unwrap();
     assert!(matches!(ipc, Endpoint::Ipc(_)));
 
@@ -64,9 +64,9 @@ fn unbind_via_last_endpoint() {
 #[test]
 fn wildcard_unbind_fails() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.bind("tcp://127.0.0.1:*").unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("ipc://*").unwrap();
 
     // libzmq's ENOENT: a wildcard names no bind; only the address it chose

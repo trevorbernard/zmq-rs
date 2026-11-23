@@ -34,11 +34,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let port = 5556;
 
     // Set up our clone server sockets
-    let mut snapshot = context.socket::<Router>();
+    let mut snapshot = context.socket::<Router>()?;
     snapshot.bind(format!("tcp://*:{port}"))?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind(format!("tcp://*:{}", port + 1))?;
-    let mut collector = context.socket::<Pull>();
+    let mut collector = context.socket::<Pull>()?;
     collector.bind(format!("tcp://*:{}", port + 2))?;
 
     let mut server = CloneServer {

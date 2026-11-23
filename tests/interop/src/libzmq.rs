@@ -54,6 +54,7 @@ struct RawMsg([u8; 64]);
 unsafe extern "C" {
     fn zmq_ctx_new() -> *mut c_void;
     fn zmq_ctx_term(context: *mut c_void) -> c_int;
+    fn zmq_ctx_shutdown(context: *mut c_void) -> c_int;
     fn zmq_ctx_set(context: *mut c_void, option: c_int, value: c_int) -> c_int;
     fn zmq_socket(context: *mut c_void, socket_type: c_int) -> *mut c_void;
     fn zmq_close(socket: *mut c_void) -> c_int;
@@ -208,6 +209,14 @@ impl Context {
             .unwrap_or_else(|err| panic!("zmq_ctx_set(ZMQ_IO_THREADS, {threads}): {err}"));
         context
     }
+
+    /// `zmq_ctx_shutdown`: every call on the context's sockets fails from
+    /// now on.
+    pub fn shutdown(&self) {
+        // SAFETY: the context is live.
+        check(unsafe { zmq_ctx_shutdown(self.0.0.as_ptr()) })
+            .unwrap_or_else(|err| panic!("zmq_ctx_shutdown: {err}"));
+    }
 }
 
 impl Default for Context {
@@ -244,16 +253,22 @@ impl Socket {
 
     /// A socket in `context`.
     pub fn in_context(context: &Context, kind: Kind) -> Self {
+        Self::try_in_context(context, kind).unwrap_or_else(|err| panic!("zmq_socket failed: {err}"))
+    }
+
+    /// A socket of type `kind` in `context`, or why libzmq would not make
+    /// one.
+    pub fn try_in_context(context: &Context, kind: Kind) -> io::Result<Self> {
         // SAFETY: the context pointer is live; the result is checked for null.
         let raw = NonNull::new(unsafe { zmq_socket(context.0.0.as_ptr(), kind as c_int) })
-            .unwrap_or_else(|| panic!("zmq_socket failed: {}", last_error()));
+            .ok_or_else(last_error)?;
         let socket = Self {
             raw,
             _context: context.clone(),
         };
         socket.set_int(ZMQ_LINGER, 0);
         socket.set_receive_timeout(Duration::from_secs(5));
-        socket
+        Ok(socket)
     }
 
     fn set_bytes(&self, option: c_int, value: &[u8]) {

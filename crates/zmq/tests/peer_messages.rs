@@ -23,9 +23,9 @@ fn frames(message: Message) -> Vec<Frame> {
 #[test]
 fn hello_is_sent_again_after_each_reconnection_and_a_hiccup_heard_between() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
-    let mut dealer = context.socket_with::<Dealer>(quick());
+    let mut dealer = context.socket_with::<Dealer>(quick()).unwrap();
     dealer.set_hello_message("hello");
     dealer.set_hiccup_message("hiccup");
     dealer.connect(&endpoint).unwrap();
@@ -36,7 +36,7 @@ fn hello_is_sent_again_after_each_reconnection_and_a_hiccup_heard_between() {
     let hiccup = dealer.recv_timeout(FIVE).unwrap().expect("the hiccup");
     assert_eq!(hiccup, Message::from("hiccup"));
 
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind(&endpoint).unwrap();
     let (_, hello) = router.recv_timeout(FIVE).unwrap().expect("a second hello");
     assert_eq!(hello, Message::from("hello"));
@@ -46,12 +46,12 @@ fn hello_is_sent_again_after_each_reconnection_and_a_hiccup_heard_between() {
 fn hello_comes_before_what_was_queued() {
     let context = Context::new().unwrap();
     let endpoint = free_endpoint();
-    let mut dealer = context.socket_with::<Dealer>(quick());
+    let mut dealer = context.socket_with::<Dealer>(quick()).unwrap();
     dealer.set_hello_message("hello");
     dealer.connect(&endpoint).unwrap();
     dealer.send("queued").unwrap();
 
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind(&endpoint).unwrap();
     let (_, first) = router.recv_timeout(FIVE).unwrap().expect("the hello");
     let (_, second) = router.recv_timeout(FIVE).unwrap().expect("the message");
@@ -64,10 +64,10 @@ fn hello_comes_before_what_was_queued() {
 #[test]
 fn a_router_hears_which_peer_left() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_disconnect_message("left");
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect(&endpoint).unwrap();
     dealer.send("last words").unwrap();
     drop(dealer);
@@ -84,10 +84,10 @@ fn a_router_hears_which_peer_left() {
 #[test]
 fn each_message_is_for_one_side_only() {
     let context = Context::new().unwrap();
-    let mut accepting = context.socket::<zmq::Peer>();
+    let mut accepting = context.socket::<zmq::Peer>().unwrap();
     accepting.set_hiccup_message("hiccup");
     let endpoint = accepting.bind(free_endpoint()).unwrap().to_string();
-    let mut connecting = context.socket_with::<zmq::Peer>(quick());
+    let mut connecting = context.socket_with::<zmq::Peer>(quick()).unwrap();
     connecting.set_disconnect_message("disconnect");
     connecting.set_hello_message("hello");
     connecting.connect_peer(&endpoint).unwrap();
@@ -101,7 +101,7 @@ fn each_message_is_for_one_side_only() {
         "no disconnect message for a peer it connected to"
     );
 
-    let mut accepting = context.socket::<zmq::Peer>();
+    let mut accepting = context.socket::<zmq::Peer>().unwrap();
     accepting.set_hiccup_message("hiccup");
     accepting.bind(&endpoint).unwrap();
     let (_, hello) = accepting.recv_timeout(FIVE).unwrap().expect("the hello");
@@ -119,14 +119,17 @@ fn hello_and_disconnect_messages_over_curve() {
     let keys = Keypair::generate();
     let server_key = keys.public();
     let context = Context::new().unwrap();
-    let mut router =
-        context.socket_with::<Router>(SocketOptions::new().security(Security::curve_server(keys)));
+    let mut router = context
+        .socket_with::<Router>(SocketOptions::new().security(Security::curve_server(keys)))
+        .unwrap();
     router.set_hello_message("welcome");
     router.set_disconnect_message("left");
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
-    let mut dealer = context.socket_with::<Dealer>(
-        SocketOptions::new().security(Security::curve_client(Keypair::generate(), server_key)),
-    );
+    let mut dealer = context
+        .socket_with::<Dealer>(
+            SocketOptions::new().security(Security::curve_client(Keypair::generate(), server_key)),
+        )
+        .unwrap();
     dealer.set_hello_message("hello");
     dealer.connect(&endpoint).unwrap();
 
@@ -144,9 +147,9 @@ fn hello_and_disconnect_messages_over_curve() {
 #[test]
 fn an_inproc_connector_hears_nothing_when_the_binder_leaves() {
     let context = Context::new().unwrap();
-    let mut binder = context.socket::<Router>();
+    let mut binder = context.socket::<Router>().unwrap();
     binder.bind("inproc://binder-leaves").unwrap();
-    let mut connector = context.socket::<Router>();
+    let mut connector = context.socket::<Router>().unwrap();
     connector.set_disconnect_message("left");
     connector.connect("inproc://binder-leaves").unwrap();
     drop(binder);
@@ -156,13 +159,13 @@ fn an_inproc_connector_hears_nothing_when_the_binder_leaves() {
 #[test]
 fn an_empty_message_turns_each_off() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_hello_message("hello");
     router.set_hello_message("");
     router.set_disconnect_message("left");
     router.set_disconnect_message("");
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect(&endpoint).unwrap();
     dealer.send("only").unwrap();
     let (_, only) = router.recv_timeout(FIVE).unwrap().expect("the message");

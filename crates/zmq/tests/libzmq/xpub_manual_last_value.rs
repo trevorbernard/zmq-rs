@@ -45,15 +45,16 @@ fn unsubscribe_cleanup() {
 #[test]
 fn manual_last_value() {
     let context = Context::new().unwrap();
-    let mut publisher =
-        context.socket_with::<ManualXPub>(SocketOptions::new().send_hwm(Hwm::from(2000)));
+    let mut publisher = context
+        .socket_with::<ManualXPub>(SocketOptions::new().send_hwm(Hwm::from(2000)))
+        .unwrap();
     publisher
         .bind("inproc://libzmq-xpub-manual-last-value")
         .unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect("inproc://libzmq-xpub-manual-last-value")
         .unwrap();
-    let mut sub2 = context.socket::<Sub>();
+    let mut sub2 = context.socket::<Sub>().unwrap();
     sub2.connect("inproc://libzmq-xpub-manual-last-value")
         .unwrap();
 

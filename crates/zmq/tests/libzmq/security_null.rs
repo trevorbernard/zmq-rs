@@ -42,15 +42,17 @@ fn server_in_domain(
             ZapReply::AuthenticationFailure
         }
     };
-    let server = context.socket_with::<Dealer>(
-        zero_linger().security(Security::null_authenticated(domain, handler)),
-    );
+    let server = context
+        .socket_with::<Dealer>(
+            zero_linger().security(Security::null_authenticated(domain, handler)),
+        )
+        .unwrap();
     (server, requests)
 }
 
 fn connected_client(context: &Context, server: &mut Socket<Dealer>) -> Socket<Dealer> {
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
-    let mut client = context.socket_with::<Dealer>(zero_linger());
+    let mut client = context.socket_with::<Dealer>(zero_linger()).unwrap();
     client.connect(&endpoint).unwrap();
     client
 }
@@ -60,7 +62,7 @@ fn connected_client(context: &Context, server: &mut Socket<Dealer>) -> Socket<De
 #[test]
 fn no_domain() {
     let context = Context::new().unwrap();
-    let mut server = context.socket_with::<Dealer>(zero_linger());
+    let mut server = context.socket_with::<Dealer>(zero_linger()).unwrap();
     let mut client = connected_client(&context, &mut server);
     bounce_dealer(&mut server, &mut client);
 }

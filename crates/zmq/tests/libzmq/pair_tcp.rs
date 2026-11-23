@@ -11,9 +11,9 @@ use crate::support::bounce_pair;
 #[test]
 fn pair_tcp_regular() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Pair>();
+    let mut sb = context.socket::<Pair>().unwrap();
     let endpoint = sb.bind(free_endpoint()).unwrap().to_string();
-    let mut sc = context.socket::<Pair>();
+    let mut sc = context.socket::<Pair>().unwrap();
     sc.connect(&endpoint).unwrap();
     bounce_pair(&mut sb, &mut sc);
 }
@@ -23,11 +23,11 @@ fn pair_tcp_regular() {
 #[test]
 fn pair_tcp_connect_by_name() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Pair>();
+    let mut sb = context.socket::<Pair>().unwrap();
     let Endpoint::Tcp(bound) = sb.bind(free_endpoint()).unwrap() else {
         panic!("a tcp endpoint");
     };
-    let mut sc = context.socket::<Pair>();
+    let mut sc = context.socket::<Pair>().unwrap();
     sc.connect(format!("tcp://localhost:{}", bound.port()))
         .unwrap();
     bounce_pair(&mut sb, &mut sc);

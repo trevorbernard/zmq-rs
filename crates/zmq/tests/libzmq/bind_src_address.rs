@@ -11,7 +11,7 @@ use zmq::{Context, Error, Pub};
 #[test]
 fn test_x() {
     let context = Context::new().unwrap();
-    let mut sock = context.socket::<Pub>();
+    let mut sock = context.socket::<Pub>().unwrap();
     sock.connect("tcp://127.0.0.1:0;localhost:1234").unwrap();
     assert!(matches!(
         sock.connect("tcp://localhost:5555;localhost:1235"),

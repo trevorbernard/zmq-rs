@@ -36,7 +36,9 @@ fn our_push(reconnect: Reconnect) -> (zmq::Socket<Push>, Monitor) {
 
 fn our_push_to(endpoint: &str, reconnect: Reconnect) -> (zmq::Socket<Push>, Monitor) {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions::new().reconnect(reconnect));
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().reconnect(reconnect))
+        .unwrap();
     let monitor = push.monitor();
     push.connect(endpoint).unwrap();
     (push, monitor)
@@ -257,9 +259,11 @@ fn we_stop_retrying_the_disconnected_endpoint_alone_and_at_once() {
         [&*missing, &*tcp, &*refusing],
     ] {
         let context = Context::new().unwrap();
-        let mut push = context.socket_with::<Push>(
-            SocketOptions::new().reconnect(Reconnect::Fixed { interval: MS(10) }),
-        );
+        let mut push = context
+            .socket_with::<Push>(
+                SocketOptions::new().reconnect(Reconnect::Fixed { interval: MS(10) }),
+            )
+            .unwrap();
         let mut monitor = push.monitor();
         for endpoint in endpoints {
             push.connect(endpoint).unwrap();

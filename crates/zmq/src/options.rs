@@ -32,7 +32,7 @@ use crate::endpoint::{Target, connect_target};
 ///     .identity(Identity::new("worker-1")?)
 ///     .linger(Linger::For(Duration::ZERO));
 /// let context = Context::new()?;
-/// let worker = context.socket_with::<Dealer>(options);
+/// let worker = context.socket_with::<Dealer>(options)?;
 /// # drop(worker);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```

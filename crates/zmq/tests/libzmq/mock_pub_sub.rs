@@ -79,7 +79,7 @@ fn expect_accepted(monitor: &mut Monitor) {
 
 fn mock_sub(sub_command: bool) {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<XPub>();
+    let mut server = context.socket::<XPub>().unwrap();
     let mut monitor = server.monitor();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut stream = TcpStream::connect(endpoint.trim_start_matches("tcp://")).unwrap();
@@ -102,7 +102,7 @@ fn mock_sub(sub_command: bool) {
 
 fn mock_pub(sub_command: bool) {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Sub>();
+    let mut server = context.socket::<Sub>().unwrap();
     let mut monitor = server.monitor();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     let mut stream = TcpStream::connect(endpoint.trim_start_matches("tcp://")).unwrap();

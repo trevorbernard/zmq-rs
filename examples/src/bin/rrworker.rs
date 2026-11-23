@@ -6,7 +6,7 @@ use zmq::{Context, Rep};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut responder = context.socket::<Rep>();
+    let mut responder = context.socket::<Rep>()?;
     responder.connect("tcp://localhost:5560")?;
 
     loop {

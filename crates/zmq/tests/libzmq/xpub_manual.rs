@@ -78,9 +78,9 @@ pub(crate) mod cases {
 
     pub(crate) fn basic() {
         let context = Context::new().unwrap();
-        let mut publisher = context.socket::<ManualXPub>();
+        let mut publisher = context.socket::<ManualXPub>().unwrap();
         publisher.bind("inproc://libzmq-xpub-manual-basic").unwrap();
-        let mut subscriber = context.socket::<XSub>();
+        let mut subscriber = context.socket::<XSub>().unwrap();
         subscriber
             .connect("inproc://libzmq-xpub-manual-basic")
             .unwrap();
@@ -98,11 +98,11 @@ pub(crate) mod cases {
 
     pub(crate) fn unsubscribe_manual() {
         let context = Context::new().unwrap();
-        let mut publisher = context.socket::<ManualXPub>();
+        let mut publisher = context.socket::<ManualXPub>().unwrap();
         publisher
             .bind("inproc://libzmq-xpub-manual-unsubscribe")
             .unwrap();
-        let mut subscriber = context.socket::<XSub>();
+        let mut subscriber = context.socket::<XSub>().unwrap();
         subscriber
             .connect("inproc://libzmq-xpub-manual-unsubscribe")
             .unwrap();
@@ -137,17 +137,17 @@ pub(crate) mod cases {
     pub(crate) fn xpub_proxy_unsubscribe_on_disconnect(last_value: bool) {
         let context = Context::new().unwrap();
         // Proxy frontend and backend
-        let mut xsub_proxy = context.socket::<XSub>();
+        let mut xsub_proxy = context.socket::<XSub>().unwrap();
         let frontend = xsub_proxy.bind(free_endpoint()).unwrap().to_string();
-        let mut xpub_proxy = context.socket::<ManualXPub>();
+        let mut xpub_proxy = context.socket::<ManualXPub>().unwrap();
         let backend = xpub_proxy.bind(free_endpoint()).unwrap().to_string();
 
-        let mut publisher = context.socket::<Pub>();
+        let mut publisher = context.socket::<Pub>().unwrap();
         publisher.connect(&frontend).unwrap();
 
         // The first subscriber subscribes; the proxy confirms it and passes
         // it upstream
-        let mut sub1 = context.socket::<Sub>();
+        let mut sub1 = context.socket::<Sub>().unwrap();
         sub1.connect(&backend).unwrap();
         sub1.subscribe("1");
         settle();
@@ -157,7 +157,7 @@ pub(crate) mod cases {
         xsub_proxy.send(subscription(b"1")).unwrap();
 
         // And the second
-        let mut sub2 = context.socket::<Sub>();
+        let mut sub2 = context.socket::<Sub>().unwrap();
         sub2.connect(&backend).unwrap();
         sub2.subscribe("1");
         settle();
@@ -208,15 +208,15 @@ pub(crate) mod cases {
     /// the first before the second arrives, so neither is lost.
     pub(crate) fn missing_subscriptions() {
         let context = Context::new().unwrap();
-        let mut xsub_proxy = context.socket::<XSub>();
+        let mut xsub_proxy = context.socket::<XSub>().unwrap();
         let frontend = xsub_proxy.bind(free_endpoint()).unwrap().to_string();
-        let mut xpub_proxy = context.socket::<ManualXPub>();
+        let mut xpub_proxy = context.socket::<ManualXPub>().unwrap();
         let backend = xpub_proxy.bind(free_endpoint()).unwrap().to_string();
 
-        let mut publisher = context.socket::<Pub>();
+        let mut publisher = context.socket::<Pub>().unwrap();
         publisher.connect(&frontend).unwrap();
 
-        let mut sub1 = context.socket::<Sub>();
+        let mut sub1 = context.socket::<Sub>().unwrap();
         sub1.connect(&backend).unwrap();
         sub1.subscribe("1");
         settle();
@@ -225,7 +225,7 @@ pub(crate) mod cases {
         });
         xsub_proxy.send(subscription(b"1")).unwrap();
 
-        let mut sub2 = context.socket::<Sub>();
+        let mut sub2 = context.socket::<Sub>().unwrap();
         sub2.connect(&backend).unwrap();
         sub2.subscribe("2");
         settle();
@@ -254,9 +254,9 @@ pub(crate) mod cases {
 
     pub(crate) fn unsubscribe_cleanup() {
         let context = Context::new().unwrap();
-        let mut publisher = context.socket::<ManualXPub>();
+        let mut publisher = context.socket::<ManualXPub>().unwrap();
         let endpoint = publisher.bind(free_endpoint()).unwrap().to_string();
-        let mut subscriber = context.socket::<XSub>();
+        let mut subscriber = context.socket::<XSub>().unwrap();
         subscriber.connect(&endpoint).unwrap();
 
         subscriber.send(subscription(b"A")).unwrap();
@@ -276,7 +276,7 @@ pub(crate) mod cases {
         });
 
         // Reconnect, and subscribe for B, overwritten to XB
-        let mut subscriber = context.socket::<XSub>();
+        let mut subscriber = context.socket::<XSub>().unwrap();
         subscriber.connect(&endpoint).unwrap();
         subscriber.send(subscription(b"B")).unwrap();
         on_request(&mut publisher, subscribed("B"), |request| {
@@ -319,9 +319,9 @@ fn unsubscribe_cleanup() {
 #[test]
 fn user_message() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher.bind("inproc://libzmq-xpub-user-message").unwrap();
-    let mut subscriber = context.socket::<XSub>();
+    let mut subscriber = context.socket::<XSub>().unwrap();
     subscriber
         .connect("inproc://libzmq-xpub-user-message")
         .unwrap();
@@ -341,12 +341,12 @@ fn user_message() {
 #[test]
 fn user_message_multi() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher
         .bind("inproc://libzmq-xpub-user-message-multi")
         .unwrap();
     publisher.set_only_first_subscribe(true);
-    let mut subscriber = context.socket::<XSub>();
+    let mut subscriber = context.socket::<XSub>().unwrap();
     subscriber
         .connect("inproc://libzmq-xpub-user-message-multi")
         .unwrap();

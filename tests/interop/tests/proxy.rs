@@ -22,9 +22,9 @@ impl Drop for StopOnDrop {
 #[test]
 fn libzmq_clients_reach_libzmq_workers_through_our_proxy() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>().unwrap();
     let clients_at = frontend.bind(free_endpoint()).unwrap();
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     let workers_at = backend.bind(free_endpoint()).unwrap();
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
     let control = proxy.control();

@@ -79,9 +79,11 @@ impl Fixture {
                 ZapReply::AuthenticationFailure
             }
         };
-        let mut server = context.socket_with::<Dealer>(zero_linger().identity(identity).security(
-            Security::curve_server_authenticated(server_keys, DOMAIN, handler),
-        ));
+        let mut server = context
+            .socket_with::<Dealer>(zero_linger().identity(identity).security(
+                Security::curve_server_authenticated(server_keys, DOMAIN, handler),
+            ))
+            .unwrap();
         let server_monitor = server.monitor();
         let endpoint = server.bind(free_endpoint()).unwrap().to_string();
         Self {
@@ -99,7 +101,8 @@ impl Fixture {
     fn client(&self, security: Security) -> (Socket<Dealer>, Monitor) {
         let mut client = self
             .context
-            .socket_with::<Dealer>(zero_linger().security(security));
+            .socket_with::<Dealer>(zero_linger().security(security))
+            .unwrap();
         let monitor = client.monitor();
         client.connect(&self.endpoint).unwrap();
         (client, monitor)

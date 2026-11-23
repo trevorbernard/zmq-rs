@@ -11,9 +11,9 @@ use crate::support::{FIVE, bounce_req_rep, msg, settle};
 #[test]
 fn simple() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Rep>();
+    let mut sb = context.socket::<Rep>().unwrap();
     let endpoint = sb.bind("ipc://*").unwrap().to_string();
-    let mut sc = context.socket::<Req>();
+    let mut sc = context.socket::<Req>().unwrap();
     sc.connect(&endpoint).unwrap();
     bounce_req_rep(&mut sb, sc);
 }
@@ -23,9 +23,9 @@ fn simple() {
 #[test]
 fn leak() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Rep>();
+    let mut sb = context.socket::<Rep>().unwrap();
     let endpoint = sb.bind("ipc://*").unwrap().to_string();
-    let mut sc = context.socket::<Req>();
+    let mut sc = context.socket::<Req>().unwrap();
     sc.connect(&endpoint).unwrap();
 
     // REQ sends and gives up waiting, then closes.

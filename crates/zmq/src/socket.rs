@@ -138,7 +138,7 @@ impl Routing for Subscriber {
 ///
 /// ```compile_fail
 /// # let context = zmq::Context::new().unwrap();
-/// let mut req = context.socket::<zmq::Req>();
+/// let mut req = context.socket::<zmq::Req>().unwrap();
 /// zmq::poll([req.readable()]);
 /// ```
 pub trait Receives: SocketType + Sized {
@@ -155,7 +155,7 @@ pub trait Receives: SocketType + Sized {
 ///
 /// ```compile_fail
 /// # let context = zmq::Context::new().unwrap();
-/// let mut publisher = context.socket::<zmq::Pub>();
+/// let mut publisher = context.socket::<zmq::Pub>().unwrap();
 /// zmq::poll([publisher.writable()]);
 /// ```
 pub trait WaitsForRoom: SocketType + Sized {
@@ -466,9 +466,9 @@ impl<T: Receives + WaitsForRoom> Socket<T> {
     /// # use zmq::{Context, Dealer};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let context = Context::new()?;
-    /// let mut a = context.socket::<Dealer>();
+    /// let mut a = context.socket::<Dealer>()?;
     /// a.bind("inproc://both")?;
-    /// let mut b = context.socket::<Dealer>();
+    /// let mut b = context.socket::<Dealer>()?;
     /// b.connect("inproc://both")?;
     /// // Nothing to receive yet, but room to send.
     /// let (readable, writable) = b.readable_and_writable();
@@ -533,7 +533,7 @@ pub enum XPub {}
 ///
 /// ```compile_fail,E0599
 /// # let context = zmq::Context::new().unwrap();
-/// let mut xsub = context.socket::<zmq::XSub>();
+/// let mut xsub = context.socket::<zmq::XSub>().unwrap();
 /// xsub.set_invert_matching(true);
 /// ```
 #[derive(Debug)]
@@ -2192,9 +2192,9 @@ impl Socket<Router> {
     /// use zmq::{Context, Router, RoutingId};
     ///
     /// let context = Context::new()?;
-    /// let mut bound = context.socket::<Router>();
+    /// let mut bound = context.socket::<Router>()?;
     /// bound.bind("inproc://routers")?;
-    /// let mut connecting = context.socket::<Router>();
+    /// let mut connecting = context.socket::<Router>()?;
     /// let peer = RoutingId::new("bound")?;
     /// connecting.connect_with_routing_id("inproc://routers", peer.clone())?;
     /// connecting.send(&peer, "hello")?;

@@ -9,11 +9,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // Socket to talk to clients
-    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(1_100_000));
+    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(1_100_000))?;
     publisher.bind("tcp://*:5561")?;
 
     // Socket to receive signals
-    let mut syncservice = context.socket::<Rep>();
+    let mut syncservice = context.socket::<Rep>()?;
     syncservice.bind("tcp://*:5562")?;
 
     // Get synchronization from subscribers

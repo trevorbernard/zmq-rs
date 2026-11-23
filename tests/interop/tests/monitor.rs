@@ -39,12 +39,14 @@ fn a_libzmq_denial_is_reported_with_its_zap_status() {
     let addr = router.bind_loopback();
 
     let ours = Context::new().unwrap();
-    let mut push = ours.socket_with::<Push>(SocketOptions::new().security(Security::PlainClient(
-        PlainCredentials {
-            username: Credential::new("admin").unwrap(),
-            password: Credential::new("wrong").unwrap(),
-        },
-    )));
+    let mut push = ours
+        .socket_with::<Push>(SocketOptions::new().security(Security::PlainClient(
+            PlainCredentials {
+                username: Credential::new("admin").unwrap(),
+                password: Credential::new("wrong").unwrap(),
+            },
+        )))
+        .unwrap();
     let mut monitor = push.monitor();
     push.connect(format!("tcp://{addr}")).unwrap();
     expect(&mut monitor, |kind| {
@@ -58,14 +60,16 @@ fn a_libzmq_server_dropping_a_bad_hello_fails_without_detail() {
     pull.set_curve_server(Keypair::generate().secret().expose());
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(
-        SocketOptions::new()
-            .security(Security::curve_client(
-                Keypair::generate(),
-                Keypair::generate().public(),
-            ))
-            .reconnect(Reconnect::Never),
-    );
+    let mut push = context
+        .socket_with::<Push>(
+            SocketOptions::new()
+                .security(Security::curve_client(
+                    Keypair::generate(),
+                    Keypair::generate().public(),
+                ))
+                .reconnect(Reconnect::Never),
+        )
+        .unwrap();
     let mut monitor = push.monitor();
     push.connect(format!("tcp://{addr}")).unwrap();
     expect(&mut monitor, |kind| *kind == EventKind::Connected);
@@ -78,7 +82,7 @@ fn a_libzmq_server_dropping_a_bad_hello_fails_without_detail() {
 #[test]
 fn a_libzmq_client_is_accepted_then_disconnects() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let mut monitor = pull.monitor();
     let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);

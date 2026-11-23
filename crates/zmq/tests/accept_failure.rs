@@ -57,7 +57,7 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) {
 #[test]
 fn a_listener_out_of_file_descriptors_accepts_once_some_are_free() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let mut monitor = pull.monitor();
     let bound = pull.bind(free_endpoint()).unwrap();
     let address = bound.tcp_addr().unwrap();

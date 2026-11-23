@@ -21,9 +21,11 @@ fn hwm(messages: usize) -> Hwm {
 /// once the SUB's subscription to everything has arrived.
 fn xpub_and_sub(send_hwm: usize, endpoint: &str) -> (Socket<XPub>, Socket<Sub>) {
     let context = Context::new().unwrap();
-    let mut pub_socket = context.socket_with::<XPub>(SocketOptions::new().send_hwm(hwm(send_hwm)));
+    let mut pub_socket = context
+        .socket_with::<XPub>(SocketOptions::new().send_hwm(hwm(send_hwm)))
+        .unwrap();
     let pub_endpoint = pub_socket.bind(endpoint).unwrap().to_string();
-    let mut sub_socket = context.socket::<Sub>();
+    let mut sub_socket = context.socket::<Sub>().unwrap();
     sub_socket.connect(&pub_endpoint).unwrap();
     sub_socket.subscribe("");
 
@@ -118,9 +120,13 @@ fn reset_hwm() {
     let second_count = 1100;
     let hwm_value = hwm(11024);
     let context = Context::new().unwrap();
-    let mut pub_socket = context.socket_with::<Pub>(SocketOptions::new().send_hwm(hwm_value));
+    let mut pub_socket = context
+        .socket_with::<Pub>(SocketOptions::new().send_hwm(hwm_value))
+        .unwrap();
     let endpoint = pub_socket.bind(free_endpoint()).unwrap().to_string();
-    let mut sub_socket = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(hwm_value));
+    let mut sub_socket = context
+        .socket_with::<Sub>(SocketOptions::new().recv_hwm(hwm_value))
+        .unwrap();
     sub_socket.connect(&endpoint).unwrap();
     sub_socket.subscribe("");
     settle();

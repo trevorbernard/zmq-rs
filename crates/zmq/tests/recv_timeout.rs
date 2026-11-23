@@ -71,9 +71,9 @@ fn check<R>(
 #[test]
 fn pair() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.bind("inproc://pair").unwrap();
-    let mut right = context.socket::<Pair>();
+    let mut right = context.socket::<Pair>().unwrap();
     right.connect("inproc://pair").unwrap();
     check(
         left,
@@ -85,9 +85,9 @@ fn pair() {
 #[test]
 fn pull() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://pull").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://pull").unwrap();
     check(
         pull,
@@ -99,9 +99,9 @@ fn pull() {
 #[test]
 fn sub() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://sub").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe("");
     sub.connect("inproc://sub").unwrap();
     check(
@@ -114,9 +114,9 @@ fn sub() {
 #[test]
 fn xsub() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://xsub").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.subscribe("");
     xsub.connect("inproc://xsub").unwrap();
     check(
@@ -129,9 +129,9 @@ fn xsub() {
 #[test]
 fn xpub() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://xpub").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect("inproc://xpub").unwrap();
     let mut topics = 0;
     check(
@@ -147,9 +147,9 @@ fn xpub() {
 #[test]
 fn manual_xpub() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<ManualXPub>();
+    let mut xpub = context.socket::<ManualXPub>().unwrap();
     xpub.bind("inproc://manual").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect("inproc://manual").unwrap();
     let mut topics = 0;
     check(
@@ -165,9 +165,9 @@ fn manual_xpub() {
 #[test]
 fn dealer() {
     let context = Context::new().unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.bind("inproc://dealer").unwrap();
-    let mut other = context.socket::<Dealer>();
+    let mut other = context.socket::<Dealer>().unwrap();
     other.connect("inproc://dealer").unwrap();
     check(
         dealer,
@@ -179,9 +179,9 @@ fn dealer() {
 #[test]
 fn router() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://router").unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://router").unwrap();
     check(
         router,
@@ -193,9 +193,9 @@ fn router() {
 #[test]
 fn rep() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://rep").unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://rep").unwrap();
     let request = || Message::try_from(vec![Frame::new(), Frame::from("x")]).unwrap();
     check(
@@ -208,7 +208,7 @@ fn rep() {
 #[test]
 fn a_request_with_no_peer_times_out() {
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     let start = Instant::now();
     assert_eq!(
         req.request_timeout("anyone?", SHORT),
@@ -220,7 +220,7 @@ fn a_request_with_no_peer_times_out() {
 #[test]
 fn a_timed_out_request_leaves_the_socket_usable_and_its_reply_unseen() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://slow").unwrap();
     let server = thread::spawn(move || {
         let first = rep.recv().unwrap();
@@ -230,7 +230,7 @@ fn a_timed_out_request_leaves_the_socket_usable_and_its_reply_unseen() {
         let body = String::from_utf8_lossy(second.body().get(0).unwrap()).into_owned();
         second.reply(format!("for {body}")).unwrap();
     });
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect("inproc://slow").unwrap();
     assert_eq!(
         req.request_timeout("first", SHORT),
@@ -246,14 +246,14 @@ fn a_timed_out_request_leaves_the_socket_usable_and_its_reply_unseen() {
 #[test]
 fn a_peer_closing_before_replying_still_fails_the_request() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://closing").unwrap();
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
         drop(request);
         drop(rep);
     });
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect("inproc://closing").unwrap();
     assert_eq!(
         req.request_timeout("anyone?", FIVE),
@@ -265,7 +265,7 @@ fn a_peer_closing_before_replying_still_fails_the_request() {
 #[test]
 fn a_monitor_times_out_then_sees_events_then_the_end() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let mut monitor = pull.monitor();
     let start = Instant::now();
     assert_eq!(monitor.recv_timeout(SHORT), Ok(None));
@@ -293,9 +293,9 @@ mod draft {
     #[test]
     fn server() {
         let context = Context::new().unwrap();
-        let mut server = context.socket::<Server>();
+        let mut server = context.socket::<Server>().unwrap();
         server.bind("inproc://server").unwrap();
-        let mut client = context.socket::<Client>();
+        let mut client = context.socket::<Client>().unwrap();
         client.connect("inproc://server").unwrap();
         check(
             server,
@@ -307,9 +307,9 @@ mod draft {
     #[test]
     fn client() {
         let context = Context::new().unwrap();
-        let mut server = context.socket::<Server>();
+        let mut server = context.socket::<Server>().unwrap();
         server.bind("inproc://client").unwrap();
-        let mut client = context.socket::<Client>();
+        let mut client = context.socket::<Client>().unwrap();
         client.connect("inproc://client").unwrap();
         client.send("hello").unwrap();
         let (id, _) = server
@@ -326,9 +326,9 @@ mod draft {
     #[test]
     fn gather() {
         let context = Context::new().unwrap();
-        let mut gather = context.socket::<Gather>();
+        let mut gather = context.socket::<Gather>().unwrap();
         gather.bind("inproc://gather").unwrap();
-        let mut scatter = context.socket::<Scatter>();
+        let mut scatter = context.socket::<Scatter>().unwrap();
         scatter.connect("inproc://gather").unwrap();
         check(
             gather,
@@ -340,9 +340,9 @@ mod draft {
     #[test]
     fn channel() {
         let context = Context::new().unwrap();
-        let mut left = context.socket::<Channel>();
+        let mut left = context.socket::<Channel>().unwrap();
         left.bind("inproc://channel").unwrap();
-        let mut right = context.socket::<Channel>();
+        let mut right = context.socket::<Channel>().unwrap();
         right.connect("inproc://channel").unwrap();
         check(
             left,
@@ -354,9 +354,9 @@ mod draft {
     #[test]
     fn peer() {
         let context = Context::new().unwrap();
-        let mut peer = context.socket::<Peer>();
+        let mut peer = context.socket::<Peer>().unwrap();
         peer.bind("inproc://peer").unwrap();
-        let mut other = context.socket::<Peer>();
+        let mut other = context.socket::<Peer>().unwrap();
         let id = other.connect_peer("inproc://peer").unwrap();
         check(
             peer,
@@ -368,9 +368,9 @@ mod draft {
     #[test]
     fn dish() {
         let context = Context::new().unwrap();
-        let mut radio = context.socket::<Radio>();
+        let mut radio = context.socket::<Radio>().unwrap();
         radio.bind("inproc://dish").unwrap();
-        let mut dish = context.socket::<Dish>();
+        let mut dish = context.socket::<Dish>().unwrap();
         dish.connect("inproc://dish").unwrap();
         let news = Group::new("news").unwrap();
         assert!(dish.join(&news));

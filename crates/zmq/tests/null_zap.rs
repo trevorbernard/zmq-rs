@@ -63,12 +63,14 @@ fn accepted() -> ZapReply {
 fn an_accepted_peer_talks_and_zap_saw_its_address() {
     let (seen, requests) = mpsc::channel();
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(guarded(move |request: &ZapRequest| {
-        let _ = seen.send(request.clone());
-        accepted()
-    }));
+    let mut pull = context
+        .socket_with::<Pull>(guarded(move |request: &ZapRequest| {
+            let _ = seen.send(request.clone());
+            accepted()
+        }))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
     push.send("let in").unwrap();
     assert_eq!(
@@ -85,11 +87,12 @@ fn an_accepted_peer_talks_and_zap_saw_its_address() {
 #[test]
 fn a_denied_peer_hears_400_and_gets_nothing_through() {
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::AuthenticationFailure));
+    let mut pull = context
+        .socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::AuthenticationFailure))
+        .unwrap();
     let mut server = pull.monitor();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let mut client = push.monitor();
     push.connect(&bound).unwrap();
     // A refused client has no pipe left, so `send` could block for good.
@@ -103,10 +106,11 @@ fn a_denied_peer_hears_400_and_gets_nothing_through() {
 #[test]
 fn a_temporary_failure_closes_without_a_word() {
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::TemporaryFailure));
+    let mut pull = context
+        .socket_with::<Pull>(guarded(|_: &ZapRequest| ZapReply::TemporaryFailure))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let mut client = push.monitor();
     push.connect(&bound).unwrap();
     // No ERROR is sent for 300, so the client only sees the connection go.
@@ -118,7 +122,9 @@ fn a_temporary_failure_closes_without_a_word() {
 #[test]
 fn a_zmtp_1_0_peer_is_refused() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(guarded(|_: &ZapRequest| accepted()));
+    let mut pull = context
+        .socket_with::<Pull>(guarded(|_: &ZapRequest| accepted()))
+        .unwrap();
     let mut server = pull.monitor();
     let bound = pull.bind(free_endpoint()).unwrap();
     let mut legacy = TcpStream::connect(bound.tcp_addr().unwrap()).unwrap();

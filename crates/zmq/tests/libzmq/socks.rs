@@ -154,7 +154,7 @@ fn zero_linger() -> SocketOptions {
 
 /// A PUSH bound to a loopback port, and the endpoint to reach it at.
 fn setup_push_server(context: &Context) -> (Socket<Push>, String) {
-    let mut push = context.socket_with::<Push>(zero_linger());
+    let mut push = context.socket_with::<Push>(zero_linger()).unwrap();
     let connect_address = push.bind(free_endpoint()).unwrap().to_string();
     (push, connect_address)
 }
@@ -168,7 +168,7 @@ fn setup_pull_client(
     if let Some(proxy) = socks_proxy {
         options = options.socks_proxy(proxy);
     }
-    let mut pull = context.socket_with::<Pull>(options);
+    let mut pull = context.socket_with::<Pull>(options).unwrap();
     pull.connect(connect_address).unwrap();
     pull
 }

@@ -39,7 +39,7 @@ fn lower_hwm() -> SocketOptions {
 }
 
 fn publisher_thread_main(context: Context) -> u64 {
-    let mut publisher = context.socket_with::<XPub>(lower_hwm());
+    let mut publisher = context.socket_with::<XPub>(lower_hwm()).unwrap();
     publisher.connect("inproc://frontend").unwrap();
 
     // Wait for the one subscriber to subscribe before sending
@@ -61,7 +61,7 @@ fn publisher_thread_main(context: Context) -> u64 {
 }
 
 fn subscriber_thread_main(context: Context) -> u64 {
-    let mut subscriber = context.socket_with::<Sub>(lower_hwm());
+    let mut subscriber = context.socket_with::<Sub>(lower_hwm()).unwrap();
     subscriber.subscribe("");
     subscriber.connect("inproc://backend").unwrap();
 
@@ -86,9 +86,9 @@ fn subscriber_thread_main(context: Context) -> u64 {
 fn proxy_hwm() {
     within(Duration::from_secs(60), || {
         let context = Context::new().unwrap();
-        let mut frontend = context.socket_with::<XSub>(lower_hwm());
+        let mut frontend = context.socket_with::<XSub>(lower_hwm()).unwrap();
         frontend.bind("inproc://frontend").unwrap();
-        let mut backend = context.socket_with::<XPub>(lower_hwm());
+        let mut backend = context.socket_with::<XPub>(lower_hwm()).unwrap();
         backend.bind("inproc://backend").unwrap();
 
         let publisher = thread::spawn({

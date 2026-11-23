@@ -18,8 +18,8 @@ use crate::support::bounce_req_rep;
 /// then disconnects and unbinds by that endpoint.
 fn round_trip_then_unbind(bind: &str) {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Rep>();
-    let mut client = context.socket::<Req>();
+    let mut server = context.socket::<Rep>().unwrap();
+    let mut client = context.socket::<Req>().unwrap();
     let endpoint = server.bind(bind).unwrap().to_string();
     client.connect(&endpoint).unwrap();
     let mut client = bounce_req_rep(&mut server, client);

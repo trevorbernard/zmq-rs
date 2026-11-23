@@ -25,7 +25,7 @@ use crate::{Socket, Terminated, ToEndpoint, TrySendError, wait};
 ///
 /// ```compile_fail,E0277
 /// let context = zmq::Context::new().unwrap();
-/// let mut client = context.socket::<zmq::Client>();
+/// let mut client = context.socket::<zmq::Client>().unwrap();
 /// let message = zmq::Message::try_from(vec![zmq::Frame::from("a"), zmq::Frame::from("b")]);
 /// client.send(message.unwrap());
 /// ```
@@ -239,12 +239,12 @@ fn poll_single_part(
 ///
 /// ```compile_fail,E0599
 /// let context = zmq::Context::new().unwrap();
-/// context.socket::<zmq::Scatter>().recv();
+/// context.socket::<zmq::Scatter>().unwrap().recv();
 /// ```
 ///
 /// ```compile_fail,E0599
 /// let context = zmq::Context::new().unwrap();
-/// context.socket::<zmq::Gather>().send("upstream");
+/// context.socket::<zmq::Gather>().unwrap().send("upstream");
 /// ```
 #[derive(Debug)]
 pub enum Scatter {}

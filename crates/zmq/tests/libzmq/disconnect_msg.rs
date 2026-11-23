@@ -10,11 +10,11 @@ use crate::support::FIVE;
 /// disconnect.
 fn test(address: &str, leave: impl FnOnce(Socket<Client>, &str) -> Option<Socket<Client>>) {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.set_disconnect_message("D");
     let endpoint = server.bind(address).unwrap().to_string();
 
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.set_hello_message("H");
     client.connect(&endpoint).unwrap();
 

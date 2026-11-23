@@ -58,9 +58,9 @@ impl Workers {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>()?;
     frontend.bind("tcp://*:5555")?; // For clients
-    let mut backend = context.socket::<Router>();
+    let mut backend = context.socket::<Router>()?;
     backend.bind("tcp://*:5556")?; // For workers
 
     let mut workers = Workers::default();

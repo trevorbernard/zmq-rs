@@ -44,16 +44,20 @@ fn we_listen_with_a_backlog_of_100() {
         return;
     }
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
     assert_eq!(backlog(bound.tcp_addr().unwrap().port()), Some(DEFAULT));
 
     // With a type of service the listener is made another way.
-    let mut tuned = context.socket_with::<Pull>(SocketOptions::new().type_of_service(0x10));
+    let mut tuned = context
+        .socket_with::<Pull>(SocketOptions::new().type_of_service(0x10))
+        .unwrap();
     let bound = tuned.bind("tcp://127.0.0.1:*").unwrap();
     assert_eq!(backlog(bound.tcp_addr().unwrap().port()), Some(DEFAULT));
 
-    let mut asked = context.socket_with::<Pull>(SocketOptions::new().backlog(7));
+    let mut asked = context
+        .socket_with::<Pull>(SocketOptions::new().backlog(7))
+        .unwrap();
     let bound = asked.bind("tcp://127.0.0.1:*").unwrap();
     assert_eq!(backlog(bound.tcp_addr().unwrap().port()), Some(7));
 }
@@ -78,7 +82,7 @@ fn ipc_listeners_have_the_same_backlog() {
     assert_eq!(ipc_backlog(&path), Some(DEFAULT), "libzmq");
 
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pull>();
+    let mut ours = context.socket::<Pull>().unwrap();
     let bound = ours.bind("ipc://*").unwrap().to_string();
     let path = bound.strip_prefix("ipc://").unwrap();
     assert_eq!(ipc_backlog(path), Some(DEFAULT), "ours");

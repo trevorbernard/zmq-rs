@@ -40,10 +40,10 @@ use zmq::{Context, Pull, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>()?;
     let endpoint = sink.bind("tcp://127.0.0.1:*")?;
 
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>()?;
     source.connect(&endpoint)?;
     source.send("task 1")?;
     source.send(["header", "body"])?;
@@ -69,7 +69,7 @@ use zmq::{Context, Rep, Req};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>()?;
     let endpoint = rep.bind("tcp://127.0.0.1:*")?;
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
@@ -77,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         request.reply(format!("hello, {name}")).unwrap();
     });
 
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>()?;
     req.connect(&endpoint)?;
     assert_eq!(req.request("world")?, "hello, world");
     server.join().unwrap();
@@ -97,10 +97,10 @@ use zmq::{Context, Pub, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind("inproc://weather")?;
 
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.subscribe("london");
     subscriber.connect("inproc://weather")?;
 
@@ -121,11 +121,11 @@ use zmq::{Context, Dealer, Identity, Router, RoutingId, SocketOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut broker = context.socket::<Router>();
+    let mut broker = context.socket::<Router>()?;
     let endpoint = broker.bind("tcp://127.0.0.1:*")?;
 
     let options = SocketOptions::new().identity(Identity::new("worker-1")?);
-    let mut worker = context.socket_with::<Dealer>(options);
+    let mut worker = context.socket_with::<Dealer>(options)?;
     worker.connect(&endpoint)?;
     worker.send("ready")?;
 
@@ -156,12 +156,12 @@ use zmq::{Context, Pull, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut jobs = context.socket::<Pull>();
+    let mut jobs = context.socket::<Pull>()?;
     jobs.bind("inproc://jobs")?;
-    let mut control = context.socket::<Pull>();
+    let mut control = context.socket::<Pull>()?;
     control.bind("inproc://control")?;
 
-    let mut boss = context.socket::<Push>();
+    let mut boss = context.socket::<Push>()?;
     boss.connect("inproc://jobs")?;
     boss.send("job 1")?;
 
@@ -202,11 +202,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = Context::new()?;
     let security = Security::curve_server_authenticated(server_keys, "global", authenticator);
-    let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security));
+    let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security))?;
     let endpoint = server.bind("tcp://127.0.0.1:*")?;
 
     let security = Security::curve_client(client_keys, server_public);
-    let mut client = context.socket_with::<Push>(SocketOptions::new().security(security));
+    let mut client = context.socket_with::<Push>(SocketOptions::new().security(security))?;
     client.connect(&endpoint)?;
     client.send("encrypted")?;
     assert_eq!(server.recv()?, "encrypted");

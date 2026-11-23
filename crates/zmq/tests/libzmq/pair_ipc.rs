@@ -9,9 +9,9 @@ use crate::support::bounce_pair;
 #[test]
 fn roundtrip() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Pair>();
+    let mut sb = context.socket::<Pair>().unwrap();
     let endpoint = sb.bind("ipc://*").unwrap().to_string();
-    let mut sc = context.socket::<Pair>();
+    let mut sc = context.socket::<Pair>().unwrap();
     sc.connect(&endpoint).unwrap();
     bounce_pair(&mut sb, &mut sc);
 }
@@ -19,7 +19,7 @@ fn roundtrip() {
 #[test]
 fn endpoint_too_long() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Pair>();
+    let mut sb = context.socket::<Pair>().unwrap();
     let endpoint_too_long = format!("ipc://{}", "a".repeat(108));
     assert!(matches!(
         sb.bind(&endpoint_too_long),

@@ -8,9 +8,9 @@ use crate::support::bounce_req_rep;
 #[test]
 fn roundtrip() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket::<Rep>();
+    let mut sb = context.socket::<Rep>().unwrap();
     sb.bind("inproc://reqrep_inproc").unwrap();
-    let mut sc = context.socket::<Req>();
+    let mut sc = context.socket::<Req>().unwrap();
     sc.connect("inproc://reqrep_inproc").unwrap();
     bounce_req_rep(&mut sb, sc);
 }

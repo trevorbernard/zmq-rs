@@ -38,7 +38,7 @@ fn ipv6_available() -> bool {
 #[test]
 fn leave_unjoined_fails() {
     let context = Context::new().unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(!dish.leave(&group("Movies")));
 }
 
@@ -52,10 +52,10 @@ fn join_too_long_fails() {
 #[test]
 fn long_group() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     let endpoint = radio.bind(free_endpoint()).unwrap().to_string();
 
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     let long = "0123456789ABCDEFGH";
     assert!(dish.join(&group(long)));
     dish.connect(&endpoint).unwrap();
@@ -68,20 +68,20 @@ fn long_group() {
 #[test]
 fn join_twice_fails() {
     let context = Context::new().unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(dish.join(&group("Movies")));
     assert!(!dish.join(&group("Movies")));
 }
 
 fn radio_dish_tcp_poll(loopback: &str) {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     let endpoint = radio
         .bind(format!("tcp://{loopback}:{}", free_port().port()))
         .unwrap()
         .to_string();
 
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(dish.join(&group("Movies")));
     dish.connect(&endpoint).unwrap();
     settle();
@@ -114,7 +114,7 @@ fn radio_dish_tcp_poll(loopback: &str) {
 #[test]
 fn radio_bind_fails() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     assert!(matches!(
         radio.bind("udp://*:5556"),
         Err(Error::IncompatibleTransport(_))
@@ -125,7 +125,7 @@ fn radio_bind_fails() {
 fn dish_connect_fails() {
     let context = Context::new().unwrap();
     for url in ["udp://127.0.0.1:5556", "udp://[::1]:5556"] {
-        let mut dish = context.socket::<Dish>();
+        let mut dish = context.socket::<Dish>().unwrap();
         assert!(matches!(
             dish.connect(url),
             Err(Error::IncompatibleTransport(_))

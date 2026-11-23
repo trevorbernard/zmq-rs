@@ -15,11 +15,11 @@ fn inproc(name: &str) -> String {
 /// strategy.
 fn round_robin_out(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     let connect_address = dealer.bind(bind_address).unwrap().to_string();
     let mut reps: Vec<_> = (0..5)
         .map(|_| {
-            let mut rep = context.socket::<Rep>();
+            let mut rep = context.socket::<Rep>().unwrap();
             rep.connect(&connect_address).unwrap();
             rep
         })
@@ -53,11 +53,11 @@ fn round_robin_out_tcp() {
 /// strategy.
 fn fair_queue_in(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut receiver = context.socket::<Dealer>();
+    let mut receiver = context.socket::<Dealer>().unwrap();
     let connect_address = receiver.bind(bind_address).unwrap().to_string();
     let mut senders: Vec<_> = (0..5)
         .map(|_| {
-            let mut sender = context.socket::<Dealer>();
+            let mut sender = context.socket::<Dealer>().unwrap();
             sender.connect(&connect_address).unwrap();
             sender
         })
@@ -101,9 +101,9 @@ fn fair_queue_in_tcp() {
 /// queue towards the peer is gone.
 fn destroy_queue_on_disconnect(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut a = context.socket::<Dealer>();
+    let mut a = context.socket::<Dealer>().unwrap();
     let connect_address = a.bind(bind_address).unwrap().to_string();
-    let mut b = context.socket::<Dealer>();
+    let mut b = context.socket::<Dealer>().unwrap();
     b.connect(&connect_address).unwrap();
 
     // Send a message in both directions
@@ -141,7 +141,7 @@ fn destroy_queue_on_disconnect_tcp() {
 #[test]
 fn block_on_send_no_peers() {
     let context = Context::new().unwrap();
-    let mut sc = context.socket::<Dealer>();
+    let mut sc = context.socket::<Dealer>().unwrap();
     assert!(sc.try_send(Message::new("")).is_err());
     assert!(
         sc.send_timeout(Message::new(""), Duration::from_millis(250))

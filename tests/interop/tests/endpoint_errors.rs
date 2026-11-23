@@ -114,18 +114,24 @@ fn libzmq_says_why_it_refuses_an_endpoint() {
 fn we_say_why_we_refuse_an_endpoint() {
     let context = Context::new().unwrap();
     assert!(matches!(
-        context.socket::<Push>().bind("tcp://:5555"),
+        context.socket::<Push>().unwrap().bind("tcp://:5555"),
         Err(Error::NoSuchDevice(_))
     ));
     for (endpoint, bind, connect) in cases("ours") {
         let code = |result: Result<(), Error>| result.err().map(|err| errno(&err));
         assert_eq!(
-            code(context.socket::<Push>().bind(&endpoint).map(drop)),
+            code(context.socket::<Push>().unwrap().bind(&endpoint).map(drop)),
             bind,
             "bind {endpoint}"
         );
         assert_eq!(
-            code(context.socket::<Push>().connect(&endpoint).map(drop)),
+            code(
+                context
+                    .socket::<Push>()
+                    .unwrap()
+                    .connect(&endpoint)
+                    .map(drop)
+            ),
             connect,
             "connect {endpoint}"
         );
@@ -162,11 +168,11 @@ mod draft {
     fn we_refuse_a_radio_that_binds_and_a_dish_that_connects_over_udp() {
         let context = Context::new().unwrap();
         assert!(matches!(
-            context.socket::<Radio>().bind(UDP),
+            context.socket::<Radio>().unwrap().bind(UDP),
             Err(Error::IncompatibleTransport(_))
         ));
         assert!(matches!(
-            context.socket::<Dish>().connect(UDP),
+            context.socket::<Dish>().unwrap().connect(UDP),
             Err(Error::IncompatibleTransport(_))
         ));
     }

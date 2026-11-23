@@ -208,7 +208,7 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
         return;
     };
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.connect(&endpoint).unwrap();
     let (heard, event) = mpsc::channel();
     thread::spawn(move || heard.send(xpub.recv().unwrap()));
@@ -222,7 +222,7 @@ fn our_xpub_hears_an_old_sub_subscribe_to_everything() {
 /// announced no properties: there is no READY before ZMTP 3.0.
 fn we_pull_from_an_old_push(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;
@@ -252,7 +252,7 @@ fn an_old_pull_takes_from_our_push(libzmq: Libzmq) {
         return;
     };
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     push.send("one").unwrap();
     push.send(message(&["two", "", "parts"])).unwrap();
@@ -266,7 +266,7 @@ fn our_req_asks_an_old_rep(libzmq: Libzmq) {
         return;
     };
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(&endpoint).unwrap();
     let asking = thread::spawn(move || req.request("question"));
     assert_eq!(rep.recv(), Some(message(&["question"])));
@@ -277,7 +277,7 @@ fn our_req_asks_an_old_rep(libzmq: Libzmq) {
 
 fn an_old_req_asks_our_rep(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
     let Some(mut req) = Peer::start(libzmq, "REQ", "connect", &endpoint, &[]) else {
         return;
@@ -292,7 +292,7 @@ fn an_old_req_asks_our_rep(libzmq: Libzmq) {
 /// ZMTP 1.0 and 2.0 carry the identity in the greeting's first frame.
 fn our_router_answers_an_old_dealer_by_its_identity(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     let Some(mut dealer) = Peer::start(
         libzmq,
@@ -322,7 +322,7 @@ fn an_old_router_answers_our_dealer_by_its_identity(libzmq: Libzmq) {
         return;
     };
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(named("ours"));
+    let mut dealer = context.socket_with::<Dealer>(named("ours")).unwrap();
     dealer.connect(&endpoint).unwrap();
     dealer.send("hello").unwrap();
     assert_eq!(router.recv(), Some(message(&["ours", "hello"])));
@@ -338,7 +338,7 @@ fn an_old_router_answers_our_dealer_by_its_identity(libzmq: Libzmq) {
 /// Either way it gets only its topic.
 fn an_old_sub_gets_only_its_topic_from_our_pub(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let endpoint = publisher.bind(free_endpoint()).unwrap().to_string();
     let Some(mut sub) = Peer::start(
         libzmq,
@@ -375,7 +375,7 @@ fn our_sub_gets_only_its_topic_from_an_old_pub(libzmq: Libzmq) {
         return;
     };
     let context = Context::new().unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe("news");
     sub.connect(&endpoint).unwrap();
     let mut received = Vec::new();
@@ -396,12 +396,15 @@ fn our_sub_gets_only_its_topic_from_an_old_pub(libzmq: Libzmq) {
 /// closed. Nothing it sends arrives.
 fn an_old_peer_is_refused_where_we_require_security(libzmq: Libzmq) {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
-        Security::plain_server("", |_: &ZapRequest| ZapReply::Ok {
-            user_id: zmq::Frame::from("anyone"),
-            metadata: zmq::Metadata::new(),
-        }),
-    ));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().security(Security::plain_server(
+            "",
+            |_: &ZapRequest| ZapReply::Ok {
+                user_id: zmq::Frame::from("anyone"),
+                metadata: zmq::Metadata::new(),
+            },
+        )))
+        .unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
     let Some(mut push) = Peer::start(libzmq, "PUSH", "connect", &endpoint, &[]) else {
         return;

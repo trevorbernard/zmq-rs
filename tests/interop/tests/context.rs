@@ -28,9 +28,9 @@ fn libzmq_without_io_threads_serves_inproc_alone() {
 #[test]
 fn we_serve_inproc_alone_without_io_threads() {
     let context = Context::with_io_threads(0).expect("as libzmq takes it");
-    let mut bound = context.socket::<Pair>();
+    let mut bound = context.socket::<Pair>().unwrap();
     bound.bind("inproc://alone").unwrap();
-    let mut connected = context.socket::<Pair>();
+    let mut connected = context.socket::<Pair>().unwrap();
     connected.connect("inproc://alone").unwrap();
     connected.send("hello").unwrap();
     assert_eq!(
@@ -38,9 +38,9 @@ fn we_serve_inproc_alone_without_io_threads() {
         Some(Message::from("hello"))
     );
 
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     assert!(matches!(pull.bind(free_endpoint()), Err(Error::NoIoThread)));
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     assert!(matches!(
         push.connect(free_endpoint()),
         Err(Error::NoIoThread)
@@ -69,9 +69,9 @@ fn libzmq_keeps_inproc_connections_when_their_name_is_unbound() {
 #[test]
 fn we_keep_inproc_connections_when_their_name_is_unbound() {
     let context = Context::new().unwrap();
-    let mut bound = context.socket::<Pair>();
+    let mut bound = context.socket::<Pair>().unwrap();
     bound.bind("inproc://unbound").unwrap();
-    let mut connected = context.socket::<Pair>();
+    let mut connected = context.socket::<Pair>().unwrap();
     connected.connect("inproc://unbound").unwrap();
     bound.unbind("inproc://unbound").unwrap();
 
@@ -86,6 +86,43 @@ fn we_keep_inproc_connections_when_their_name_is_unbound() {
         Some(Message::from("and back"))
     );
 
-    let mut other = context.socket::<Pair>();
+    let mut other = context.socket::<Pair>().unwrap();
     other.bind("inproc://unbound").unwrap();
+}
+
+/// `ZMQ_HAUSNUMERO + 53`.
+const ETERM: i32 = 156_384_765;
+
+/// libzmq's `test_ctx_shutdown_socket_opened_after` and
+/// `test_ctx_shutdown_only_socket_opened_after`.
+#[test]
+fn libzmq_makes_no_socket_once_its_context_is_shut_down() {
+    for used in [false, true] {
+        let context = libzmq::Context::new();
+        if used {
+            drop(Socket::in_context(&context, Kind::Pull));
+        }
+        context.shutdown();
+        let refused = Socket::try_in_context(&context, Kind::Pull).map(drop);
+        assert_eq!(
+            refused.err().and_then(|err| libzmq::errno(&err)),
+            Some(ETERM),
+            "used: {used}"
+        );
+    }
+}
+
+#[test]
+fn we_make_no_socket_once_our_context_is_shut_down() {
+    for used in [false, true] {
+        let context = Context::new().unwrap();
+        if used {
+            drop(context.socket::<Pull>().unwrap());
+        }
+        context.shutdown(FIVE).unwrap();
+        assert!(
+            matches!(context.socket::<Pull>(), Err(Error::Terminated)),
+            "used: {used}"
+        );
+    }
 }

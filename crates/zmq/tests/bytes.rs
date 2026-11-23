@@ -24,9 +24,9 @@ fn a_small_payload_is_copied_inline() {
 #[test]
 fn bytes_sent_over_inproc_arrive_in_the_same_buffer() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Pair>();
+    let mut server = context.socket::<Pair>().unwrap();
     server.bind("inproc://bytes-feature").unwrap();
-    let mut client = context.socket::<Pair>();
+    let mut client = context.socket::<Pair>().unwrap();
     client.connect("inproc://bytes-feature").unwrap();
 
     let payload = Bytes::from(vec![7; 1024]);

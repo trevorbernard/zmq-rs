@@ -28,7 +28,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
     theirs.set_receive_timeout(FIVE);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send("ping").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"ping"]);
@@ -41,7 +41,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
 #[test]
 fn a_libzmq_pair_talks_to_ours() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Pair);
     theirs.set_receive_timeout(FIVE);
@@ -56,7 +56,7 @@ fn a_libzmq_pair_talks_to_ours() {
 #[test]
 fn a_second_libzmq_pair_waits_its_turn() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let first = Socket::new(Kind::Pair);
     first.connect(bound.clone());
@@ -131,7 +131,7 @@ fn libzmq_delivers_what_a_departed_peer_sent() {
 #[test]
 fn we_deliver_what_a_departed_peer_sent() {
     let context = Context::new().unwrap();
-    let mut pair = context.socket::<Pair>();
+    let mut pair = context.socket::<Pair>().unwrap();
     let mut monitor = pair.monitor();
     let addr = pair.bind("tcp://127.0.0.1:*").unwrap().tcp_addr().unwrap();
     send_three_and_leave(addr);

@@ -199,7 +199,7 @@ fn open<T: SocketType>(
     if let Some(heartbeat) = setup.heartbeat {
         options = options.heartbeat(heartbeat);
     }
-    let mut socket = CONTEXT.socket_with::<T>(options);
+    let mut socket = CONTEXT.socket_with::<T>(options).unwrap();
     let monitor = socket.monitor();
     prepare(&mut socket);
     match setup.direction {
