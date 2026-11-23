@@ -116,17 +116,37 @@ fn draft_function(name: &str) -> *mut c_void {
     address
 }
 
+/// A failure of libzmq's: its `errno`, and what `zmq_strerror` says of it.
+#[derive(Debug)]
+struct Failure {
+    errno: c_int,
+    message: String,
+}
+
+impl std::fmt::Display for Failure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "libzmq error {}: {}", self.errno, self.message)
+    }
+}
+
+impl std::error::Error for Failure {}
+
 fn last_error() -> io::Error {
     // SAFETY: both functions are always safe to call; strerror returns a
     // static NUL-terminated string.
-    let (code, message) = unsafe {
-        let code = zmq_errno();
-        (code, CStr::from_ptr(zmq_strerror(code)))
+    let (errno, message) = unsafe {
+        let errno = zmq_errno();
+        (errno, CStr::from_ptr(zmq_strerror(errno)))
     };
-    io::Error::other(format!(
-        "libzmq error {code}: {}",
-        message.to_string_lossy()
-    ))
+    io::Error::other(Failure {
+        errno,
+        message: message.to_string_lossy().into_owned(),
+    })
+}
+
+/// The `errno` libzmq failed with, if `err` is a failure of its own.
+pub fn errno(err: &io::Error) -> Option<i32> {
+    Some(err.get_ref()?.downcast_ref::<Failure>()?.errno)
 }
 
 fn check(rc: c_int) -> io::Result<c_int> {

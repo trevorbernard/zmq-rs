@@ -16,12 +16,13 @@ fn roundtrip() {
     bounce_pair(&mut sb, &mut sc);
 }
 
-/// libzmq fails with `ENAMETOOLONG`; here the operating system's refusal
-/// comes back as `Error::Io`.
 #[test]
 fn endpoint_too_long() {
     let context = Context::new().unwrap();
     let mut sb = context.socket::<Pair>();
     let endpoint_too_long = format!("ipc://{}", "a".repeat(108));
-    assert!(matches!(sb.bind(&endpoint_too_long), Err(Error::Io(_))));
+    assert!(matches!(
+        sb.bind(&endpoint_too_long),
+        Err(Error::NameTooLong(_))
+    ));
 }

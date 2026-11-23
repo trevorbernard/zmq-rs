@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Frame, ManualXPub, Message, Pub, Socket, Sub, XPub, XPubEvent, XSub};
+use zmq::{Context, ManualXPub, Message, Pub, Socket, Sub, XPub, XPubEvent, XSub};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle};
@@ -368,7 +368,7 @@ fn user_message_multi() {
     for topic in ["BC", "CD"] {
         assert_eq!(
             publisher.recv_timeout(FIVE).unwrap(),
-            Some(XPubEvent::Subscribe(Frame::from(topic)))
+            Some(XPubEvent::Subscribe(topic.into()))
         );
     }
     subscriber
@@ -377,7 +377,7 @@ fn user_message_multi() {
     for topic in ["BC", "CD"] {
         assert_eq!(
             publisher.recv_timeout(FIVE).unwrap(),
-            Some(XPubEvent::Cancel(Frame::from(topic)))
+            Some(XPubEvent::Cancel(topic.into()))
         );
     }
 }

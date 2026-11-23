@@ -1,8 +1,7 @@
 //! libzmq's `tests/test_radio_dish.cpp`: RADIO sends to the DISH peers
 //! that joined a message's group.
 //!
-//! Not ported, as zmq-rs has no UDP transport: `test_radio_bind_fails`,
-//! `test_dish_connect_fails`, `test_radio_dish_udp`,
+//! Not ported, as zmq-rs has no UDP transport: `test_radio_dish_udp`,
 //! `test_radio_dish_mcast` and `test_radio_dish_no_loop`, each over IPv4
 //! and IPv6.
 
@@ -10,7 +9,7 @@ use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Dish, Frame, Group, Radio, Socket};
+use zmq::{Context, Dish, Error, Frame, Group, Radio, Socket};
 use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, settle, within};
@@ -110,6 +109,28 @@ fn radio_dish_tcp_poll(loopback: &str) {
         Some([true])
     );
     recv_cmp(dish, "Movies", "Godfather");
+}
+
+#[test]
+fn radio_bind_fails() {
+    let context = Context::new().unwrap();
+    let mut radio = context.socket::<Radio>();
+    assert!(matches!(
+        radio.bind("udp://*:5556"),
+        Err(Error::IncompatibleTransport(_))
+    ));
+}
+
+#[test]
+fn dish_connect_fails() {
+    let context = Context::new().unwrap();
+    for url in ["udp://127.0.0.1:5556", "udp://[::1]:5556"] {
+        let mut dish = context.socket::<Dish>();
+        assert!(matches!(
+            dish.connect(url),
+            Err(Error::IncompatibleTransport(_))
+        ));
+    }
 }
 
 #[test]

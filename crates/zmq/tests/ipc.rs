@@ -280,12 +280,13 @@ mod abstract_names {
     fn a_name_too_long_for_sun_path_fails() {
         let context = Context::new().unwrap();
         let mut pull = context.socket::<Pull>();
-        let longest = "x".repeat(107);
+        // One octet short of what `sun_path` holds, as in libzmq.
+        let longest = "x".repeat(106);
         assert!(pull.bind(format!("ipc://@{longest}")).is_ok());
         let mut pull = context.socket::<Pull>();
         assert!(matches!(
             pull.bind(format!("ipc://@{longest}y")),
-            Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::InvalidInput
+            Err(Error::NameTooLong(_))
         ));
     }
 

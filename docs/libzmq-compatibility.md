@@ -46,7 +46,6 @@ sees, with no safety gain.
 | # | libzmq | zmq-rs today |
 |---|---|---|
 | D17 | With `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, once any endpoint is disconnected, no `ipc` endpoint that refuses is retried again, disconnected or not. Without it, a disconnected endpoint is retried until its socket is next called | No such flag: the disconnected endpoint alone stops being retried, at once. Found on 2026-11-22 in place of what was listed, that libzmq's disconnect stops the retrying only with the flag (`tests/interop/tests/reconnect.rs`). Not yet ruled a Divergence to close or an Exception |
-| D18 | `ENODEV`, `ENAMETOOLONG`, `ENOCOMPATPROTO` and `EPROTONOSUPPORT` are distinct | `ENODEV` is `InvalidEndpoint`, `ENAMETOOLONG` an `Io` error, and the last two are both `UnsupportedTransport` |
 | D19 | `zmq_socket` fails with `ETERM` once the context is shut down | Succeeds; the socket's operations then fail |
 | D21 | A PAIR holds a departed peer's place until the application has read what it sent, and turns away a peer that arrives meanwhile, whose messages are lost | Frees the place when the departed peer's session ends, so the newcomer is let in. Found on 2026-11-22 in place of what was listed, that libzmq drops the departed peer's messages: it delivers them, as we do (`tests/interop/tests/pair.rs`). Not yet ruled a Divergence to close or an Exception |
 
@@ -95,7 +94,7 @@ Divergences that stand.
 | A REQ waits forever if its peer closes before replying | `RequestError::PeerGone` | The typed `request` has no state to be stuck in |
 | A REQ is stuck (`EFSM`) after a receive times out, unless `ZMQ_REQ_RELAXED` | Takes a new request; `request_timeout` turns on correlation for good | As above; a ROUTER serving it then sees the request id frame |
 | `zmq_unbind` closes the listener in the background | Returns once it is closed | A stronger guarantee |
-| A source address or SOCKS proxy that cannot be resolved is accepted and never connects | `InvalidEndpoint` at once | Never worked in libzmq |
+| A source address or SOCKS proxy that cannot be resolved, or a host that is empty, is accepted by a connect and never connects | `InvalidEndpoint` at once | Never worked in libzmq |
 | Closes on a socket-type mismatch | Sends ERROR, then closes | RFC 37; Unverified that libzmq treats the two alike |
 | Application metadata names are any octets | RFC 37's characters, compared without case | Never valid on the wire |
 | A ZMTP 1.0 subscriber is reported only when it leaves, as a cancel | Reported as `Subscribe("")` on arrival too | libzmq's cancel has no subscription to match |
@@ -221,7 +220,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_ctx_term`, `zmq_ctx_destroy`, `zmq_term`, `zmq_ctx_shutdown` | Drop, `Context::shutdown` | Exception (API shape) |
 | `zmq_socket` | `Context::socket`, `socket_with` | Same; Divergence D19 |
 | `zmq_close` | Drop | Same |
-| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`) |
+| `zmq_bind`, `zmq_connect`, `zmq_unbind`, `zmq_disconnect` | `bind`, `connect`, `unbind`, `disconnect` | Same; Verified for an `inproc` unbind (`tests/interop/tests/context.rs`) and for why an endpoint is refused: `EINVAL` is `Error::InvalidEndpoint`, `ENODEV` `NoSuchDevice`, `ENAMETOOLONG` `NameTooLong`, `EPROTONOSUPPORT` `UnsupportedTransport`, `ENOCOMPATPROTO` `IncompatibleTransport` (`tests/interop/tests/endpoint_errors.rs`) |
 | `zmq_send`, `zmq_recv`, `zmq_msg_send`, `zmq_msg_recv`, `zmq_send_const` | `send`, `recv`, their `try_`, `_timeout` and `_async` forms | Same |
 | `zmq_sendiov`, `zmq_recviov` | | N/A |
 | `zmq_msg_init*`, `_close`, `_move`, `_copy`, `_data`, `_size` | `Frame`, `Message` | Same |
@@ -294,7 +293,7 @@ known to fall short of the bar:
   as one: about thirty, listed in the headers of the modules in
   `crates/zmq/tests/libzmq/`.
 - **libzmq tests ported in part**: `poller` (6 of 49 cases), `monitor`
-  (4 of 10), `security_zap` (12 of 30), `radio_dish` (6 of 16),
+  (4 of 10), `security_zap` (12 of 30), `radio_dish` (9 of 16),
   `inproc_connect` (lacks `shutdown_during_pend`).
 - **Not settled by reading the sources**:
   - which `ipc` socket files libzmq removes when a listener closes

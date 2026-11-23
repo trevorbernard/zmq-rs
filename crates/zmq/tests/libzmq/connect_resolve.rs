@@ -37,7 +37,6 @@ fn invalid_service_fails() {
 
 #[test]
 fn invalid_proto_fails() {
-    // libzmq's EPROTONOSUPPORT.
     assert!(matches!(
         connect("invalid://localhost:1234"),
         Err(Error::UnsupportedTransport(_))

@@ -385,8 +385,9 @@ heartbeats run over a `Stream` that is either kind. Unix only.
     `AddrInUse` from the kernel, and the name is free once its listener
     closes.
   - `ipc://@` alone is `InvalidEndpoint`, as libzmq's `EINVAL`.
-  - A name over 107 octets is `InvalidInput`, where libzmq reports
-    `ENAMETOOLONG`.
+  - A name over 106 octets is `Error::NameTooLong`, as libzmq's
+    `ENAMETOOLONG`: with its `@`, it must leave `sun_path` an octet to
+    spare, as a path must. A bind and a connect both say so.
   - `ipc://@*` is the literal name `*`, not a wildcard, as in libzmq.
   - Elsewhere, `ipc://@name` is an ordinary relative path starting with
     `@`, as in libzmq.

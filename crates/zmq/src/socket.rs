@@ -956,6 +956,7 @@ impl<T: SocketType> Socket<T> {
         let endpoint = endpoint.written();
         let endpoint = &*endpoint;
         self.alive()?;
+        endpoint::compatible(endpoint, T::KIND, true)?;
         let target = endpoint::bind_target(endpoint)?;
         self.served(&target)?;
         let (id, bound) = match target {
@@ -1010,6 +1011,7 @@ impl<T: SocketType> Socket<T> {
     pub fn unbind(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
         let endpoint = endpoint.written();
         let endpoint = &*endpoint;
+        endpoint::compatible(endpoint, T::KIND, true)?;
         let wanted = endpoint::bind_target(endpoint)?.into_endpoint();
         let mut found = Vec::new();
         self.bound.retain(|(bound, id)| {
@@ -1068,6 +1070,7 @@ impl<T: SocketType> Socket<T> {
         endpoint: &str,
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
         self.alive()?;
+        endpoint::compatible(endpoint, T::KIND, false)?;
         let target = endpoint::connect_target(endpoint)?;
         self.served(&target)?;
         let (id, key) = match &target {
@@ -1110,6 +1113,7 @@ impl<T: SocketType> Socket<T> {
         let wanted = if as_written {
             None
         } else {
+            endpoint::compatible(endpoint, T::KIND, false)?;
             Some(endpoint::connect_target(endpoint)?)
         };
         let wanted_addr = wanted.as_ref().and_then(Target::resolve);
