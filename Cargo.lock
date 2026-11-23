@@ -1249,6 +1249,7 @@ dependencies = [
 name = "zmq-interop"
 version = "0.1.0-dev"
 dependencies = [
+ "libc",
  "pkg-config",
  "zmq",
  "zmq-core",

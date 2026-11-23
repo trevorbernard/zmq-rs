@@ -1,13 +1,10 @@
 //! Why a bind or a connect is refused, compared with libzmq's `errno` for
 //! the same endpoint.
 
+use libc::{EINVAL, ENAMETOOLONG, ENODEV, EPROTONOSUPPORT};
 use zmq::{Context, Error, Push};
 use zmq_interop::libzmq::{self, Kind, Socket};
 
-const ENODEV: i32 = 19;
-const EINVAL: i32 = 22;
-const ENAMETOOLONG: i32 = 36;
-const EPROTONOSUPPORT: i32 = 93;
 /// `ZMQ_HAUSNUMERO + 52`.
 const ENOCOMPATPROTO: i32 = 156_384_764;
 
