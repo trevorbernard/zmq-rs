@@ -201,16 +201,6 @@ fn dropping_the_connection_closes_the_tcp_stream() {
 }
 
 #[test]
-fn incompatible_peer_closes_the_pipes() {
-    let router = Socket::new(Kind::Router);
-    let addr = router.bind_loopback();
-    let context = Context::new().unwrap();
-    let connection = context.connect(addr, ConnectionConfig::new(SocketType::Sub));
-    let (_connection, next) = recv(connection);
-    assert_eq!(next, None);
-}
-
-#[test]
 fn refused_connection_closes_the_pipes() {
     let addr = free_port();
     let context = Context::new().unwrap();

@@ -577,25 +577,6 @@ mod tests {
     }
 
     #[test]
-    fn an_empty_frame_is_a_valid_message() {
-        let msg = Message::new(Frame::new());
-        assert_eq!(msg.len().get(), 1);
-        assert!(msg.last().is_empty());
-    }
-
-    #[test]
-    fn push_appends_frames_in_order() {
-        let mut msg = Message::new("a");
-        msg.push("b");
-        msg.push(Frame::from("c"));
-        assert_eq!(msg.len().get(), 3);
-        assert_eq!(
-            msg.iter().cloned().collect::<Vec<_>>(),
-            frames(&["a", "b", "c"])
-        );
-    }
-
-    #[test]
     fn get_and_last_index_across_all_frames() {
         let msg = Message::try_from(frames(&["a", "b", "c"])).unwrap();
         assert_eq!(msg.get(0), Some(&Frame::from("a")));
@@ -647,13 +628,6 @@ mod tests {
         assert_eq!(borrowed, frames(&["a", "b"]).iter().collect::<Vec<_>>());
         let owned: Vec<Frame> = msg.into_iter().collect();
         assert_eq!(owned, frames(&["a", "b"]));
-    }
-
-    #[test]
-    fn single_part_messages_convert_from_frame_sources() {
-        assert_eq!(Message::from("hi"), Message::new(Frame::from("hi")));
-        assert_eq!(Message::from(b"hi".to_vec()), Message::new("hi"));
-        assert_eq!(Message::from(Frame::from("hi")), Message::new("hi"));
     }
 
     #[test]

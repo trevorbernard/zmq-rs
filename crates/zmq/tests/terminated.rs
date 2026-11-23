@@ -173,7 +173,6 @@ fn every_kind_of_send_fails_after_a_shutdown() {
         req.request_timeout(kept(), SHORT),
         Err(RequestError::Terminated)
     );
-    assert_eq!(TrySendError::Terminated(kept()).into_inner(), kept());
 }
 
 #[test]

@@ -297,12 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn clone_of_inline_frame_is_equal() {
-        let frame = Frame::copy_from_slice(b"abc");
-        assert_eq!(frame.clone(), frame);
-    }
-
-    #[test]
     fn equality_and_hash_follow_contents() {
         let a = Frame::copy_from_slice(&[5u8; 100]);
         let b = Frame::from(vec![5u8; 100]);

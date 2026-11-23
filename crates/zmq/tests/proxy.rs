@@ -330,14 +330,10 @@ fn a_capture_with_no_room_does_not_hold_up_the_proxy() {
     let context = Context::new().unwrap();
     // No peer, so nowhere to send a copy.
     let mut capture = context.socket::<Push>();
-    let mut never = context.socket::<Pull>();
-    assert_eq!(
-        captured_by(&context, "untapped", &mut capture, move || {
-            assert_eq!(never.try_recv().unwrap(), None);
-            Message::from("nothing")
-        }),
+    // That the stream gets through is `captured_by`'s own check.
+    captured_by(&context, "untapped", &mut capture, || {
         Message::from("nothing")
-    );
+    });
 }
 
 /// A SUB and a PUB as a proxy's ends, with a publisher upstream and a
@@ -545,13 +541,13 @@ fn a_slow_backend_holds_up_only_its_own_direction() {
         // Nobody reads `right`: its queue fills and the proxy holds the rest.
         thread::sleep(Duration::from_millis(50));
         right.send("meanwhile").unwrap();
-        let (heard, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
+        let (heard, _left) = within(FIVE, move || (left.recv().unwrap(), left));
         assert_eq!(heard, Message::from("meanwhile"));
         let received = within(FIVE, move || {
             (0..10).map(|_| right.recv().unwrap()).collect::<Vec<_>>()
         });
-        assert_eq!(received.len(), 10, "nothing lost while held");
-        let _ = &mut left;
+        let sent: Vec<_> = (0..10).map(|i| Message::from(format!("{i}"))).collect();
+        assert_eq!(received, sent, "nothing lost while held");
         control.terminate();
         running.join().unwrap();
     });

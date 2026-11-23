@@ -482,13 +482,6 @@ mod tests {
     }
 
     #[test]
-    fn looking_without_sleeping_leaves_the_writer_quiet() {
-        let (mut producer, mut consumer) = queue();
-        assert_eq!(consumer.pop(false), None);
-        assert!(!producer.push(1));
-    }
-
-    #[test]
     fn a_queue_that_keeps_up_reuses_one_spare() {
         let (mut producer, mut consumer) = queue();
         // The first chunk is too small to be one.

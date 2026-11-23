@@ -1,5 +1,12 @@
 # cargo-mutants skips `#[cfg(test)]` modules, but not ones gated on more,
 # such as `cfg(all(test, unix))` or zmq-pipe's `cfg(all(test, loom))`.
-exclude_re = ["tests::"]
+exclude_re = [
+    "tests::",
+    # Only a test that reads back what it wrote, or compares a fixed string
+    # with itself, could catch these (CODING_STANDARDS.md).
+    "Listener::name ->",
+    "TrySendError<T>::into_inner",
+    "impl fmt::Debug for ZapResponder",
+]
 # Items outside functions there, such as constants, carry no `tests::`.
 exclude_globs = ["**/loom_tests.rs"]

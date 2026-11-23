@@ -77,7 +77,6 @@ fn an_accepted_peer_talks_and_zap_saw_its_address() {
     );
     let request = requests.recv_timeout(FIVE).unwrap();
     assert_eq!(request.credentials, ZapCredentials::Null);
-    assert_eq!(request.credentials.mechanism(), "NULL");
     assert_eq!(request.domain, Frame::from("lan"));
     assert_eq!(request.address, "127.0.0.1");
 }

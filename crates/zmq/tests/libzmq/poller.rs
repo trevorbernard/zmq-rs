@@ -10,7 +10,10 @@
 //!   does not poll plain file descriptors;
 //! - `test_call_poller_wait_empty_without_timeout_fails` and
 //!   `..._wait_all_empty_with_timeout_fails`: polling no sockets without a
-//!   timeout does not compile (see `zmq::poll`'s documentation).
+//!   timeout does not compile (see `zmq::poll`'s documentation);
+//! - `test_call_poller_wait_all_inf_disabled_fails`: its endless wait has
+//!   no form here, and with a timeout it is `call_poller_add_no_events`
+//!   on a socket with nothing to read, which passes whatever `when` does.
 
 use std::time::Duration;
 
@@ -86,16 +89,6 @@ fn call_poller_modify_no_events() {
 fn call_poller_wait_empty_with_timeout_fails() {
     // Waiting on no sockets only times out.
     assert_eq!(zmq::poll_timeout([], Duration::ZERO).unwrap(), None);
-}
-
-#[test]
-fn call_poller_wait_all_inf_disabled_fails() {
-    let context = Context::new().unwrap();
-    let (_vent, mut sink) = pipeline(&context);
-    assert_eq!(
-        zmq::poll_timeout([sink.readable().when(false)], Duration::ZERO).unwrap(),
-        None
-    );
 }
 
 #[cfg(feature = "draft")]

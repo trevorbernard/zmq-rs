@@ -13,6 +13,11 @@ Where zmq-rs differs from libzmq on purpose, a test asserts zmq-rs's
 behavior and cites [`docs/rfc-compliance.md`](../../../../docs/rfc-compliance.md).
 A test marked `#[ignore = "zmq-rs bug: ..."]` found a bug not yet fixed.
 
+A case is ported only if it can fail here. One that differs from another
+only by an option or API version zmq-rs does not have, or that checks an
+argument Rust's types rule out, is left out, and its module's `//!`
+comment names it and why: a copy of another test's body tells nothing.
+
 ## Not ported
 
 Of 139 tests, these are left out.
