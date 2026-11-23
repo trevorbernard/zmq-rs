@@ -3,7 +3,8 @@
 //!
 //! Not ported, as zmq-rs has no UDP transport: `test_radio_dish_udp`,
 //! `test_radio_dish_mcast` and `test_radio_dish_no_loop`, each over IPv4
-//! and IPv6.
+//! and IPv6; nor `test_radio_bind_fails_ipv6`, which differs from the
+//! IPv4 case only in setting `ZMQ_IPV6`, an option zmq-rs has yet to have.
 
 use std::net::TcpListener;
 use std::thread;
@@ -46,7 +47,10 @@ fn leave_unjoined_fails() {
 fn join_too_long_fails() {
     // ZMQ_GROUP_MAX_LENGTH is 255: a group one octet longer cannot be
     // made, so it can never be joined.
-    assert!(Group::new("A".repeat(256)).is_err());
+    assert_eq!(
+        Group::new("A".repeat(256)).err(),
+        Some(zmq::InvalidGroup::TooLong)
+    );
 }
 
 #[test]

@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Message, Rep};
+use zmq::{Context, Dealer, Message, Rep, TrySendError};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, msg, settle};
@@ -142,9 +142,12 @@ fn destroy_queue_on_disconnect_tcp() {
 fn block_on_send_no_peers() {
     let context = Context::new().unwrap();
     let mut sc = context.socket::<Dealer>().unwrap();
-    assert!(sc.try_send(Message::new("")).is_err());
-    assert!(
-        sc.send_timeout(Message::new(""), Duration::from_millis(250))
-            .is_err()
-    );
+    assert!(matches!(
+        sc.try_send(Message::new("")),
+        Err(TrySendError::Full(_))
+    ));
+    assert!(matches!(
+        sc.send_timeout(Message::new(""), Duration::from_millis(250)),
+        Err(TrySendError::Full(_))
+    ));
 }

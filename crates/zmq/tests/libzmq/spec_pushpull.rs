@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::time::Duration;
 
-use zmq::{Context, Frame, Hwm, Linger, Message, Pull, Push, SocketOptions};
+use zmq::{Context, Frame, Hwm, Linger, Message, Pull, Push, SocketOptions, TrySendError};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, msg, settle};
@@ -121,11 +121,14 @@ fn pull_fair_queue_in_tcp() {
 fn push_block_on_send_no_peers() {
     let context = Context::new().unwrap();
     let mut sc = context.socket::<Push>().unwrap();
-    assert!(sc.try_send(Message::new("")).is_err());
-    assert!(
-        sc.send_timeout(Message::new(""), Duration::from_millis(250))
-            .is_err()
-    );
+    assert!(matches!(
+        sc.try_send(Message::new("")),
+        Err(TrySendError::Full(_))
+    ));
+    assert!(matches!(
+        sc.send_timeout(Message::new(""), Duration::from_millis(250)),
+        Err(TrySendError::Full(_))
+    ));
 }
 
 /// PUSH and PULL: SHALL create this queue when a peer connects to it. If

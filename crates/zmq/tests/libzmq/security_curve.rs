@@ -14,8 +14,8 @@ use std::sync::mpsc;
 use std::time::Duration;
 
 use zmq::{
-    Context, Credential, Dealer, EventKind, Frame, HandshakeFailure, Identity, Keypair, Metadata,
-    Monitor, PlainCredentials, ProtocolError, PublicKey, SecretKey, Security, Socket,
+    Context, Credential, Dealer, EventKind, Frame, HandshakeFailure, Identity, KeyError, Keypair,
+    Metadata, Monitor, PlainCredentials, ProtocolError, PublicKey, SecretKey, Security, Socket,
     ZapCredentials, ZapReply, ZapRequest,
 };
 use zmq_test_ports::free_endpoint;
@@ -447,6 +447,6 @@ fn curve_security_invalid_initiate_command_encrypted_content() {
 #[test]
 fn curve_security_invalid_keysize() {
     let wrong = "0".repeat(123);
-    assert!(PublicKey::from_z85(&wrong).is_err());
-    assert!(SecretKey::from_z85(&wrong).is_err());
+    assert_eq!(PublicKey::from_z85(&wrong).err(), Some(KeyError::Length));
+    assert_eq!(SecretKey::from_z85(&wrong).err(), Some(KeyError::Length));
 }

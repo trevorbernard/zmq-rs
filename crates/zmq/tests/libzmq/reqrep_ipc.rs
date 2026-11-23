@@ -18,8 +18,9 @@ fn simple() {
     bounce_req_rep(&mut sb, sc);
 }
 
-/// libzmq checks that replying after the requester closed leaks nothing;
-/// here the reply must be dropped quietly.
+/// libzmq checks that replying after the requester closed leaks nothing.
+/// Its send succeeds and the reply is dropped; ours says the requester is
+/// gone, which the application is free to ignore.
 #[test]
 fn leak() {
     let context = Context::new().unwrap();

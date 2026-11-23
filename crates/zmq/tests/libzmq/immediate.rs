@@ -6,7 +6,7 @@
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Linger, Message, Pull, Push, Socket, SocketOptions};
+use zmq::{Context, Dealer, Linger, Message, Pull, Push, Socket, SocketOptions, TrySendError};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle};
@@ -91,7 +91,10 @@ fn immediate_3() {
     // Give time to process the disconnect
     thread::sleep(SETTLE * 10);
 
-    assert!(frontend.try_send("Hello").is_err(), "no connection");
+    assert!(
+        matches!(frontend.try_send("Hello"), Err(TrySendError::Full(_))),
+        "no connection"
+    );
 
     let mut backend = context.socket_with::<Dealer>(options(false)).unwrap();
     backend.bind(&endpoint).unwrap();

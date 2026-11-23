@@ -8,7 +8,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Hwm, Message, Pub, Socket, SocketOptions, Sub, XPub, XPubEvent};
+use zmq::{Context, Hwm, Message, Pub, Socket, SocketOptions, Sub, TrySendError, XPub, XPubEvent};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, settle};
@@ -82,11 +82,13 @@ fn blocking(send_hwm: usize, msg_cnt: usize, endpoint: &str, must_block: bool) -
     let mut recv_count = 0;
     let mut blocked_count = 0;
     while send_count < msg_cnt {
-        if pub_socket.try_send_all(Message::from("")).is_ok() {
-            send_count += 1;
-        } else {
-            blocked_count += 1;
-            recv_count += receive(&mut sub_socket).0;
+        match pub_socket.try_send_all(Message::from("")) {
+            Ok(_) => send_count += 1,
+            Err(refused) => {
+                assert!(matches!(refused, TrySendError::Full(_)));
+                blocked_count += 1;
+                recv_count += receive(&mut sub_socket).0;
+            }
         }
     }
     // With fewer HWM than messages, we should block at least once

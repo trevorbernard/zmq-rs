@@ -76,6 +76,7 @@ Divergences that stand.
 | `ZMQ_SNDMORE`, `ZMQ_RCVMORE`, `zmq_msg_more` | A `Message` is the whole multipart message |
 | An XPUB hands over a subscription read from a message of several frames as the last frame of the message the frames before it began | `XPubEvent::Message` of those frames, then the `Subscribe` or `Cancel` |
 | `ZMQ_ROUTER_MANDATORY` off drops silently | A send to an unknown routing id always reports it; ignoring the error is libzmq's default |
+| A REP's reply to a requester that has gone succeeds, and is dropped | `ReplyError::PeerGone`, to ignore likewise |
 | `ZMQ_XPUB_NODROP` | `send_all` and its variants, per call |
 | XPUB receives `01`/`00`-prefixed messages | `XPubEvent` |
 | `ZMQ_XPUB_MANUAL`, `ZMQ_XPUB_MANUAL_LAST_VALUE` | `ManualXPub`, `SubscriptionRequest` |
@@ -94,6 +95,7 @@ Divergences that stand.
 | A REQ waits forever if its peer closes before replying | `RequestError::PeerGone` | The typed `request` has no state to be stuck in |
 | A REQ is stuck (`EFSM`) after a receive times out, unless `ZMQ_REQ_RELAXED` | Takes a new request; `request_timeout` turns on correlation for good | As above; a ROUTER serving it then sees the request id frame |
 | `zmq_unbind` closes the listener in the background | Returns once it is closed | A stronger guarantee |
+| A queue's writer learns of what its reader took in batches, so over `tcp` and `ipc` a send can be refused before the HWM is reached | It learns at once: a send is refused only when the queue is full | Fewer refusals; nothing that was sent on libzmq is refused |
 | The socket file of an `ipc` path is left when its listener closes; only that of an `ipc://*` bind is removed | Removed, if it is still the file the listener made (`tests/interop/tests/ipc.rs`) | Nothing can connect to the file libzmq leaves, and its next bind removes it |
 | A source address or SOCKS proxy that cannot be resolved, or a host that is empty, is accepted by a connect and never connects | `InvalidEndpoint` at once | Never worked in libzmq |
 | Closes on a socket-type mismatch | Sends ERROR, then closes | RFC 37; Unverified that libzmq treats the two alike |
@@ -275,12 +277,28 @@ known to fall short of the bar:
     application sees: libzmq's own tests of them are ported
   - a SOCKS proxy that asks for a user name and password
   - an option on any socket type but the one named in its row
-- **Ported tests that assert something other than libzmq's expectation.**
-  Each is a Divergence or an Exception above, or has yet to be recorded
-  as one: about thirty, listed in the headers of the modules in
-  `crates/zmq/tests/libzmq/`.
-- **libzmq tests ported in part**: `poller` (6 of 49 cases), `monitor`
-  (4 of 10), `security_zap` (12 of 30), `radio_dish` (9 of 16).
+- **libzmq's tests, as ported** (`crates/zmq/tests/libzmq/`), read
+  against the Reference's on 2026-11-22. Of 80, 42 have every case and
+  assert what libzmq's assert. The others, by what keeps them from it:
+  - **Cases left out**, for a Gap, an Exclusion or the API's shape:
+    `poller` (6 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
+    `radio_dish` (9 of 16), `router_notify`, `connect_rid`,
+    `unbind_wildcard`, `router_mandatory`, `security_curve`, `pair_tcp`,
+    `client_server`, `channel`, `scatter_gather`, `spec_dealer`,
+    `spec_pushpull`, `pubsub` and `proxy_single_socket`; and the options
+    read back in `sockopt_hwm`, `socks` and `diffserv`.
+  - **An Exception asserted** in place of libzmq's outcome:
+    `router_mandatory`, `bind_src_address`, `req_relaxed`, `reqrep_ipc`,
+    `xpub_manual_last_value`, `hwm_pubsub`, `reconnect_options`,
+    `security_zap`, `security_no_zap_handler`, `invalid_rep` and
+    `proxy_terminate`.
+  - **An assertion looser than libzmq's**, which is yet to be tightened
+    or explained: which events a server's monitor reports, and how many,
+    in `security_curve` and `security_zap`; how often a client retries
+    in `monitor`; the non-blocking send in `spec_req`; the upper bound in
+    `proxy_hwm`; `poller`'s two cases of waiting on nothing; and
+    `pair_tcp_cap_net_admin`, which passes without the capability where
+    libzmq's fails.
 - **Not settled by reading the sources**:
   - whether libzmq's draft sockets talk to a ZMTP 1.0 or 2.0 peer: ours
     refuse one, having no RFC 15 socket-type number to announce

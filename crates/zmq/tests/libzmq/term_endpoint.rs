@@ -1,7 +1,7 @@
 //! libzmq's `tests/test_term_endpoint.cpp`: `zmq_unbind` and
 //! `zmq_disconnect`, as zmq-rs's `Socket::unbind` and `Socket::disconnect`.
 
-use zmq::{Context, Endpoint, Error, Message, Pull, Push};
+use zmq::{Context, Endpoint, Error, Message, Pull, Push, TrySendError};
 
 use crate::support::{FIVE, settle, within};
 
@@ -29,7 +29,10 @@ fn send_after_unbind_fails() {
 
     push.unbind(&endpoint).unwrap();
     settle();
-    assert!(push.try_send("ABC").is_err(), "no peer is left");
+    assert!(
+        matches!(push.try_send("ABC"), Err(TrySendError::Full(_))),
+        "no peer is left"
+    );
 }
 
 #[test]
@@ -43,7 +46,10 @@ fn send_after_disconnect_fails() {
 
     push.disconnect(&endpoint).unwrap();
     settle();
-    assert!(push.try_send("ABC").is_err(), "no peer is left");
+    assert!(
+        matches!(push.try_send("ABC"), Err(TrySendError::Full(_))),
+        "no peer is left"
+    );
 }
 
 #[cfg(unix)]
