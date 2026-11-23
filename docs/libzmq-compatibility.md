@@ -109,9 +109,9 @@ Divergences that stand.
 
 | libzmq | zmq-rs | Status |
 |---|---|---|
-| PAIR, PUB, SUB, REQ, REP, DEALER, ROUTER, PULL, PUSH, XPUB, XSUB | `Socket<T>` for each | Same |
+| PAIR, PUB, SUB, REQ, REP, DEALER, ROUTER, PULL, PUSH, XPUB, XSUB | `Socket<T>` for each | Same; Verified for every pair, as either type, with either side binding (`tests/interop/tests/pairs.rs`) |
 | STREAM | | Exclusion |
-| SERVER, CLIENT, RADIO, DISH, GATHER, SCATTER, PEER, CHANNEL (draft) | `Socket<T>`, with the `draft` feature | Same |
+| SERVER, CLIENT, RADIO, DISH, GATHER, SCATTER, PEER, CHANNEL (draft) | `Socket<T>`, with the `draft` feature | Same; Verified as above |
 | DGRAM (draft) | | Gap |
 | Draft sockets are used from several threads at once | Each needs `&mut`, so a `Mutex` | Gap |
 
@@ -119,10 +119,10 @@ Divergences that stand.
 
 | libzmq | zmq-rs | Status |
 |---|---|---|
-| `tcp://`: address, `*`, interface name, host name, wildcard port, `source;host:port` | The same | Same |
+| `tcp://`: address, `*`, interface name, host name, wildcard port, `source;host:port` | The same | Same; Verified for an address and a wildcard port, every pair (`pairs.rs`) |
 | `tcp://` with `ZMQ_IPV6`: `*` binds `::` for both families, names resolve to IPv6 first | No option: `*` is `0.0.0.0`, names prefer IPv4 | Gap |
-| An IPv6 literal is refused without `ZMQ_IPV6` | Accepted | Same (accepts more) |
-| `ipc://`: path, `ipc://*`, abstract `@name` on Linux | The same | Same |
+| An IPv6 literal is refused without `ZMQ_IPV6` | Accepted | Same (accepts more); Verified over `[::1]`, every pair (`pairs.rs`) |
+| `ipc://`: path, `ipc://*`, abstract `@name` on Linux | The same | Same; Verified, every pair (`pairs.rs`) |
 | `inproc://`, connect before bind, between any two socket types | The same | Same; Verified for mismatched types (`inproc_connect::multiple_threads`, ported) |
 | `udp://` for RADIO, DISH and DGRAM: unicast, multicast, broadcast | | Gap |
 | `pgm://`, `epgm://`, `norm://`, `ws://`, `wss://`, `tipc://`, `vmci://` | | Exclusion |
@@ -269,11 +269,8 @@ Verified says so and names its test; no other row has been judged against
 that bar. A Divergence is taken off its list once it is closed. What is
 known to fall short of the bar:
 
-- **One bind direction only**, against libzmq: every pair but PUSH/PULL,
-  PAIR, PEER, DEALER/DEALER and ROUTER/DEALER.
 - **No test against libzmq** for:
-  - IPv6
-  - `ipc` beyond PUSH/PULL over NULL
+  - `ipc` and IPv6 under PLAIN or CURVE
   - PLAIN succeeding through the typed sockets
   - CURVE with ZAP when libzmq is the server
   - a ZMTP 3.0 peer (libzmq 4.0 or 4.1)
@@ -281,7 +278,7 @@ known to fall short of the bar:
     `TOPICS_COUNT`, `XSUB_VERBOSE_UNSUBSCRIBE`
   - `ROUTER_NOTIFY`, `CONNECT_ROUTING_ID`
   - `unbind` and `disconnect`
-  - reconnect intervals and `RECONNECT_STOP`
+  - `RECONNECT_STOP` for a refused connection and a failed handshake
   - `DISCONNECT_MSG`, `HICCUP_MSG`
   - the HWM of a typed socket
   - the SOCKS proxy

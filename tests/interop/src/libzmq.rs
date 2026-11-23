@@ -24,6 +24,7 @@ const ZMQ_RECONNECT_IVL_MAX: c_int = 21;
 const ZMQ_MAXMSGSIZE: c_int = 22;
 const ZMQ_RCVTIMEO: c_int = 27;
 const ZMQ_IMMEDIATE: c_int = 39;
+const ZMQ_IPV6: c_int = 42;
 const ZMQ_PLAIN_SERVER: c_int = 44;
 const ZMQ_PLAIN_USERNAME: c_int = 45;
 const ZMQ_PLAIN_PASSWORD: c_int = 46;
@@ -492,6 +493,11 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_connect(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_connect({endpoint}): {err}"));
+    }
+
+    /// `ZMQ_IPV6`: bind and connect over IPv6 too.
+    pub fn set_ipv6(&self) {
+        self.set_int(ZMQ_IPV6, 1);
     }
 
     /// `ZMQ_IMMEDIATE`: queue only for completed connections.
