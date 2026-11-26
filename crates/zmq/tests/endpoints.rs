@@ -19,8 +19,8 @@ fn fast_reconnect() -> SocketOptions {
 #[test]
 fn connections_spread_over_several_io_threads() {
     let context = Context::with_io_threads(3).unwrap();
-    let mut pulls: Vec<_> = (0..3).map(|_| context.socket::<Pull>()).collect();
-    let mut push = context.socket::<Push>();
+    let mut pulls: Vec<_> = (0..3).map(|_| context.socket::<Pull>().unwrap()).collect();
+    let mut push = context.socket::<Push>().unwrap();
     for pull in &mut pulls {
         let bound = pull.bind(free_endpoint()).unwrap();
         push.connect(&bound).unwrap();
@@ -37,27 +37,38 @@ fn connections_spread_over_several_io_threads() {
 }
 
 #[test]
-fn a_context_needs_an_io_thread() {
-    let err = Context::with_io_threads(0).unwrap_err();
-    assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+fn a_context_without_io_threads_refuses_tcp_and_ipc() {
+    let context = Context::with_io_threads(0).unwrap();
+    let mut pull = context.socket::<Pull>().unwrap();
+    for endpoint in ["tcp://127.0.0.1:*", "ipc://*"] {
+        assert!(
+            matches!(pull.bind(endpoint), Err(zmq::Error::NoIoThread)),
+            "{endpoint}"
+        );
+    }
+    assert!(matches!(
+        pull.connect("ipc:///nowhere"),
+        Err(zmq::Error::NoIoThread)
+    ));
+    pull.bind("inproc://without-threads").unwrap();
 }
 
 #[test]
 fn an_unbound_port_can_be_bound_again_at_once() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     let bound = first.bind(free_endpoint()).unwrap().to_string();
     first.unbind(&bound).unwrap();
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     second.bind(&bound).expect("the port is free");
 }
 
 #[test]
 fn unbinding_closes_accepted_connections() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     let bound = first.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket_with::<Push>(fast_reconnect());
+    let mut push = context.socket_with::<Push>(fast_reconnect()).unwrap();
     let mut monitor = push.monitor();
     push.connect(&bound).unwrap();
     push.send("before").unwrap();
@@ -72,7 +83,7 @@ fn unbinding_closes_accepted_connections() {
         != zmq::EventKind::Disconnected
     {}
     // The push reconnects to whoever binds the port next.
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     second.bind(&bound).unwrap();
     push.send("after").unwrap();
     assert_eq!(
@@ -86,7 +97,7 @@ fn unbinding_closes_accepted_connections() {
 fn a_wildcard_host_names_the_same_bind() {
     let port = free_port().port();
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("tcp://*:{port}")).unwrap();
     pull.unbind(format!("tcp://0.0.0.0:{port}")).unwrap();
     pull.bind(format!("tcp://0.0.0.0:{port}")).unwrap();
@@ -96,7 +107,7 @@ fn a_wildcard_host_names_the_same_bind() {
 #[test]
 fn unbinding_what_is_not_bound_fails() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
     assert!(matches!(
         pull.unbind("tcp://127.0.0.1:*"),
@@ -117,7 +128,7 @@ fn unbinding_what_is_not_bound_fails() {
 #[test]
 fn unbinding_ipc_removes_its_file() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("ipc://*").unwrap();
     let zmq::Endpoint::Ipc(path) = &bound else {
         panic!("an ipc endpoint");
@@ -130,21 +141,21 @@ fn unbinding_ipc_removes_its_file() {
 #[test]
 fn an_unbound_inproc_name_is_free() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     first.bind("inproc://name").unwrap();
     first.unbind("inproc://name").unwrap();
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     second.bind("inproc://name").expect("the name is free");
 }
 
 #[test]
 fn a_disconnected_peer_gets_no_more() {
     let context = Context::new().unwrap();
-    let mut kept = context.socket::<Pull>();
+    let mut kept = context.socket::<Pull>().unwrap();
     let kept_at = kept.bind(free_endpoint()).unwrap().to_string();
-    let mut dropped = context.socket::<Pull>();
+    let mut dropped = context.socket::<Pull>().unwrap();
     let dropped_at = dropped.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&kept_at).unwrap();
     push.connect(&dropped_at).unwrap();
     push.disconnect(&dropped_at).unwrap();
@@ -164,10 +175,10 @@ fn a_disconnected_peer_gets_no_more() {
 fn a_disconnected_endpoint_is_not_retried() {
     let context = Context::new().unwrap();
     let endpoint = free_endpoint();
-    let mut push = context.socket_with::<Push>(fast_reconnect());
+    let mut push = context.socket_with::<Push>(fast_reconnect()).unwrap();
     push.connect(&endpoint).unwrap();
     push.disconnect(&endpoint).unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(&endpoint).unwrap();
     assert!(push.send_timeout("lost", BRIEFLY).is_err(), "no peer left");
     assert_eq!(pull.recv_timeout(BRIEFLY).unwrap(), None);
@@ -176,12 +187,12 @@ fn a_disconnected_endpoint_is_not_retried() {
 #[test]
 fn a_connection_can_be_named_by_its_address() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let port = match pull.bind(free_endpoint()).unwrap() {
         zmq::Endpoint::Tcp(addr) => addr.port(),
         other => panic!("a tcp endpoint, not {other}"),
     };
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("tcp://localhost:{port}")).unwrap();
     push.disconnect(format!("tcp://127.0.0.1:{port}")).unwrap();
     assert!(matches!(
@@ -193,9 +204,11 @@ fn a_connection_can_be_named_by_its_address() {
 #[test]
 fn an_immediate_connection_can_be_disconnected() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket_with::<Push>(fast_reconnect().immediate(true));
+    let mut push = context
+        .socket_with::<Push>(fast_reconnect().immediate(true))
+        .unwrap();
     push.connect(&bound).unwrap();
     push.send("connected").unwrap();
     assert_eq!(
@@ -209,9 +222,9 @@ fn an_immediate_connection_can_be_disconnected() {
 #[test]
 fn an_inproc_connection_can_be_disconnected() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://pipeline").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://pipeline").unwrap();
     push.disconnect("inproc://pipeline").unwrap();
     assert!(push.send_timeout("lost", BRIEFLY).is_err(), "no peer left");
@@ -220,7 +233,7 @@ fn an_inproc_connection_can_be_disconnected() {
 #[test]
 fn a_host_name_is_resolved_when_connecting_not_before() {
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(fast_reconnect());
+    let mut push = context.socket_with::<Push>(fast_reconnect()).unwrap();
     let mut monitor = push.monitor();
     let endpoint = "tcp://no-such-host.invalid:5555";
     push.connect(endpoint).unwrap();
@@ -241,10 +254,10 @@ fn a_host_name_is_resolved_when_connecting_not_before() {
 #[test]
 fn a_socket_binds_an_interface_by_name() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("tcp://lo:*").unwrap();
     assert!(bound.tcp_addr().unwrap().ip().is_loopback(), "{bound}");
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
     push.send("over lo").unwrap();
     assert_eq!(
@@ -259,7 +272,7 @@ fn a_connection_leaves_from_its_source() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let address = listener.local_addr().unwrap();
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("tcp://127.0.0.1:{source_port};{address}"))
         .unwrap();
     let (_, peer) = listener.accept().unwrap();
@@ -278,9 +291,9 @@ fn what_bind_returns_can_be_connected_to_and_unbound() {
     #[cfg(target_os = "linux")]
     endpoints.push(format!("ipc://@zmq-rs-returned-{}", std::process::id()));
     for endpoint in endpoints {
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         let bound = pull.bind(&endpoint).unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         push.connect(&bound).unwrap();
         push.send("hi").unwrap();
         assert_eq!(

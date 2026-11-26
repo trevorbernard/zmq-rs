@@ -1,10 +1,12 @@
 //! A pipe frees what it allocated, and nothing else, however far its ends
-//! got and whichever drops first: an allocator that counts what is live
-//! checks the balance, so a leaked chunk or a freed null shows.
+//! got and whichever drops first: an allocator that counts what the test's
+//! thread has live checks the balance, so a leaked chunk or a freed null
+//! shows.
 // A global allocator cannot be written without unsafe.
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::atomic::{AtomicIsize, Ordering};
 
 use zmq_pipe::{Hwm, pipe};
@@ -13,16 +15,30 @@ struct Counting;
 
 static LIVE: AtomicIsize = AtomicIsize::new(0);
 
+thread_local! {
+    /// Whether this thread's allocations count: the harness allocates on
+    /// its own thread while the test runs.
+    static COUNTED: Cell<bool> = const { Cell::new(false) };
+}
+
+fn counted() -> bool {
+    COUNTED.try_with(Cell::get).unwrap_or(false)
+}
+
 // SAFETY: forwards to `System`, only counting.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        LIVE.fetch_add(1, Ordering::Relaxed);
+        if counted() {
+            LIVE.fetch_add(1, Ordering::Relaxed);
+        }
         // SAFETY: as the caller promised us.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        LIVE.fetch_sub(1, Ordering::Relaxed);
+        if counted() {
+            LIVE.fetch_sub(1, Ordering::Relaxed);
+        }
         // SAFETY: as the caller promised us.
         unsafe { System.dealloc(ptr, layout) }
     }
@@ -81,6 +97,7 @@ fn every_chunk_is_freed_once() {
         (600, 600),
         (1000, 999),
     ];
+    COUNTED.set(true);
     // Whatever the first run sets up once, such as thread-local state.
     run(1, 1, FirstDropped::Writer);
     for (sent, received) in cases {

@@ -14,9 +14,11 @@ use crate::support::{FIVE, SETTLE, bounce_content, zero_linger};
 
 /// Client and server over TCP, the server with `security`.
 fn pair(context: &Context, security: Security) -> (Socket<Dealer>, Socket<Dealer>) {
-    let mut server = context.socket_with::<Dealer>(zero_linger().security(security));
+    let mut server = context
+        .socket_with::<Dealer>(zero_linger().security(security))
+        .unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
-    let mut client = context.socket_with::<Dealer>(zero_linger());
+    let mut client = context.socket_with::<Dealer>(zero_linger()).unwrap();
     client.connect(&endpoint).unwrap();
     (server, client)
 }

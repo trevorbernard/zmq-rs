@@ -9,11 +9,12 @@ An idiomatic, type-safe Rust port of [libzmq](https://github.com/zeromq/libzmq).
 - Own I/O threads (no async runtime required); blocking and executor-agnostic async APIs.
 - Invalid states are compile errors: each socket type exposes only the operations
   its pattern allows.
-- Every libzmq socket type but STREAM, which is not planned, the draft ones behind the `draft` feature, over
+- Every libzmq socket type but STREAM (not planned) and DGRAM (not yet), the draft ones behind the `draft` feature, over
   tcp, ipc and inproc, with libzmq's proxies, monitor events, `zmq_poll`
   and message properties (`zmq_msg_gets`).
 
-See [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
+See [docs/libzmq-compatibility.md](docs/libzmq-compatibility.md) for what libzmq has that zmq-rs lacks and where the two differ,
+and [docs/rfc-compliance.md](docs/rfc-compliance.md) for how each ZeroMQ RFC is met.
 [docs/architecture.md](docs/architecture.md) compares the runtime with libzmq's.
 [docs/benchmarks.md](docs/benchmarks.md) compares throughput and latency with libzmq's.
 Requires Rust 1.99.
@@ -39,10 +40,10 @@ use zmq::{Context, Pull, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>()?;
     let endpoint = sink.bind("tcp://127.0.0.1:*")?;
 
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>()?;
     source.connect(&endpoint)?;
     source.send("task 1")?;
     source.send(["header", "body"])?;
@@ -68,7 +69,7 @@ use zmq::{Context, Rep, Req};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>()?;
     let endpoint = rep.bind("tcp://127.0.0.1:*")?;
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
@@ -76,7 +77,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         request.reply(format!("hello, {name}")).unwrap();
     });
 
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>()?;
     req.connect(&endpoint)?;
     assert_eq!(req.request("world")?, "hello, world");
     server.join().unwrap();
@@ -96,10 +97,10 @@ use zmq::{Context, Pub, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind("inproc://weather")?;
 
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.subscribe("london");
     subscriber.connect("inproc://weather")?;
 
@@ -120,11 +121,11 @@ use zmq::{Context, Dealer, Identity, Router, RoutingId, SocketOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut broker = context.socket::<Router>();
+    let mut broker = context.socket::<Router>()?;
     let endpoint = broker.bind("tcp://127.0.0.1:*")?;
 
     let options = SocketOptions::new().identity(Identity::new("worker-1")?);
-    let mut worker = context.socket_with::<Dealer>(options);
+    let mut worker = context.socket_with::<Dealer>(options)?;
     worker.connect(&endpoint)?;
     worker.send("ready")?;
 
@@ -143,8 +144,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Waiting on several sockets: `poll`
 
 `zmq::poll` waits until any of its sockets is ready and says which, as
-`zmq_poll`. Each socket is borrowed only for the call, and one reported
-readable returns a message from its next `try_recv`. Only socket types that
+`zmq_poll`. The sockets go in an array, or in a `Vec` when how many there
+are is known only as the program runs. Each is borrowed only for the call,
+and one reported readable returns a message from its next `try_recv`. A
+file descriptor of the application's own waits with them, as
+`PollItem::fd_readable` or `fd_writable`. Only socket types that
 receive have `readable`, and only those whose sends can wait have
 `writable`.
 
@@ -155,12 +159,12 @@ use zmq::{Context, Pull, Push};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut jobs = context.socket::<Pull>();
+    let mut jobs = context.socket::<Pull>()?;
     jobs.bind("inproc://jobs")?;
-    let mut control = context.socket::<Pull>();
+    let mut control = context.socket::<Pull>()?;
     control.bind("inproc://control")?;
 
-    let mut boss = context.socket::<Push>();
+    let mut boss = context.socket::<Push>()?;
     boss.connect("inproc://jobs")?;
     boss.send("job 1")?;
 
@@ -173,6 +177,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 ```
+
+An event loop of another kind, one that waits on file descriptors, takes a
+socket's from `Socket::fd` and looks at `Socket::events` when it turns
+readable, as with libzmq's `ZMQ_FD` and `ZMQ_EVENTS`.
 
 ### Security: CURVE with an authenticator
 
@@ -201,11 +209,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let context = Context::new()?;
     let security = Security::curve_server_authenticated(server_keys, "global", authenticator);
-    let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security));
+    let mut server = context.socket_with::<Pull>(SocketOptions::new().security(security))?;
     let endpoint = server.bind("tcp://127.0.0.1:*")?;
 
     let security = Security::curve_client(client_keys, server_public);
-    let mut client = context.socket_with::<Push>(SocketOptions::new().security(security));
+    let mut client = context.socket_with::<Push>(SocketOptions::new().security(security))?;
     client.connect(&endpoint)?;
     client.send("encrypted")?;
     assert_eq!(server.recv()?, "encrypted");
@@ -241,8 +249,9 @@ throughput ran up to three times as fast, for libzmq as well.
 
 ## Differences from libzmq
 
-Deliberate, beyond the API being typed. The full list, with reasons, is in
-[docs/rfc-compliance.md](docs/rfc-compliance.md).
+The ones an application meets first. The full list, with which are to
+stay and which are to go, is in
+[docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 
 - ROUTER `send` fails for an unknown routing id, as with libzmq's
   `ROUTER_MANDATORY`. Ignoring `try_send`'s error drops the message, which is
@@ -264,20 +273,23 @@ Deliberate, beyond the API being typed. The full list, with reasons, is in
 - PUB `send` returns how many subscribers the message was queued for.
 - With `CONFLATE`, subscriptions are never conflated; libzmq can lose all but
   the last.
-- The PEER socket ignores `IMMEDIATE`; libzmq refuses `connect_peer` with it.
 
-Not planned unless someone asks, as there is too little call for them:
-STREAM sockets, WebSockets, TIPC, VMCI, GSSAPI and the TCP and IPC accept
-filters. Not yet: polling plain file descriptors beside sockets, UDP,
-timers and `USE_FD`. The full list is in
-[the libzmq test port](crates/zmq/tests/libzmq/README.md#not-ported).
+Not planned unless someone asks: STREAM sockets, WebSockets, TIPC, VMCI,
+GSSAPI, the TCP and IPC accept filters, PGM and NORM, and Windows. Not
+yet: UDP and libzmq's ZAP handler socket, among others.
+The full list is in
+[docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 
 ## Testing
 
-- **Against libzmq 4.3.5:** every pattern and security mechanism, over
-  tcp and ipc, with zmq-rs on either side (`tests/interop`).
-- **Against libzmq 2.2 and 3.2,** which speak ZMTP 1.0 and 2.0, as
-  separate processes the Nix dev shell builds (`just test-legacy`).
+- **Against libzmq 4.3.5:** every pair of socket types, with either side
+  binding, over tcp on IPv4 and IPv6 and over ipc; PLAIN and CURVE with
+  either as the server; and the socket options, each held by one library
+  and then the other (`tests/interop`). What is not yet tested against it
+  is listed under [Evidence](docs/libzmq-compatibility.md#evidence).
+- **Against libzmq 2.2, 3.2 and 4.1,** which speak ZMTP 1.0, 2.0 and
+  3.0, as separate processes the Nix dev shell builds
+  (`just test-legacy`).
 - **libzmq's own regression tests,** 80 of its 139 ported, the rest listed
   with why (`crates/zmq/tests/libzmq`).
 - **Property tests against models:** subscription matching, XPUB events,
@@ -296,7 +308,7 @@ timers and `USE_FD`. The full list is in
 nix develop        # or `direnv allow`
 just               # lists the workflows
 just ci            # rustfmt, clippy, tests, loom, as CI runs them
-just test-legacy   # against libzmq 2.2 and 3.2
+just test-legacy   # against libzmq 2.2, 3.2 and 4.1
 just loom          # zmq-pipe's queue, every interleaving; also miri, tsan
 just mutants zmtp  # changes to a crate's code that no test notices
 just perf          # throughput and latency next to libzmq

@@ -41,9 +41,9 @@ fn subscribe_cancel(xpub: &mut Socket<XPub>, sub: &mut Socket<Sub>, topic: &[u8]
 #[test]
 fn xpub_subscribe_long_topic() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     let endpoint = xpub.bind(free_endpoint()).unwrap().to_string();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect(&endpoint).unwrap();
 
     subscribe_cancel(&mut xpub, &mut sub, &short_topic());

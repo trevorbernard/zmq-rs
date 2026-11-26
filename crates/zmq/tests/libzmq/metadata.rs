@@ -36,17 +36,19 @@ fn zap_handler(request: &ZapRequest) -> ZapReply {
 /// request goes to the returned receiver.
 fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receiver<ZapRequest>) {
     let (seen, requests) = mpsc::channel();
-    let mut server = context.socket_with::<T>(
-        SocketOptions::new()
-            .security(Security::null_authenticated(
-                "DOMAIN",
-                move |request: &ZapRequest| {
-                    let _ = seen.send(request.clone());
-                    zap_handler(request)
-                },
-            ))
-            .linger(Linger::For(Duration::ZERO)),
-    );
+    let mut server = context
+        .socket_with::<T>(
+            SocketOptions::new()
+                .security(Security::null_authenticated(
+                    "DOMAIN",
+                    move |request: &ZapRequest| {
+                        let _ = seen.send(request.clone());
+                        zap_handler(request)
+                    },
+                ))
+                .linger(Linger::For(Duration::ZERO)),
+        )
+        .unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, endpoint, requests)
 }
@@ -55,7 +57,7 @@ fn server<T: SocketType>(context: &Context) -> (Socket<T>, String, mpsc::Receive
 fn metadata() {
     let context = Context::new().unwrap();
     let (mut server, endpoint, requests) = server::<Dealer>(&context);
-    let mut client = context.socket::<Dealer>();
+    let mut client = context.socket::<Dealer>().unwrap();
     client.connect(&endpoint).unwrap();
 
     client.send("This is a message").unwrap();
@@ -82,7 +84,7 @@ fn metadata() {
 fn router_prefetch_metadata() {
     let context = Context::new().unwrap();
     let (mut server, endpoint, _requests) = server::<Router>(&context);
-    let mut client = context.socket::<Req>();
+    let mut client = context.socket::<Req>().unwrap();
     client.connect(&endpoint).unwrap();
 
     let asking = thread::spawn(move || client.request("This is a message"));

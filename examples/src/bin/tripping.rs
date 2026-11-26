@@ -8,7 +8,7 @@ use zguide::sleep_ms;
 use zmq::{Context, Dealer, Pair, Proxy};
 
 fn client_task(context: Context, mut pipe: zmq::Socket<Pair>) -> Result<(), zmq::Error> {
-    let mut client = context.socket::<Dealer>();
+    let mut client = context.socket::<Dealer>().unwrap();
     client.connect("tcp://localhost:5555")?;
     println!("Setting up test...");
     sleep_ms(100);
@@ -43,7 +43,7 @@ fn client_task(context: Context, mut pipe: zmq::Socket<Pair>) -> Result<(), zmq:
 // The worker uses its own context, as the guide's does.
 fn worker_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let context = Context::new()?;
-    let mut worker = context.socket::<Dealer>();
+    let mut worker = context.socket::<Dealer>()?;
     worker.connect("tcp://localhost:5556")?;
 
     loop {
@@ -56,9 +56,9 @@ fn worker_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 // context.
 fn broker_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let context = Context::new()?;
-    let mut frontend = context.socket::<Dealer>();
+    let mut frontend = context.socket::<Dealer>()?;
     frontend.bind("tcp://*:5555")?;
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>()?;
     backend.bind("tcp://*:5556")?;
     Proxy::new(&mut frontend, &mut backend).run();
     Ok(())
@@ -66,9 +66,9 @@ fn broker_task() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut client = context.socket::<Pair>();
+    let mut client = context.socket::<Pair>()?;
     client.bind("inproc://client")?;
-    let mut pipe = context.socket::<Pair>();
+    let mut pipe = context.socket::<Pair>()?;
     pipe.connect("inproc://client")?;
 
     thread::spawn({

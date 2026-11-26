@@ -33,7 +33,7 @@ use crate::{
     ZapResponder,
 };
 
-/// The shortest PING interval, so a zero interval cannot spin.
+/// The shortest PING interval, so one below a millisecond cannot spin.
 const MIN_PING_INTERVAL: Duration = Duration::from_millis(1);
 
 /// Stop taking messages from the socket while this much output is unsent.
@@ -187,6 +187,24 @@ pub(crate) enum EngineError {
     Curve(CurveError),
     /// A SOCKS5 proxy did not connect us.
     Proxy(#[expect(dead_code, reason = "shown when the error is debugged")] SocksError),
+    /// A REQ was sent something that is not framed as a reply.
+    NotAReply,
+}
+
+/// Whether `message` is framed as libzmq's `req_session_t` requires of
+/// what a REQ receives: an empty delimiter, after a request id of four
+/// octets if there is one, and at least one frame after it.
+fn is_reply(message: &Message) -> bool {
+    let mut frames = message.iter();
+    let Some(first) = frames.next() else {
+        return false;
+    };
+    let delimiter = if first.len() == 4 {
+        frames.next()
+    } else {
+        Some(first)
+    };
+    delimiter.is_some_and(|frame| frame.is_empty()) && frames.next().is_some()
 }
 
 fn protocol(detail: ProtocolDetail) -> HandshakeFailure {
@@ -219,7 +237,7 @@ impl EngineError {
             Self::Greeting(err) => protocol(ProtocolDetail::Greeting(err.clone())),
             Self::Decode(err) => protocol(ProtocolDetail::Decode(err.clone())),
             Self::Curve(err) => protocol(ProtocolDetail::Curve(*err)),
-            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) => {
+            Self::Io(_) | Self::PeerClosed | Self::Timeout | Self::Proxy(_) | Self::NotAReply => {
                 HandshakeFailure::NoDetail
             }
         }
@@ -346,7 +364,7 @@ impl Engine {
         };
         let encoder = *encoder;
         let ping = Command::Ping(Ping {
-            ttl: Ttl::from_duration(heartbeat.ttl),
+            ttl: heartbeat.ttl,
             context: PingContext::default(),
         });
         let mut body = Vec::new();
@@ -355,10 +373,11 @@ impl Engine {
             // An interval or timeout too long for an `Instant` to reach
             // never comes.
             self.deadlines.next_ping = now.checked_add(heartbeat.interval.max(MIN_PING_INTERVAL));
-            self.deadlines.ping_timeout = self
-                .deadlines
-                .ping_timeout
-                .or_else(|| now.checked_add(heartbeat.timeout));
+            // A timeout of zero never gives up, as libzmq's.
+            self.deadlines.ping_timeout = self.deadlines.ping_timeout.or_else(|| {
+                now.checked_add(heartbeat.timeout)
+                    .filter(|_| !heartbeat.timeout.is_zero())
+            });
         }
         Ok(())
     }
@@ -653,6 +672,7 @@ impl Engine {
             peer.version(),
             DecoderConfig {
                 max_message_size: self.config.max_message_size,
+                max_multipart_size: self.config.max_multipart_size,
             },
         );
         // An unversioned ZMTP 1.0 peer's greeting octets were the start of
@@ -838,15 +858,17 @@ impl Engine {
                 let mut metadata = (self.config.message_properties == MessageProperties::Attach)
                     .then(|| connection_metadata(&self.stream, &established));
                 self.curve = codec.map(|mut codec| {
-                    codec.set_max_message_size(self.config.max_message_size);
+                    codec.set_max_multipart_size(self.config.max_multipart_size);
                     codec
                 });
                 self.deadlines.handshake = None;
                 // ZMTP 1.0 and 2.0 have no commands, so no heartbeats.
                 if matches!(version, Version::V3_0 | Version::V3_1) {
+                    // An interval of zero is libzmq's default: no PINGs.
                     self.deadlines.next_ping = self
                         .config
                         .heartbeat
+                        .filter(|heartbeat| !heartbeat.interval.is_zero())
                         .and_then(|heartbeat| Instant::now().checked_add(heartbeat.interval));
                 }
                 // A ZMTP 1.0 subscriber filters for itself and never says
@@ -1038,6 +1060,11 @@ impl Engine {
             }
             match item {
                 Some(Incoming::Message(mut message)) => {
+                    // libzmq's REQ session drops a connection that sends
+                    // anything else, and it is not tried again.
+                    if self.config.socket_type == SocketType::Req && !is_reply(&message) {
+                        return Err(EngineError::NotAReply);
+                    }
                     announce(&mut message, metadata, self.config.conflate_inbound);
                     if let Some(refused) = deliver(pipes.inbound, message, cx) {
                         *pending = Some(refused);
@@ -1266,6 +1293,27 @@ fn announce(message: &mut Message, metadata: &mut Option<MessageMetadata>, confl
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_reply_has_a_delimiter_and_a_body() {
+        let message = |frames: &[&[u8]]| {
+            let frames: Vec<_> = frames
+                .iter()
+                .map(|frame| zmtp::Frame::copy_from_slice(frame))
+                .collect();
+            Message::try_from(frames).unwrap()
+        };
+        assert!(is_reply(&message(&[b"", b"body"])));
+        assert!(is_reply(&message(&[b"", b"body", b"more"])));
+        assert!(is_reply(&message(&[b"\0\0\0\x01", b"", b"body"])));
+        assert!(!is_reply(&message(&[b"body"])));
+        assert!(!is_reply(&message(&[b""])), "nothing after the delimiter");
+        assert!(!is_reply(&message(&[b"id", b"", b"body"])));
+        assert!(
+            !is_reply(&message(&[b"\0\0\0\x01", b"body"])),
+            "four octets are a request id, which a delimiter follows"
+        );
+    }
 
     #[test]
     fn an_error_reason_is_a_zap_status_only_if_it_is_a_failure() {

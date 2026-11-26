@@ -19,6 +19,9 @@ zmq-pipe.workspace = true
 zmq-test-ports.workspace = true
 zmtp.workspace = true
 
+[dev-dependencies]
+libc.workspace = true
+
 [build-dependencies]
 pkg-config = "0.3"
 

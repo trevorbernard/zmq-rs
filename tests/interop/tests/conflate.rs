@@ -12,7 +12,7 @@ const FIVE: Duration = Duration::from_secs(5);
 #[test]
 fn our_conflating_pull_keeps_the_latest_from_a_libzmq_push() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
@@ -30,7 +30,7 @@ fn our_conflating_pull_keeps_the_latest_from_a_libzmq_push() {
 fn our_conflating_push_delivers_only_the_latest_to_a_libzmq_pull() {
     let addr = free_port();
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.set_conflate(true);
     push.connect(format!("tcp://{addr}")).unwrap();
     for i in 1..=10 {
@@ -48,7 +48,7 @@ fn our_conflating_sub_keeps_every_subscription_with_a_libzmq_pub() {
     let publisher = Socket::new(Kind::Pub);
     let addr = publisher.bind_loopback();
     let context = Context::new().unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.set_conflate(true);
     subscriber.subscribe("a");
     subscriber.subscribe("b");

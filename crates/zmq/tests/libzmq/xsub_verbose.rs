@@ -5,12 +5,6 @@
 //! Where libzmq checks with a non-blocking receive that nothing was
 //! reported, this waits [`SETTLE`] for it, so that a report on its way is
 //! not missed.
-//!
-//! libzmq's XPUB reports an unsubscription of a topic the peer does not
-//! hold, which is how its test sees the ones the option lets through. Ours
-//! ignores those (`docs/rfc-compliance.md`, PUBSUB), so here the
-//! option shows in the first of two unsubscriptions being reported, and
-//! what goes on the wire is checked in `zmq-core`'s `pubsub` tests.
 
 use zmq::{Context, Socket, Verbosity, XPub, XPubEvent, XSub};
 
@@ -32,9 +26,9 @@ fn xsub_verbose_unsubscribe() {
     let cancelled = || XPubEvent::Cancel(TOPIC_A.into());
 
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher.bind("inproc://soketto").unwrap();
-    let mut subscriber = context.socket::<XSub>();
+    let mut subscriber = context.socket::<XSub>().unwrap();
     subscriber.connect("inproc://soketto").unwrap();
 
     // To be told of every subscription and unsubscription.
@@ -57,20 +51,18 @@ fn xsub_verbose_unsubscribe() {
 
     subscriber.set_verbose_unsubscribe(true);
 
-    // Not subscribed, but passed on all the same; libzmq's XPUB reports
-    // it, ours ignores it.
+    // Not subscribed, but passed on all the same.
     subscriber.unsubscribe(TOPIC_A);
-    expect_nothing(&mut publisher);
+    expect(&mut publisher, cancelled());
 
     subscriber.subscribe(TOPIC_A);
     expect(&mut publisher, subscribed());
     subscriber.subscribe(TOPIC_A);
     expect(&mut publisher, subscribed());
 
-    // The first unsubscription is passed on now, and ends the XPUB's one
-    // subscription for this peer; libzmq's XPUB reports the second too.
+    // Both unsubscriptions are passed on now.
     subscriber.unsubscribe(TOPIC_A);
     expect(&mut publisher, cancelled());
     subscriber.unsubscribe(TOPIC_A);
-    expect_nothing(&mut publisher);
+    expect(&mut publisher, cancelled());
 }

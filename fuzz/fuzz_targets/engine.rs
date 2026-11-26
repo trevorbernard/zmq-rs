@@ -76,7 +76,7 @@ impl From<u8> for Setup {
             heartbeat: (octet & 0x80 != 0).then(|| Heartbeat {
                 interval: Duration::from_millis(1),
                 timeout: Duration::from_millis(20),
-                ttl: Duration::from_millis(100),
+                ttl: zmq::Ttl::from_deciseconds(1),
             }),
         }
     }
@@ -194,11 +194,12 @@ fn open<T: SocketType>(
         // The context outlives every run: nothing may linger.
         .linger(Linger::For(Duration::ZERO))
         .max_message_size(zmtp_fuzz::MAX_MESSAGE_SIZE)
+        .max_multipart_size(zmtp_fuzz::MAX_MESSAGE_SIZE)
         .security(security(setup));
     if let Some(heartbeat) = setup.heartbeat {
         options = options.heartbeat(heartbeat);
     }
-    let mut socket = CONTEXT.socket_with::<T>(options);
+    let mut socket = CONTEXT.socket_with::<T>(options).unwrap();
     let monitor = socket.monitor();
     prepare(&mut socket);
     match setup.direction {

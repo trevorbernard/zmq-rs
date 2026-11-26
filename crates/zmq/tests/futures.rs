@@ -93,9 +93,9 @@ fn tiny() -> SocketOptions {
 #[test]
 fn a_pull_wakes_for_a_message_over_tcp() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
 
     let task = Task::new();
@@ -108,9 +108,9 @@ fn a_pull_wakes_for_a_message_over_tcp() {
 #[test]
 fn a_push_waits_for_room() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(tiny());
+    let mut pull = context.socket_with::<Pull>(tiny()).unwrap();
     pull.bind("inproc://push-room").unwrap();
-    let mut push = context.socket_with::<Push>(tiny());
+    let mut push = context.socket_with::<Push>(tiny()).unwrap();
     push.connect("inproc://push-room").unwrap();
     while push.try_send("fill").is_ok() {}
 
@@ -129,9 +129,9 @@ fn a_push_waits_for_room() {
 #[test]
 fn a_pair_sends_and_receives() {
     let context = Context::new().unwrap();
-    let mut left = context.socket_with::<Pair>(tiny());
+    let mut left = context.socket_with::<Pair>(tiny()).unwrap();
     left.bind("inproc://pair").unwrap();
-    let mut right = context.socket_with::<Pair>(tiny());
+    let mut right = context.socket_with::<Pair>(tiny()).unwrap();
     right.connect("inproc://pair").unwrap();
 
     let task = Task::new();
@@ -152,9 +152,9 @@ fn a_pair_sends_and_receives() {
 #[test]
 fn a_dealer_sends_and_receives() {
     let context = Context::new().unwrap();
-    let mut left = context.socket_with::<Dealer>(tiny());
+    let mut left = context.socket_with::<Dealer>(tiny()).unwrap();
     left.bind("inproc://dealer").unwrap();
-    let mut right = context.socket_with::<Dealer>(tiny());
+    let mut right = context.socket_with::<Dealer>(tiny()).unwrap();
     right.connect("inproc://dealer").unwrap();
 
     let task = Task::new();
@@ -175,10 +175,11 @@ fn a_dealer_sends_and_receives() {
 #[test]
 fn a_router_receives_and_answers() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://router").unwrap();
-    let mut dealer =
-        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("d").unwrap()));
+    let mut dealer = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("d").unwrap()))
+        .unwrap();
     dealer.connect("inproc://router").unwrap();
 
     let task = Task::new();
@@ -198,9 +199,9 @@ fn a_router_receives_and_answers() {
 #[test]
 fn a_request_and_its_reply() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://reqrep").unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect("inproc://reqrep").unwrap();
 
     let server = Task::new();
@@ -219,9 +220,9 @@ fn a_request_and_its_reply() {
 #[test]
 fn a_sub_wakes_for_a_publication() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://pubsub").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe("a");
     sub.connect("inproc://pubsub").unwrap();
 
@@ -236,9 +237,9 @@ fn a_sub_wakes_for_a_publication() {
 #[test]
 fn send_all_waits_for_every_subscriber_to_have_room() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<Pub>(tiny());
+    let mut publisher = context.socket_with::<Pub>(tiny()).unwrap();
     publisher.bind("inproc://send-all").unwrap();
-    let mut sub = context.socket_with::<Sub>(tiny());
+    let mut sub = context.socket_with::<Sub>(tiny()).unwrap();
     sub.subscribe("");
     sub.connect("inproc://send-all").unwrap();
     assert_eq!(run(publisher.send_all_async("first")), Ok(1));
@@ -254,9 +255,9 @@ fn send_all_waits_for_every_subscriber_to_have_room() {
 #[test]
 fn an_xpub_wakes_for_a_subscription() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://xpub").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect("inproc://xpub").unwrap();
 
     let task = Task::new();
@@ -272,10 +273,10 @@ fn an_xpub_wakes_for_a_subscription() {
 #[test]
 fn a_manual_xpub_wakes_for_a_request_to_subscribe() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<ManualXPub>();
+    let mut xpub = context.socket::<ManualXPub>().unwrap();
     xpub.bind("inproc://manual").unwrap();
     assert!(matches!(xpub.try_recv(), Ok(None)));
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.connect("inproc://manual").unwrap();
 
     let task = Task::new();
@@ -298,9 +299,9 @@ fn a_manual_xpub_wakes_for_a_request_to_subscribe() {
 #[test]
 fn an_xsub_wakes_for_a_publication() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://xsub").unwrap();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     xsub.subscribe("a");
     xsub.connect("inproc://xsub").unwrap();
 
@@ -314,13 +315,13 @@ fn an_xsub_wakes_for_a_publication() {
 #[test]
 fn a_proxy_runs_as_a_task_until_it_is_terminated() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Pull>();
+    let mut frontend = context.socket::<Pull>().unwrap();
     frontend.bind("inproc://proxy-front").unwrap();
-    let mut backend = context.socket::<Push>();
+    let mut backend = context.socket::<Push>().unwrap();
     backend.bind("inproc://proxy-back").unwrap();
-    let mut source = context.socket::<Push>();
+    let mut source = context.socket::<Push>().unwrap();
     source.connect("inproc://proxy-front").unwrap();
-    let mut sink = context.socket::<Pull>();
+    let mut sink = context.socket::<Pull>().unwrap();
     sink.connect("inproc://proxy-back").unwrap();
 
     let mut proxy = Proxy::new(&mut frontend, &mut backend);
@@ -353,9 +354,9 @@ mod draft {
     fn a_dish_wakes_for_its_group() {
         let news = Group::new("news").unwrap();
         let context = Context::new().unwrap();
-        let mut radio = context.socket::<Radio>();
+        let mut radio = context.socket::<Radio>().unwrap();
         radio.bind("inproc://radio").unwrap();
-        let mut dish = context.socket::<Dish>();
+        let mut dish = context.socket::<Dish>().unwrap();
         dish.connect("inproc://radio").unwrap();
         assert!(dish.join(&news));
 
@@ -369,9 +370,9 @@ mod draft {
     #[test]
     fn a_client_and_a_server_talk() {
         let context = Context::new().unwrap();
-        let mut server = context.socket_with::<Server>(tiny());
+        let mut server = context.socket_with::<Server>(tiny()).unwrap();
         server.bind("inproc://server").unwrap();
-        let mut client = context.socket_with::<Client>(tiny());
+        let mut client = context.socket_with::<Client>(tiny()).unwrap();
         client.connect("inproc://server").unwrap();
 
         let task = Task::new();
@@ -400,7 +401,7 @@ mod draft {
     #[test]
     fn a_server_refuses_an_unknown_client_at_once() {
         let context = Context::new().unwrap();
-        let mut server = context.socket::<Server>();
+        let mut server = context.socket::<Server>().unwrap();
         let nobody = ClientId::new(7).unwrap();
         assert_eq!(
             run(server.send_async(nobody, "lost")),
@@ -411,9 +412,9 @@ mod draft {
     #[test]
     fn peers_talk() {
         let context = Context::new().unwrap();
-        let mut alice = context.socket_with::<Peer>(tiny());
+        let mut alice = context.socket_with::<Peer>(tiny()).unwrap();
         alice.bind("inproc://peer").unwrap();
-        let mut bob = context.socket_with::<Peer>(tiny());
+        let mut bob = context.socket_with::<Peer>(tiny()).unwrap();
         let to_alice = bob.connect_peer("inproc://peer").unwrap();
 
         let task = Task::new();
@@ -439,7 +440,7 @@ mod draft {
     #[test]
     fn a_peer_refuses_an_unknown_peer_at_once() {
         let context = Context::new().unwrap();
-        let mut peer = context.socket::<Peer>();
+        let mut peer = context.socket::<Peer>().unwrap();
         let nobody = PeerId::new(7).unwrap();
         assert_eq!(
             run(peer.send_async(nobody, "lost")),
@@ -450,9 +451,9 @@ mod draft {
     #[test]
     fn a_scatter_and_a_gather() {
         let context = Context::new().unwrap();
-        let mut gather = context.socket_with::<Gather>(tiny());
+        let mut gather = context.socket_with::<Gather>(tiny()).unwrap();
         gather.bind("inproc://gather").unwrap();
-        let mut scatter = context.socket_with::<Scatter>(tiny());
+        let mut scatter = context.socket_with::<Scatter>(tiny()).unwrap();
         scatter.connect("inproc://gather").unwrap();
 
         let task = Task::new();
@@ -473,9 +474,9 @@ mod draft {
     #[test]
     fn a_channel_sends_and_receives() {
         let context = Context::new().unwrap();
-        let mut left = context.socket_with::<Channel>(tiny());
+        let mut left = context.socket_with::<Channel>(tiny()).unwrap();
         left.bind("inproc://channel").unwrap();
-        let mut right = context.socket_with::<Channel>(tiny());
+        let mut right = context.socket_with::<Channel>(tiny()).unwrap();
         right.connect("inproc://channel").unwrap();
 
         let task = Task::new();

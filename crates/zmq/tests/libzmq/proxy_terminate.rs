@@ -22,11 +22,11 @@ fn proxy_terminate() {
     let server = thread::spawn({
         let context = context.clone();
         move || {
-            let mut frontend = context.socket::<Sub>();
+            let mut frontend = context.socket::<Sub>().unwrap();
             frontend.subscribe("");
             let bound = frontend.bind(free_endpoint()).unwrap();
             // A PUSH that is never read
-            let mut backend = context.socket::<Push>();
+            let mut backend = context.socket::<Push>().unwrap();
             backend.bind(free_endpoint()).unwrap();
             endpoints.send(bound.to_string()).unwrap();
 
@@ -39,7 +39,7 @@ fn proxy_terminate() {
     let control = control.recv().unwrap();
 
     thread::sleep(Duration::from_millis(500));
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect(&endpoint).unwrap();
     settle();
     for _ in 0..3 {

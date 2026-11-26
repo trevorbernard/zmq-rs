@@ -9,7 +9,7 @@ use zmq_test_ports::free_endpoint;
 #[test]
 fn busy_poll() {
     let context = Context::new().unwrap();
-    let mut socket = context.socket::<Dealer>();
+    let mut socket = context.socket::<Dealer>().unwrap();
     socket.set_busy_poll(Some(Duration::from_micros(1)));
     socket.bind(free_endpoint()).unwrap();
 }

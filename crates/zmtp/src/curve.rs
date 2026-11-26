@@ -200,11 +200,11 @@ pub struct CurveCodec {
     peer_nonce: u64,
     /// A multipart message whose last frame has yet to arrive.
     partial: Option<Message>,
-    /// The size `partial` counts towards `max_message_size`, as the
+    /// The size `partial` counts towards `max_multipart_size`, as the
     /// decoder counts it: each boxed frame reaches the decoder alone, so
     /// only the codec sees a multipart message whole.
     partial_size: u64,
-    max_message_size: Option<u64>,
+    max_multipart_size: Option<u64>,
 }
 
 /// Why a frame could not be boxed or unboxed. The connection must close.
@@ -222,7 +222,7 @@ pub enum CurveError {
     /// We have sent 2^64 - 1 frames; RFC 26 forbids reusing a nonce.
     NonceExhausted,
     /// A multipart message larger than the limit set with
-    /// [`CurveCodec::set_max_message_size`].
+    /// [`CurveCodec::set_max_multipart_size`].
     MessageTooLarge,
 }
 
@@ -355,7 +355,7 @@ impl CurveClient {
             peer_nonce: nonce,
             partial: None,
             partial_size: 0,
-            max_message_size: None,
+            max_multipart_size: None,
         };
         Ok(CurveClientStep::Established(established, codec))
     }
@@ -543,7 +543,7 @@ impl PendingCurveAuthentication {
             peer_nonce: self.peer_nonce,
             partial: None,
             partial_size: 0,
-            max_message_size: None,
+            max_multipart_size: None,
         };
         Ok((established, codec))
     }
@@ -610,12 +610,12 @@ impl CurveCodec {
     }
 
     /// Fails a message once its frames total more than `max` octets,
-    /// counted as [`DecoderConfig::max_message_size`] counts them. The
+    /// counted as [`DecoderConfig::max_multipart_size`] counts them. The
     /// decoder only sees boxed frames one at a time.
     ///
-    /// [`DecoderConfig::max_message_size`]: crate::DecoderConfig::max_message_size
-    pub fn set_max_message_size(&mut self, max: Option<u64>) {
-        self.max_message_size = max;
+    /// [`DecoderConfig::max_multipart_size`]: crate::DecoderConfig::max_multipart_size
+    pub fn set_max_multipart_size(&mut self, max: Option<u64>) {
+        self.max_multipart_size = max;
     }
 
     /// Unboxes one item from the decoder. Returns a whole message once its
@@ -667,7 +667,7 @@ impl CurveCodec {
             .partial_size
             .saturating_add(counted_size(payload.len() as u64));
         if self
-            .max_message_size
+            .max_multipart_size
             .is_some_and(|max| self.partial_size > max)
         {
             return Err(CurveError::MessageTooLarge);
@@ -1036,7 +1036,7 @@ mod tests {
     #[test]
     fn a_multipart_message_over_the_limit_is_refused() {
         let (mut client, mut server) = established();
-        server.set_max_message_size(Some(10));
+        server.set_max_multipart_size(Some(10));
         let at_limit = Message::try_from(vec![
             Frame::from("12345"),
             Frame::from("1234"),

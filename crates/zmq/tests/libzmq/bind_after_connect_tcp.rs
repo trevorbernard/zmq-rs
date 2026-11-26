@@ -10,8 +10,8 @@ use crate::support::{FIVE, within};
 fn x() {
     let endpoint = free_endpoint();
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Dealer>();
-    let mut client = context.socket::<Dealer>();
+    let mut server = context.socket::<Dealer>().unwrap();
+    let mut client = context.socket::<Dealer>().unwrap();
     client.connect(&endpoint).unwrap();
     client.send("foobar").unwrap();
     client.send("baz").unwrap();

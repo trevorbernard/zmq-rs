@@ -70,14 +70,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut bstar = BinaryStar::new(&context, role, local, remote, &format!("tcp://*:{port}"))?;
 
     // Set up our clone server sockets
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind(format!("tcp://*:{}", port + 1))?;
-    let mut collector = context.socket::<Sub>();
+    let mut collector = context.socket::<Sub>()?;
     collector.subscribe("");
     collector.bind(format!("tcp://*:{}", port + 2))?;
 
     // Set up our own clone client interface to peer
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.subscribe("");
     subscriber.connect(format!("tcp://localhost:{}", peer + 1))?;
 
@@ -275,7 +275,7 @@ impl CloneServer {
     fn follow_peer(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         if self.kvmap.is_none() {
             let mut kvmap = HashMap::new();
-            let mut snapshot = self.context.socket::<Dealer>();
+            let mut snapshot = self.context.socket::<Dealer>()?;
             let endpoint = format!("tcp://localhost:{}", self.peer);
             snapshot.connect(&endpoint)?;
             log(&format!("I: asking for snapshot from: {endpoint}"));

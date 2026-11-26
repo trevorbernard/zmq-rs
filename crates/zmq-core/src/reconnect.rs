@@ -11,12 +11,13 @@ pub enum Reconnect {
     /// Give up: the connection's pipes close.
     Never,
     /// Wait `interval` plus a random fraction of it each time, like libzmq's
-    /// `ZMQ_RECONNECT_IVL` (default 100 ms).
+    /// `ZMQ_RECONNECT_IVL` (default 100 ms). An interval of zero is
+    /// [`Never`](Self::Never), as libzmq's 0 is.
     Fixed { interval: Duration },
-    /// Wait `initial`, then double up to `max`, each time plus a random
-    /// fraction of `initial`, like libzmq's `ZMQ_RECONNECT_IVL` with
-    /// `ZMQ_RECONNECT_IVL_MAX`. Resets once a connection is made, before
-    /// its handshake, as in libzmq.
+    /// Wait `initial`, then double up to `max`, with nothing random added,
+    /// like libzmq's `ZMQ_RECONNECT_IVL` with `ZMQ_RECONNECT_IVL_MAX`.
+    /// Resets once a connection is made, before its handshake, as in
+    /// libzmq. An `initial` of zero is [`Never`](Self::Never).
     Backoff { initial: Duration, max: Duration },
 }
 
@@ -32,8 +33,10 @@ impl Default for Reconnect {
 /// [`Reconnect`]: libzmq's `ZMQ_RECONNECT_STOP`. A session that gives up
 /// ends as one disconnected does, its pipes closing.
 ///
-/// libzmq's third condition, `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, needs
-/// no flag: a disconnected endpoint is never retried.
+/// libzmq's third condition, `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, has no
+/// flag here. A disconnected endpoint is never retried, as in libzmq once
+/// its socket is next called; with that flag libzmq also gives up on every
+/// other `ipc` endpoint that refuses.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ReconnectStop {
     pub(crate) connection_refused: bool,
@@ -80,6 +83,11 @@ impl Retry {
     pub(crate) fn next_delay(&mut self) -> Option<Duration> {
         match self.policy {
             Reconnect::Never => None,
+            // libzmq retries only if `ZMQ_RECONNECT_IVL` is above zero.
+            Reconnect::Fixed { interval }
+            | Reconnect::Backoff {
+                initial: interval, ..
+            } if interval.is_zero() => None,
             // libzmq: the base interval plus `random % interval`.
             Reconnect::Fixed { interval } => Some(interval.saturating_add(jitter(interval))),
             Reconnect::Backoff { initial, max } => {
@@ -88,9 +96,9 @@ impl Retry {
                     Some(current) => current.saturating_mul(2).min(max),
                 };
                 self.current = Some(next);
-                // libzmq bounds the jitter by the base interval, not the
-                // current one.
-                Some(next.saturating_add(jitter(initial)))
+                // libzmq adds jitter only to an interval that does not
+                // back off.
+                Some(next)
             }
         }
     }
@@ -130,6 +138,21 @@ mod tests {
     }
 
     #[test]
+    fn an_interval_of_zero_gives_up_at_once() {
+        for policy in [
+            Reconnect::Fixed {
+                interval: Duration::ZERO,
+            },
+            Reconnect::Backoff {
+                initial: Duration::ZERO,
+                max: MS(500),
+            },
+        ] {
+            assert_eq!(Retry::new(policy).next_delay(), None, "{policy:?}");
+        }
+    }
+
+    #[test]
     fn fixed_adds_up_to_one_interval_of_jitter() {
         let mut retry = Retry::new(Reconnect::Fixed { interval: MS(100) });
         let delays: Vec<Duration> = (0..200).map(|_| retry.next_delay().unwrap()).collect();
@@ -150,11 +173,8 @@ mod tests {
             max: MS(500),
         });
         let delays: Vec<Duration> = (0..5).map(|_| retry.next_delay().unwrap()).collect();
-        for (delay, base) in delays.iter().zip([100, 200, 400, 500, 500]) {
-            assert!((MS(base)..MS(base + 100)).contains(delay), "{delays:?}");
-        }
+        assert_eq!(delays, [100, 200, 400, 500, 500].map(MS));
         retry.reset();
-        let delay = retry.next_delay().unwrap();
-        assert!((MS(100)..MS(200)).contains(&delay), "{delay:?}");
+        assert_eq!(retry.next_delay(), Some(MS(100)));
     }
 }

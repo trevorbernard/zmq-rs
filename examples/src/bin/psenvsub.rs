@@ -6,7 +6,7 @@ use zmq::{Context, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.connect("tcp://localhost:5563")?;
     subscriber.subscribe("B");
 

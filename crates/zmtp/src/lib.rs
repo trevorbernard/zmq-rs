@@ -34,7 +34,7 @@ pub use codec::{
 };
 pub use command::{
     Command, CommandError, CommandName, ErrorReason, Group, InvalidGroup, InvalidName, Metadata,
-    Ping, PingContext, PropertyName, TooLong, Ttl,
+    Ping, PingContext, PropertyName, TooLong, Ttl, TtlTooLong,
 };
 pub use curve::{
     CurveClient, CurveClientStep, CurveCodec, CurveError, CurveServer, CurveServerStep,

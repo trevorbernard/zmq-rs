@@ -6,8 +6,10 @@ use std::thread;
 use std::time::Duration;
 
 use zmq::{Context, Frame, Message, Reconnect, Rep, Req, RequestError, SocketOptions};
-use zmq_interop::libzmq::{Kind, Socket};
-use zmq_test_ports::free_endpoint;
+use zmq_interop::libzmq::{self, Kind, Socket};
+use zmq_interop::{Peer, Security};
+use zmq_test_ports::{free_endpoint, free_port};
+use zmtp::SocketType;
 
 /// Runs `f` on another thread and fails the test if it takes longer than
 /// `limit`, so a lost wakeup fails instead of hanging the suite.
@@ -45,7 +47,7 @@ fn our_req_asks_a_libzmq_rep() {
     let rep = Socket::new(Kind::Rep);
     let addr = rep.bind_loopback();
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("question"));
     assert_eq!(rep.recv().unwrap(), [b"question".to_vec()]);
@@ -59,7 +61,7 @@ fn our_req_asks_a_libzmq_rep() {
 #[test]
 fn our_rep_answers_a_libzmq_req() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let addr = rep.bind(free_endpoint()).unwrap();
     let req = Socket::new(Kind::Req);
     req.connect(addr);
@@ -76,7 +78,7 @@ fn our_rep_answers_a_libzmq_req() {
 #[test]
 fn our_req_and_rep_talk_to_each_other() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let addr = rep.bind(free_endpoint()).unwrap();
     let server = spawn(move || {
         for _ in 0..3 {
@@ -85,7 +87,7 @@ fn our_req_and_rep_talk_to_each_other() {
             request.reply(text.to_uppercase()).unwrap();
         }
     });
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(&addr).unwrap();
     let answers = within(FIVE, move || {
         ["a", "b", "c"].map(|q| req.request(q).unwrap())
@@ -100,7 +102,7 @@ fn a_router_sees_the_req_envelope() {
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
     let options = SocketOptions::new().identity(zmq::Identity::new("asker").unwrap());
-    let mut req = context.socket_with::<Req>(options);
+    let mut req = context.socket_with::<Req>(options).unwrap();
     req.connect(format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("q"));
     assert_eq!(router.recv().unwrap(), [&b"asker"[..], b"", b"q"]);
@@ -113,7 +115,7 @@ fn rep_returns_the_whole_envelope_for_multi_hop_requests() {
     // A libzmq DEALER stands in for a broker that has already prepended
     // its client's address.
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let addr = rep.bind(free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.connect(addr);
@@ -133,7 +135,7 @@ fn rep_returns_the_whole_envelope_for_multi_hop_requests() {
 fn req_round_robins_across_reps() {
     let reps: Vec<Socket> = (0..2).map(|_| Socket::new(Kind::Rep)).collect();
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     for rep in &reps {
         req.connect(format!("tcp://{}", rep.bind_loopback()))
             .unwrap();
@@ -160,7 +162,7 @@ fn a_peer_closing_before_replying_fails_the_request() {
     let addr = rep.bind_loopback();
     let context = Context::new().unwrap();
     let options = SocketOptions::new().reconnect(Reconnect::Never);
-    let mut req = context.socket_with::<Req>(options);
+    let mut req = context.socket_with::<Req>(options).unwrap();
     req.connect(format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("anyone?"));
     rep.recv().unwrap();
@@ -176,7 +178,7 @@ fn correlated_requests_interoperate_with_libzmq_rep() {
     let rep = Socket::new(Kind::Rep);
     let addr = rep.bind_loopback();
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.set_correlation(true);
     req.connect(format!("tcp://{addr}")).unwrap();
     let answer = spawn(move || req.request("q"));
@@ -195,7 +197,7 @@ fn abandon_request(req: &mut zmq::Socket<Req>, body: &'static str) {
 /// A REP that answers `stale` to the first request, once told it was
 /// abandoned, and `fresh` to the second.
 fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Sender<()>, mpsc::Receiver<()>) {
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let addr = rep.bind(free_endpoint()).unwrap();
     let (abandoned, heard) = mpsc::channel();
     let done = spawn(move || {
@@ -211,7 +213,7 @@ fn answer_stale_then_fresh(context: &Context) -> (String, mpsc::Sender<()>, mpsc
 fn correlation_drops_the_reply_to_an_abandoned_request() {
     let context = Context::new().unwrap();
     let (endpoint, abandoned, done) = answer_stale_then_fresh(&context);
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.set_correlation(true);
     req.connect(&endpoint).unwrap();
     abandon_request(&mut req, "first");
@@ -227,7 +229,7 @@ fn without_correlation_an_abandoned_reply_can_be_taken() {
     // libzmq's ZMQ_REQ_RELAXED alone.
     let context = Context::new().unwrap();
     let (endpoint, abandoned, done) = answer_stale_then_fresh(&context);
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(&endpoint).unwrap();
     abandon_request(&mut req, "first");
     abandoned.send(()).unwrap();
@@ -239,7 +241,7 @@ fn without_correlation_an_abandoned_reply_can_be_taken() {
 #[test]
 fn try_recv_does_not_block() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     assert!(rep.try_recv().unwrap().is_none());
 }
 
@@ -248,7 +250,7 @@ fn a_timed_out_request_to_a_libzmq_rep_leaves_the_socket_usable() {
     let rep = Socket::new(Kind::Rep);
     let addr = rep.bind_loopback();
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(format!("tcp://{addr}")).unwrap();
     let first = req.request_timeout("first", Duration::from_millis(100));
     assert_eq!(first, Err(RequestError::TimedOut));
@@ -260,5 +262,72 @@ fn a_timed_out_request_to_a_libzmq_rep_leaves_the_socket_usable() {
     assert_eq!(
         answer.recv_timeout(FIVE).unwrap(),
         Ok(Message::from("fresh"))
+    );
+}
+
+/// A hand-written ROUTER that answers the request it is sent with one
+/// frame, where a reply starts with an empty delimiter.
+fn reply_without_a_delimiter(listener: &std::net::TcpListener) -> Peer {
+    let mut router = Peer::accept(
+        listener,
+        SocketType::Router,
+        zmtp::Identity::default(),
+        Security::Null,
+    )
+    .unwrap();
+    router.recv_message().unwrap();
+    router.send(&zmtp::Message::from("no delimiter")).unwrap();
+    router
+}
+
+#[test]
+fn libzmq_drops_a_connection_that_replies_without_a_delimiter() {
+    let listener = std::net::TcpListener::bind(free_port()).unwrap();
+    let req = Socket::new(Kind::Req);
+    req.set_reconnect(10, 0);
+    let monitor = req.monitor();
+    req.connect(listener.local_addr().unwrap());
+    req.send(&[b"request"]).unwrap();
+    let _router = reply_without_a_delimiter(&listener);
+    let events: Vec<u16> = monitor
+        .during(Duration::from_millis(500))
+        .into_iter()
+        .map(|(event, _)| event)
+        .collect();
+    assert!(events.contains(&libzmq::EVENT_DISCONNECTED), "{events:?}");
+    assert!(
+        !events.contains(&libzmq::EVENT_CONNECT_RETRIED),
+        "a protocol error is not retried: {events:?}"
+    );
+}
+
+#[test]
+fn we_drop_a_connection_that_replies_without_a_delimiter() {
+    let listener = std::net::TcpListener::bind(free_port()).unwrap();
+    let context = Context::new().unwrap();
+    let mut req = context
+        .socket_with::<Req>(SocketOptions::new().reconnect(Reconnect::Fixed {
+            interval: Duration::from_millis(10),
+        }))
+        .unwrap();
+    let mut monitor = req.monitor();
+    req.connect(format!("tcp://{}", listener.local_addr().unwrap()))
+        .unwrap();
+    let reply = spawn(move || req.request("request"));
+    let _router = reply_without_a_delimiter(&listener);
+    assert!(matches!(
+        reply.recv_timeout(Duration::from_secs(5)),
+        Ok(Err(RequestError::PeerGone))
+    ));
+    let mut events = Vec::new();
+    while let Ok(Some(event)) = monitor.recv_timeout(Duration::from_millis(300)) {
+        events.push(event.kind);
+    }
+    assert!(events.contains(&zmq::EventKind::Disconnected), "{events:?}");
+    assert!(
+        !events
+            .iter()
+            .any(|kind| matches!(kind, zmq::EventKind::ConnectRetried { .. })),
+        "{events:?}"
     );
 }

@@ -147,17 +147,26 @@ fn tcp_socket(addr: SocketAddr, tuning: &TcpTuning) -> io::Result<socket2::Socke
     Ok(socket)
 }
 
-/// Listens on `addr`, as mio's listener does, tuned first.
-pub(crate) fn listen_tcp(addr: SocketAddr, tuning: &TcpTuning) -> io::Result<TcpListener> {
-    if tuning.is_default() {
-        return TcpListener::bind(addr);
-    }
+/// Listens on `addr`, as mio's listener does, tuned first, with room for
+/// `backlog` connections not yet accepted (`ZMQ_BACKLOG`).
+pub(crate) fn listen_tcp(
+    addr: SocketAddr,
+    tuning: &TcpTuning,
+    backlog: u32,
+) -> io::Result<TcpListener> {
     let socket = tcp_socket(addr, tuning)?;
     #[cfg(unix)]
     socket.set_reuse_address(true)?;
     socket.bind(&addr.into())?;
-    socket.listen(1024)?;
+    socket.listen(backlog.try_into().unwrap_or(i32::MAX))?;
     Ok(TcpListener::from_std(socket.into()))
+}
+
+/// Gives a listener that is already listening another backlog, as an `ipc`
+/// one is by the time it is bound.
+#[cfg(unix)]
+pub(crate) fn set_backlog(listener: &impl std::os::fd::AsFd, backlog: u32) -> io::Result<()> {
+    socket2::SockRef::from(listener).listen(backlog.try_into().unwrap_or(i32::MAX))
 }
 
 /// Starts a non-blocking connection to `addr`, tuned first, from `source`
@@ -708,7 +717,7 @@ mod tests {
 
     #[test]
     fn a_connection_and_its_listener_carry_the_type_of_service() {
-        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &serviced(0x28)).unwrap();
+        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &serviced(0x28), 100).unwrap();
         assert_eq!(socket2::SockRef::from(&listener).tos_v4().unwrap(), 0x28);
 
         let address = Address::Tcp(listener.local_addr().unwrap());
@@ -734,7 +743,7 @@ mod tests {
 
     #[test]
     fn an_ipv6_connection_carries_the_traffic_class() {
-        let Ok(listener) = listen_tcp("[::1]:0".parse().unwrap(), &serviced(0x28)) else {
+        let Ok(listener) = listen_tcp("[::1]:0".parse().unwrap(), &serviced(0x28), 100) else {
             return; // no IPv6 here
         };
         assert_eq!(socket2::SockRef::from(&listener).tclass_v6().unwrap(), 0x28);
@@ -747,7 +756,7 @@ mod tests {
             bind_to_device: Some("lo".to_owned()),
             ..TcpTuning::default()
         };
-        let listener = match listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning) {
+        let listener = match listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning, 100) {
             Ok(listener) => listener,
             // Before Linux 5.7 this takes CAP_NET_RAW.
             Err(err) if err.kind() == io::ErrorKind::PermissionDenied => return,
@@ -776,7 +785,7 @@ mod tests {
             ..TcpTuning::default()
         };
         let addr = "127.0.0.1:0".parse().unwrap();
-        assert!(listen_tcp(addr, &tuning).is_err());
+        assert!(listen_tcp(addr, &tuning, 100).is_err());
         assert!(Stream::connect(&Address::Tcp(addr), &tuning).is_err());
     }
 
@@ -789,7 +798,7 @@ mod tests {
             busy_poll: Some(Duration::from_micros(50)),
             ..TcpTuning::default()
         };
-        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning).unwrap();
+        let listener = listen_tcp("127.0.0.1:0".parse().unwrap(), &tuning, 100).unwrap();
         let set = socket2::SockRef::from(&listener).busy_poll().unwrap();
         assert!(set == 50 || set == 0, "{set}");
     }

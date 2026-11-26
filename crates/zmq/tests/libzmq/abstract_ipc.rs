@@ -15,11 +15,11 @@ fn roundtrip() {
     let name = format!("tmp-tester-{}", process::id());
     let endpoint = format!("ipc://@{name}");
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Dealer>();
+    let mut server = context.socket::<Dealer>().unwrap();
     let bound = server.bind(&endpoint).unwrap();
     assert_eq!(bound, Endpoint::IpcAbstract(name));
     assert_eq!(bound.to_string(), endpoint);
-    let mut client = context.socket::<Dealer>();
+    let mut client = context.socket::<Dealer>().unwrap();
     client.connect(&endpoint).unwrap();
     bounce_dealer(&mut server, &mut client);
 }
@@ -27,7 +27,7 @@ fn roundtrip() {
 #[test]
 fn empty_abstract_name() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Dealer>();
+    let mut server = context.socket::<Dealer>().unwrap();
     assert!(matches!(
         server.bind("ipc://@"),
         Err(Error::InvalidEndpoint(_))

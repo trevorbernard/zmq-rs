@@ -23,6 +23,12 @@ impl Subscription {
         let (frame, []) = message.split_first() else {
             return None;
         };
+        Self::from_frame(frame)
+    }
+
+    /// Reads one frame in the message form: `0x01` or `0x00`, then the
+    /// topic.
+    pub fn from_frame(frame: &Frame) -> Option<Self> {
         let (&kind, topic) = frame.split_first()?;
         let topic = Frame::copy_from_slice(topic);
         match kind {

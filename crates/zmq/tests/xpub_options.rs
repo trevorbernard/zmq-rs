@@ -46,7 +46,7 @@ fn events(xpub: &mut zmq::Socket<XPub>, count: usize) -> Vec<XPubEvent> {
 }
 
 fn subscriber(context: &Context, endpoint: &str, topic: &str) -> zmq::Socket<Sub> {
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe(topic);
     sub.connect(endpoint).unwrap();
     sub
@@ -55,7 +55,7 @@ fn subscriber(context: &Context, endpoint: &str, topic: &str) -> zmq::Socket<Sub
 #[test]
 fn an_xpub_welcomes_each_new_subscriber() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_welcome(Some(Message::from("WELCOME")));
     xpub.bind("inproc://welcome").unwrap();
     let mut sub = subscriber(&context, "inproc://welcome", "WELCOME");
@@ -77,7 +77,7 @@ fn an_xpub_welcomes_each_new_subscriber() {
 #[test]
 fn by_default_an_xpub_reports_first_subscriptions_and_last_cancels() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind("inproc://quiet").unwrap();
     let mut first = subscriber(&context, "inproc://quiet", "a");
     let mut second = subscriber(&context, "inproc://quiet", "a");
@@ -90,7 +90,7 @@ fn by_default_an_xpub_reports_first_subscriptions_and_last_cancels() {
 #[test]
 fn a_verbose_xpub_reports_every_subscription() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_verbosity(Verbosity::Subscriptions);
     xpub.bind("inproc://verbose").unwrap();
     let mut first = subscriber(&context, "inproc://verbose", "a");
@@ -106,7 +106,7 @@ fn a_verbose_xpub_reports_every_subscription() {
 #[test]
 fn a_verboser_xpub_reports_every_cancel_too() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_verbosity(Verbosity::Everything);
     xpub.bind("inproc://verboser").unwrap();
     let mut first = subscriber(&context, "inproc://verboser", "a");
@@ -121,7 +121,7 @@ fn a_verboser_xpub_reports_every_cancel_too() {
 #[test]
 fn a_verboser_xpub_reports_a_departing_peers_shared_topics() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_verbosity(Verbosity::Everything);
     xpub.bind("inproc://departing").unwrap();
     let _stays = subscriber(&context, "inproc://departing", "a");
@@ -134,10 +134,10 @@ fn a_verboser_xpub_reports_a_departing_peers_shared_topics() {
 #[test]
 fn inverted_matching_publishes_what_does_not_match() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.set_invert_matching(true);
     publisher.bind("inproc://inverted").unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.set_invert_matching(true);
     sub.subscribe("a");
     sub.connect("inproc://inverted").unwrap();
@@ -156,7 +156,7 @@ fn inverted_matching_publishes_what_does_not_match() {
 #[test]
 fn an_inverted_xpub_skips_matching_subscribers() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_invert_matching(true);
     xpub.bind("inproc://inverted-x").unwrap();
     let _sub = subscriber(&context, "inproc://inverted-x", "a");
@@ -175,11 +175,15 @@ fn publisher_and_slow_subscribers(
     context: &Context,
     name: &str,
 ) -> (zmq::Socket<Pub>, zmq::Socket<Sub>, zmq::Socket<Sub>) {
-    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(one()));
+    let mut publisher = context
+        .socket_with::<Pub>(SocketOptions::new().send_hwm(one()))
+        .unwrap();
     let endpoint = format!("inproc://{name}");
     publisher.bind(&endpoint).unwrap();
     let slow = |topic: &str| {
-        let mut sub = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one()));
+        let mut sub = context
+            .socket_with::<Sub>(SocketOptions::new().recv_hwm(one()))
+            .unwrap();
         sub.subscribe(topic);
         sub.connect(&endpoint).unwrap();
         sub
@@ -227,9 +231,13 @@ fn send_all_waits_for_every_matching_subscriber() {
 #[test]
 fn an_xpub_can_send_without_dropping_too() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket_with::<XPub>(SocketOptions::new().send_hwm(one()));
+    let mut xpub = context
+        .socket_with::<XPub>(SocketOptions::new().send_hwm(one()))
+        .unwrap();
     xpub.bind("inproc://xnodrop").unwrap();
-    let mut sub = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one()));
+    let mut sub = context
+        .socket_with::<Sub>(SocketOptions::new().recv_hwm(one()))
+        .unwrap();
     sub.subscribe("a");
     sub.connect("inproc://xnodrop").unwrap();
     assert_eq!(events(&mut xpub, 1), [subscribed("a")]);

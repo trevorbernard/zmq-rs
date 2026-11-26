@@ -19,6 +19,7 @@ draft = ["zmq-core/draft"]
 bytes = ["zmtp/bytes"]
 
 [dependencies]
+rustix.workspace = true
 zmq-core.workspace = true
 zmq-pipe.workspace = true
 zmtp.workspace = true

@@ -20,8 +20,9 @@ const PPP_HEARTBEAT: &[u8] = b"\x02"; // Signals worker heartbeat
 /// A new socket connected to the Paranoid Pirate queue, which it has told
 /// it is ready.
 fn worker_socket(context: &Context) -> Result<Socket<Dealer>, zmq::Error> {
-    let mut worker =
-        context.socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
+    let mut worker = context
+        .socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)))
+        .unwrap();
     worker.connect("tcp://localhost:5556")?;
 
     // Tell queue we're ready for work

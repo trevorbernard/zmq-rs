@@ -25,9 +25,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn peers_address_each_other_by_id() {
     let context = Context::new().unwrap();
-    let mut alice = context.socket::<Peer>();
+    let mut alice = context.socket::<Peer>().unwrap();
     let bound = alice.bind(free_endpoint()).unwrap();
-    let mut bob = context.socket::<Peer>();
+    let mut bob = context.socket::<Peer>().unwrap();
     let to_alice = bob.connect_peer(&bound).unwrap();
     bob.send(to_alice, "hello alice").unwrap();
 
@@ -46,11 +46,11 @@ fn peers_address_each_other_by_id() {
 #[test]
 fn every_connection_gets_its_own_id() {
     let context = Context::new().unwrap();
-    let mut hub = context.socket::<Peer>();
+    let mut hub = context.socket::<Peer>().unwrap();
     hub.bind("inproc://hub-a").unwrap();
-    let mut other = context.socket::<Peer>();
+    let mut other = context.socket::<Peer>().unwrap();
     other.bind("inproc://hub-b").unwrap();
-    let mut caller = context.socket::<Peer>();
+    let mut caller = context.socket::<Peer>().unwrap();
     let a = caller.connect_peer("inproc://hub-a").unwrap();
     let b = caller.connect_peer("inproc://hub-b").unwrap();
     assert_ne!(a, b);
@@ -65,7 +65,7 @@ fn every_connection_gets_its_own_id() {
 #[test]
 fn sending_to_an_unknown_peer_fails() {
     let context = Context::new().unwrap();
-    let mut peer = context.socket::<Peer>();
+    let mut peer = context.socket::<Peer>().unwrap();
     let nobody = PeerId::new(7).unwrap();
     assert_eq!(
         peer.send(nobody, "hi"),
@@ -80,9 +80,9 @@ fn sending_to_an_unknown_peer_fails() {
 #[test]
 fn a_disconnected_peer_is_forgotten() {
     let context = Context::new().unwrap();
-    let mut far = context.socket::<Peer>();
+    let mut far = context.socket::<Peer>().unwrap();
     far.bind("inproc://far").unwrap();
-    let mut near = context.socket::<Peer>();
+    let mut near = context.socket::<Peer>().unwrap();
     let id = near.connect_peer("inproc://far").unwrap();
     assert!(near.disconnect_peer(id));
     assert!(!near.disconnect_peer(id));
@@ -95,7 +95,7 @@ fn a_disconnected_peer_is_forgotten() {
 #[test]
 fn a_bad_endpoint_is_an_error() {
     let context = Context::new().unwrap();
-    let mut peer = context.socket::<Peer>();
+    let mut peer = context.socket::<Peer>().unwrap();
     assert!(matches!(
         peer.connect_peer("tcp://nonsense"),
         Err(zmq::Error::InvalidEndpoint(_))
@@ -105,9 +105,9 @@ fn a_bad_endpoint_is_an_error() {
 #[test]
 fn a_channel_talks_both_ways() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Channel>();
+    let mut left = context.socket::<Channel>().unwrap();
     let bound = left.bind(free_endpoint()).unwrap();
-    let mut right = context.socket::<Channel>();
+    let mut right = context.socket::<Channel>().unwrap();
     right.connect(&bound).unwrap();
     right.send("ping").unwrap();
     let (heard, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
@@ -122,11 +122,11 @@ fn a_channel_talks_both_ways() {
 #[test]
 fn a_channel_has_one_peer() {
     let context = Context::new().unwrap();
-    let mut hub = context.socket::<Channel>();
+    let mut hub = context.socket::<Channel>().unwrap();
     hub.bind("inproc://one-peer").unwrap();
-    let mut first = context.socket::<Channel>();
+    let mut first = context.socket::<Channel>().unwrap();
     first.connect("inproc://one-peer").unwrap();
-    let mut second = context.socket::<Channel>();
+    let mut second = context.socket::<Channel>().unwrap();
     second.connect("inproc://one-peer").unwrap();
     hub.send("for the first").unwrap();
     assert_eq!(
@@ -140,7 +140,7 @@ fn a_channel_has_one_peer() {
 #[test]
 fn a_channel_without_a_peer_hands_the_frame_back() {
     let context = Context::new().unwrap();
-    let mut channel = context.socket::<Channel>();
+    let mut channel = context.socket::<Channel>().unwrap();
     assert_eq!(
         channel.try_send("alone"),
         Err(zmq::TrySendError::Full(Frame::from("alone")))

@@ -7,6 +7,7 @@
 
 use std::collections::{BTreeMap, HashMap, VecDeque, btree_map};
 use std::hash::{BuildHasher, BuildHasherDefault, Hasher, RandomState};
+use std::iter;
 use std::mem;
 use std::task::{Context as TaskContext, Poll};
 
@@ -224,7 +225,9 @@ pub enum XPubEvent {
     Subscribe(Frame),
     /// The last subscription to this topic is gone.
     Cancel(Frame),
-    /// Anything else a peer sent, such as an XSUB's own messages.
+    /// Anything else a peer sent, such as an XSUB's own messages. Where a
+    /// message of several frames holds subscriptions, the frames between
+    /// them.
     Message(Message),
 }
 
@@ -260,6 +263,7 @@ pub struct Publisher {
     manual: bool,
     /// Whether messages go to the peers they do not match instead.
     invert: bool,
+    only_first_subscribe: bool,
     /// Reads only peers that sent something, so that a publish does not
     /// look at every peer.
     upstream: FairQueue,
@@ -303,6 +307,13 @@ impl Publisher {
     /// instead (libzmq's `ZMQ_INVERT_MATCHING`).
     pub fn set_invert_matching(&mut self, on: bool) {
         self.invert = on;
+    }
+
+    /// Whether the later frames of a message a peer sent are read as
+    /// subscriptions only when its first is one (libzmq's
+    /// `ZMQ_ONLY_FIRST_SUBSCRIBE`). Otherwise every frame is read.
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        self.only_first_subscribe = on;
     }
 
     /// The next event, or `Pending` with `cx` woken once a peer sends more.
@@ -385,6 +396,7 @@ impl Publisher {
             events,
             verbosity,
             manual,
+            only_first_subscribe,
             upstream,
             cursor,
             ..
@@ -394,6 +406,7 @@ impl Publisher {
             events,
             verbosity: *verbosity,
             manual: *manual,
+            only_first: *only_first_subscribe,
             from: None,
         };
         for peer in cursor.added_since(peers) {
@@ -407,12 +420,7 @@ impl Publisher {
                 }
                 return;
             };
-            let entry = subscribers.entry(key).or_default();
-            match Subscription::from_message(&message) {
-                Some(Subscription::Subscribe(topic)) => changes.subscribe(entry, topic),
-                Some(Subscription::Cancel(topic)) => changes.cancel(entry, topic),
-                None => changes.message(message),
-            }
+            changes.read(subscribers.entry(key).or_default(), message);
         };
         match cx {
             Some(cx) => upstream.poll_drain(peers, cx, read),
@@ -601,11 +609,79 @@ struct Changes<'a> {
     events: &'a mut Option<VecDeque<(PeerKey, XPubEvent)>>,
     verbosity: Verbosity,
     manual: bool,
+    only_first: bool,
     /// The peer being read.
     from: Option<PeerKey>,
 }
 
+/// Which frames of `message` are read as subscriptions, as libzmq's XSUB
+/// reads what it sends and its XPUB what it receives: each frame that
+/// starts with `0x01` or `0x00`, or, with `only_first`, none after a first
+/// frame that is not one.
+fn subscriptions_in(
+    message: &Message,
+    only_first: bool,
+) -> impl Iterator<Item = Option<Subscription>> + '_ {
+    let (first, rest) = message.split_first();
+    let first = Subscription::from_frame(first);
+    let read_rest = !only_first || first.is_some();
+    iter::once(first).chain(
+        rest.iter()
+            .map(move |frame| Subscription::from_frame(frame).filter(|_| read_rest)),
+    )
+}
+
 impl Changes<'_> {
+    /// Takes in what a peer sent. The frames that are subscriptions are
+    /// applied; those between them are messages, each one ended by a
+    /// subscription that is reported, as in libzmq, where the report
+    /// arrives as that message's last frame.
+    fn read(&mut self, peer: &mut PeerTopics, message: Message) {
+        if message.len().get() == 1 {
+            match Subscription::from_message(&message) {
+                Some(Subscription::Subscribe(topic)) => self.subscribe(peer, topic),
+                Some(Subscription::Cancel(topic)) => self.cancel(peer, topic),
+                None => self.message(message),
+            }
+            return;
+        }
+        let subscriptions: Vec<_> = subscriptions_in(&message, self.only_first).collect();
+        if subscriptions.iter().all(Option::is_none) {
+            self.message(message);
+            return;
+        }
+        let metadata = message.metadata().cloned();
+        let mut pending = Vec::new();
+        let flush = |changes: &mut Self, pending: &mut Vec<Frame>, at: usize| {
+            let Ok(mut message) = Message::try_from(mem::take(pending)) else {
+                return;
+            };
+            message.set_metadata(metadata.clone());
+            let from = changes.key();
+            if let Some(events) = changes.events {
+                events.insert(at, (from, XPubEvent::Message(message)));
+            }
+        };
+        for (frame, subscription) in message.into_iter().zip(subscriptions) {
+            let reported = self.reported();
+            match subscription {
+                Some(Subscription::Subscribe(topic)) => self.subscribe(peer, topic),
+                Some(Subscription::Cancel(topic)) => self.cancel(peer, topic),
+                None => pending.push(frame),
+            }
+            if self.reported() > reported {
+                flush(self, &mut pending, reported);
+            }
+        }
+        let end = self.reported();
+        flush(self, &mut pending, end);
+    }
+
+    /// How many events are waiting.
+    fn reported(&self) -> usize {
+        self.events.as_ref().map_or(0, VecDeque::len)
+    }
+
     fn subscribe(&mut self, peer: &mut PeerTopics, topic: Frame) {
         if self.manual {
             if !peer.requested.contains(&topic) {
@@ -630,6 +706,9 @@ impl Changes<'_> {
             return;
         }
         if !peer.topics.remove(&topic) {
+            // Reported, as libzmq does when its trie has no such topic for
+            // the peer, whether or not another peer holds it.
+            self.event(XPubEvent::Cancel(topic));
             return;
         }
         if leave(self.index, &topic, self.key()) || self.verbosity == Verbosity::Everything {
@@ -685,6 +764,7 @@ pub struct Subscriber {
     /// Whether every unsubscription is sent upstream, not only a topic's
     /// last.
     verbose_unsubscribe: bool,
+    only_first_subscribe: bool,
     recv: FairQueue,
     /// The peers that have been sent the topics.
     greeted: PeerCursor,
@@ -718,20 +798,64 @@ impl Subscriber {
         self.verbose_unsubscribe = on;
     }
 
-    /// Sends `message` to every peer, as XSUB does. A subscription in the
-    /// message form subscribes or unsubscribes instead, as in libzmq, so
-    /// the topics stay counted.
+    /// Whether the later frames of a message sent upstream are read as
+    /// subscriptions only when its first is one (libzmq's
+    /// `ZMQ_ONLY_FIRST_SUBSCRIBE`). Otherwise every frame is read.
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        self.only_first_subscribe = on;
+    }
+
+    /// Sends `message` to every peer, as XSUB does. A frame that is a
+    /// subscription in the message form subscribes or unsubscribes too, as
+    /// in libzmq, so the topics stay counted; a cancel the publishers are
+    /// not to hear of is left out of what is sent.
     pub fn send_upstream(&mut self, peers: &mut PeerList, mut message: Message) {
         message.set_metadata(None);
         match Subscription::from_message(&message) {
-            Some(Subscription::Subscribe(topic)) => self.subscribe(peers, &topic),
+            Some(Subscription::Subscribe(topic)) => return self.subscribe(peers, &topic),
             Some(Subscription::Cancel(topic)) => {
                 self.unsubscribe(peers, &topic);
+                return;
             }
-            None => {
-                self.greet(peers);
-                peers.send_to_all(&message);
+            None => {}
+        }
+        self.greet(peers);
+        if message.len().get() == 1 {
+            peers.send_to_all(&message);
+            return;
+        }
+        let subscriptions: Vec<_> = subscriptions_in(&message, self.only_first_subscribe).collect();
+        if subscriptions.iter().all(Option::is_none) {
+            peers.send_to_all(&message);
+            return;
+        }
+        let mut subscribes = false;
+        let mut sent = Vec::new();
+        for (frame, subscription) in message.into_iter().zip(subscriptions) {
+            match subscription {
+                Some(Subscription::Subscribe(topic)) => {
+                    self.topics.add(&topic);
+                    subscribes = true;
+                }
+                Some(Subscription::Cancel(topic)) => {
+                    let last = self.topics.contains(&topic) && self.topics.remove(&topic);
+                    if !last && !self.verbose_unsubscribe {
+                        continue;
+                    }
+                    subscribes = true;
+                }
+                None => {}
             }
+            sent.push(frame);
+        }
+        let Ok(message) = Message::try_from(sent) else {
+            return;
+        };
+        // What holds a subscription is never dropped, as one alone is not.
+        if subscribes {
+            peers.broadcast(&message);
+        } else {
+            peers.send_to_all(&message);
         }
     }
 
@@ -986,12 +1110,12 @@ mod tests {
     }
 
     #[test]
-    fn xpub_ignores_cancels_for_topics_never_subscribed() {
+    fn xpub_reports_cancels_for_topics_never_subscribed() {
         let (a, mut sa) = connection(10);
         let mut peers = list(vec![a]);
         let mut publisher = Publisher::with_events();
         sa.to_socket.try_send(cancel("x")).unwrap();
-        assert_eq!(events(&mut publisher, &mut peers), []);
+        assert_eq!(events(&mut publisher, &mut peers), [cancelled("x")]);
     }
 
     #[test]
@@ -1002,7 +1126,11 @@ mod tests {
         let mut publisher = Publisher::with_events();
         sa.to_socket.try_send(subscribe("x")).unwrap();
         sb.to_socket.try_send(cancel("x")).unwrap();
-        assert_eq!(events(&mut publisher, &mut peers), [subscribed("x")]);
+        // Reported, as libzmq reports it, but the subscription stands.
+        assert_eq!(
+            events(&mut publisher, &mut peers),
+            [subscribed("x"), cancelled("x")]
+        );
         assert_eq!(publisher.send(&mut peers, msg("x")), 1);
         assert_eq!(drain(&mut sa), [msg("x")]);
     }
@@ -1162,6 +1290,67 @@ mod tests {
         let expected = [msg("hello"), subscribe("x"), subscribe("x")];
         assert_eq!(drain(&mut sa), expected);
         assert_eq!(drain(&mut sb), expected);
+    }
+
+    fn frames<const N: usize>(frames: [&'static [u8]; N]) -> Message {
+        Message::from(frames)
+    }
+
+    #[test]
+    fn xsub_reads_a_subscription_from_any_frame_it_sends() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut subscriber = Subscriber::default();
+        subscriber.send_upstream(
+            &mut peers,
+            frames([b"\x01x", b"hello", b"\x00never", b"\x01y", b"\x00x"]),
+        );
+        assert!(!subscriber.topics().contains(b"x"));
+        assert!(subscriber.topics().contains(b"y"));
+        // The cancel of a topic never held is left out.
+        assert_eq!(
+            drain(&mut sa),
+            [frames([b"\x01x", b"hello", b"\x01y", b"\x00x"])]
+        );
+        // All that is left of a message may be nothing.
+        subscriber.send_upstream(&mut peers, frames([b"\x00never", b"\x00never"]));
+        assert!(drain(&mut sa).is_empty());
+    }
+
+    #[test]
+    fn xsub_reading_only_first_subscriptions_reads_the_rest_after_one() {
+        let (a, mut sa) = connection(10);
+        let mut peers = list(vec![a]);
+        let mut subscriber = Subscriber::default();
+        subscriber.set_only_first_subscribe(true);
+        subscriber.send_upstream(&mut peers, frames([b"hello", b"\x01x", b"\x00never"]));
+        assert!(!subscriber.topics().contains(b"x"));
+        subscriber.send_upstream(&mut peers, frames([b"\x01y", b"hello", b"\x01z"]));
+        assert!(subscriber.topics().contains(b"y"));
+        assert!(subscriber.topics().contains(b"z"));
+        assert_eq!(
+            drain(&mut sa),
+            [
+                frames([b"hello", b"\x01x", b"\x00never"]),
+                frames([b"\x01y", b"hello", b"\x01z"])
+            ]
+        );
+    }
+
+    /// A message that holds a subscription is sent past the HWM, as a
+    /// subscription alone is; one that holds none is not.
+    #[test]
+    fn xsub_never_drops_a_message_that_subscribes() {
+        let (a, mut sa) = connection(1);
+        let mut peers = list(vec![a]);
+        let mut subscriber = Subscriber::default();
+        subscriber.send_upstream(&mut peers, msg("fills the queue"));
+        subscriber.send_upstream(&mut peers, frames([b"dropped", b"too"]));
+        subscriber.send_upstream(&mut peers, frames([b"\x01x", b"kept"]));
+        assert_eq!(
+            drain(&mut sa),
+            [msg("fills the queue"), frames([b"\x01x", b"kept"])]
+        );
     }
 
     #[test]

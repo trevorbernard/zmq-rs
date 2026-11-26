@@ -15,6 +15,7 @@ use zmq_core::{
 use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
+use crate::events::Signal;
 use crate::polling::{PollItem, PollReadable, PollWritable};
 use crate::{Endpoint, Error, RoutingId, SocketOptions, ToEndpoint, endpoint, wait};
 
@@ -138,7 +139,7 @@ impl Routing for Subscriber {
 ///
 /// ```compile_fail
 /// # let context = zmq::Context::new().unwrap();
-/// let mut req = context.socket::<zmq::Req>();
+/// let mut req = context.socket::<zmq::Req>().unwrap();
 /// zmq::poll([req.readable()]);
 /// ```
 pub trait Receives: SocketType + Sized {
@@ -155,7 +156,7 @@ pub trait Receives: SocketType + Sized {
 ///
 /// ```compile_fail
 /// # let context = zmq::Context::new().unwrap();
-/// let mut publisher = context.socket::<zmq::Pub>();
+/// let mut publisher = context.socket::<zmq::Pub>().unwrap();
 /// zmq::poll([publisher.writable()]);
 /// ```
 pub trait WaitsForRoom: SocketType + Sized {
@@ -204,6 +205,30 @@ impl<T: SocketType> Socket<T> {
     }
 }
 
+impl<T: SocketType> Socket<T> {
+    /// Polls `poll` for a call that does not wait. With a file descriptor,
+    /// what a pending poll waits for makes the descriptor readable, as a
+    /// shutdown does.
+    fn poll_once<R>(
+        &mut self,
+        mut poll: impl FnMut(&mut Self, &mut TaskContext<'_>) -> Poll<R>,
+    ) -> Poll<Result<R, Terminated>> {
+        self.alive()?;
+        let Some(signal) = self.signal.clone() else {
+            return poll(self, &mut noop()).map(Ok);
+        };
+        let mut cx = TaskContext::from_waker(&signal.waker);
+        if let Poll::Ready(output) = poll(self, &mut cx) {
+            return Poll::Ready(Ok(output));
+        }
+        // The socket has been found not ready, so the descriptor is
+        // emptied: only what follows is news. A wake since the poll is
+        // emptied with it, hence the second poll.
+        signal.drain();
+        self.poll_alive(&mut cx, poll)
+    }
+}
+
 impl<T: Receives> Socket<T> {
     /// What a poll for readability received, or else the next.
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<T::Received> {
@@ -214,8 +239,7 @@ impl<T: Receives> Socket<T> {
     }
 
     pub(crate) fn try_recv_next(&mut self) -> Result<Option<T::Received>, Terminated> {
-        self.alive()?;
-        Ok(ready(self.poll_recv(&mut noop())))
+        ready(self.poll_once(|socket, cx| socket.poll_recv(cx))).transpose()
     }
 
     pub(crate) fn recv_next(&mut self) -> Result<T::Received, Terminated> {
@@ -250,12 +274,9 @@ impl<T: WaitsForRoom> Socket<T> {
         &mut self,
         message: Message,
     ) -> Result<(), TrySendError<Message>> {
-        if self.peers.is_terminated() {
-            return Err(TrySendError::Terminated(message));
-        }
         let mut slot = Some(message);
-        let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), |message| Err(TrySendError::Full(message)))
+        let sent = ready(self.poll_once(|socket, cx| socket.poll_send(&mut slot, cx)));
+        unsent(sent, &mut slot)
     }
 
     pub(crate) fn send_message(&mut self, message: Message) -> Result<(), Terminated> {
@@ -466,9 +487,9 @@ impl<T: Receives + WaitsForRoom> Socket<T> {
     /// # use zmq::{Context, Dealer};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
     /// let context = Context::new()?;
-    /// let mut a = context.socket::<Dealer>();
+    /// let mut a = context.socket::<Dealer>()?;
     /// a.bind("inproc://both")?;
-    /// let mut b = context.socket::<Dealer>();
+    /// let mut b = context.socket::<Dealer>()?;
     /// b.connect("inproc://both")?;
     /// // Nothing to receive yet, but room to send.
     /// let (readable, writable) = b.readable_and_writable();
@@ -533,7 +554,7 @@ pub enum XPub {}
 ///
 /// ```compile_fail,E0599
 /// # let context = zmq::Context::new().unwrap();
-/// let mut xsub = context.socket::<zmq::XSub>();
+/// let mut xsub = context.socket::<zmq::XSub>().unwrap();
 /// xsub.set_invert_matching(true);
 /// ```
 #[derive(Debug)]
@@ -723,17 +744,9 @@ pub struct Socket<T: SocketType> {
     /// What a poll for readability received, which the next receive
     /// returns.
     pub(crate) pending: Option<T::Received>,
+    /// Its file descriptor, once [`fd`](Self::fd) has made one.
+    pub(crate) signal: Option<Signal>,
     _type: PhantomData<T>,
-}
-
-#[cfg(feature = "draft")]
-fn is_peer(kind: zmtp::SocketType) -> bool {
-    kind == zmtp::SocketType::Peer
-}
-
-#[cfg(not(feature = "draft"))]
-fn is_peer(_: zmtp::SocketType) -> bool {
-    false
 }
 
 /// libzmq's `xsub_t` and `dish_t` start with a linger of zero, so that a
@@ -752,11 +765,11 @@ impl<T: SocketType> Socket<T> {
             identity: options.identity,
             send_hwm: options.send_hwm,
             recv_hwm: options.recv_hwm,
-            // PEER's connect_peer names the peer at once.
-            immediate: options.immediate && !is_peer(T::KIND),
+            immediate: options.immediate,
             linger: SharedLinger::new(options.linger.unwrap_or_else(default_linger::<T>)),
             reconnect: options.reconnect,
             max_message_size: options.max_message_size,
+            max_multipart_size: options.max_multipart_size,
             message_properties: options.message_properties,
             security: options.security,
             heartbeat: options.heartbeat,
@@ -766,6 +779,7 @@ impl<T: SocketType> Socket<T> {
                 bind_to_device: options.bind_to_device,
                 busy_poll: None,
             },
+            backlog: options.backlog,
             socks_proxy: options.socks_proxy.map(|proxy| proxy.0),
             handshake_timeout: options.handshake_timeout,
             ..ConnectionConfig::new(T::KIND)
@@ -776,6 +790,7 @@ impl<T: SocketType> Socket<T> {
             bound: Vec::new(),
             connected: Vec::new(),
             pending: None,
+            signal: None,
             _type: PhantomData,
         }
     }
@@ -831,14 +846,19 @@ impl<T: SocketType> Socket<T> {
     /// Changes [`SocketOptions::immediate`] for binds and connects made from
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_immediate(&mut self, immediate: bool) {
-        // PEER's connect_peer names the peer at once.
-        self.peers.config_mut().immediate = immediate && !is_peer(T::KIND);
+        self.peers.config_mut().immediate = immediate;
     }
 
     /// Changes [`SocketOptions::max_message_size`] for binds and connects made from
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_max_message_size(&mut self, octets: u64) {
         self.peers.config_mut().max_message_size = Some(octets);
+    }
+
+    /// Changes [`SocketOptions::max_multipart_size`] for binds and connects
+    /// made from now on. Those already made keep what they had.
+    pub fn set_max_multipart_size(&mut self, octets: u64) {
+        self.peers.config_mut().max_multipart_size = Some(octets);
     }
 
     /// Changes [`SocketOptions::message_properties`] for binds and connects made from
@@ -863,6 +883,12 @@ impl<T: SocketType> Socket<T> {
     /// now on. Those already made keep what they had, as in libzmq.
     pub fn set_tcp_keepalive(&mut self, keepalive: crate::TcpKeepalive) {
         self.peers.config_mut().tcp_keepalive = Some(keepalive);
+    }
+
+    /// Changes [`SocketOptions::backlog`] for binds made from now on. Those
+    /// already made keep what they had, as in libzmq.
+    pub fn set_backlog(&mut self, backlog: u32) {
+        self.peers.config_mut().backlog = backlog;
     }
 
     /// Changes [`SocketOptions::type_of_service`] for binds and connects made from
@@ -894,8 +920,9 @@ impl<T: SocketType> Socket<T> {
     /// they retry as [`SocketOptions::reconnect`] says.
     ///
     /// A connection that gives up ends as one disconnected does. libzmq's
-    /// `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` needs no flag here:
-    /// [`disconnect`](Self::disconnect) always ends the retrying.
+    /// `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` has no flag here:
+    /// [`disconnect`](Self::disconnect) ends the retrying of its endpoint
+    /// at once, and of no other.
     #[cfg(feature = "draft")]
     pub fn set_reconnect_stop(&mut self, stop: crate::ReconnectStop) {
         self.peers.config_mut().reconnect_stop = stop;
@@ -953,7 +980,10 @@ impl<T: SocketType> Socket<T> {
         let endpoint = endpoint.written();
         let endpoint = &*endpoint;
         self.alive()?;
-        let (id, bound) = match endpoint::bind_target(endpoint)? {
+        endpoint::compatible(endpoint, T::KIND, true)?;
+        let target = endpoint::bind_target(endpoint)?;
+        self.served(&target)?;
+        let (id, bound) = match target {
             Target::Tcp(addr) => self
                 .peers
                 .bind(addr)
@@ -994,7 +1024,8 @@ impl<T: SocketType> Socket<T> {
     /// Stops listening on `endpoint`, as libzmq's `zmq_unbind`, and closes
     /// the connections accepted there. What those peers sent is discarded;
     /// what was queued to them is still delivered within the
-    /// [`linger`](SocketOptions::linger).
+    /// [`linger`](SocketOptions::linger). An `inproc` name's connections
+    /// stay, as in libzmq: only the name is freed.
     ///
     /// `endpoint` is as [`bind`](Self::bind) took it or as it returned it:
     /// `tcp://*:5555` and `tcp://0.0.0.0:5555` are the same bind, but a
@@ -1004,20 +1035,26 @@ impl<T: SocketType> Socket<T> {
     pub fn unbind(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
         let endpoint = endpoint.written();
         let endpoint = &*endpoint;
+        endpoint::compatible(endpoint, T::KIND, true)?;
         let wanted = endpoint::bind_target(endpoint)?.into_endpoint();
         let mut found = Vec::new();
         self.bound.retain(|(bound, id)| {
             let keep = Some(bound) != wanted.as_ref();
             if !keep {
-                found.push(*id);
+                found.push((matches!(bound, Endpoint::Inproc(_)), *id));
             }
             keep
         });
         if found.is_empty() {
             return Err(Error::UnknownEndpoint(endpoint.to_owned()));
         }
-        for id in found {
-            self.peers.close(id);
+        for (inproc, id) in found {
+            if inproc {
+                self.peers.unbind_inproc(id);
+                self.routing.connected(self.peers.list_mut());
+            } else {
+                self.peers.close(id);
+            }
         }
         Ok(())
     }
@@ -1035,6 +1072,21 @@ impl<T: SocketType> Socket<T> {
         self.connect_key(&endpoint.written()).map(drop)
     }
 
+    /// Whether [`SocketOptions::immediate`] is set for connects made now.
+    #[cfg(feature = "draft")]
+    pub(crate) fn is_immediate(&mut self) -> bool {
+        self.peers.config_mut().immediate
+    }
+
+    /// Fails if `target` needs an I/O thread and the context has none.
+    fn served(&self, target: &Target) -> Result<(), Error> {
+        if matches!(target, Target::Inproc(_)) || self.peers.has_io_threads() {
+            Ok(())
+        } else {
+            Err(Error::NoIoThread)
+        }
+    }
+
     /// Connects to `endpoint` and returns the new peer, unless
     /// [`immediate`](SocketOptions::immediate) defers it.
     pub(crate) fn connect_key(
@@ -1042,7 +1094,9 @@ impl<T: SocketType> Socket<T> {
         endpoint: &str,
     ) -> Result<Option<zmq_core::PeerKey>, Error> {
         self.alive()?;
+        endpoint::compatible(endpoint, T::KIND, false)?;
         let target = endpoint::connect_target(endpoint)?;
+        self.served(&target)?;
         let (id, key) = match &target {
             Target::Tcp(addr) => self.peers.connect(*addr),
             Target::TcpHost { host, port, source } => self.peers.connect_host(host, *port, *source),
@@ -1083,6 +1137,7 @@ impl<T: SocketType> Socket<T> {
         let wanted = if as_written {
             None
         } else {
+            endpoint::compatible(endpoint, T::KIND, false)?;
             Some(endpoint::connect_target(endpoint)?)
         };
         let wanted_addr = wanted.as_ref().and_then(Target::resolve);
@@ -1376,6 +1431,15 @@ impl<T: Publishes> Socket<T> {
         T::publisher(&mut self.routing).set_invert_matching(on);
     }
 
+    /// Whether the later frames of a message a subscriber sends are read
+    /// as subscriptions only when its first frame is one, as libzmq's
+    /// `ZMQ_ONLY_FIRST_SUBSCRIBE`, a draft option. Off by default: every
+    /// frame that starts with `0x01` or `0x00` is read as one.
+    #[cfg(feature = "draft")]
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        T::publisher(&mut self.routing).set_only_first_subscribe(on);
+    }
+
     /// How many distinct topics its subscribers hold between them, as
     /// libzmq's `ZMQ_TOPICS_COUNT`, a draft option. Subscriptions take a
     /// moment to arrive; those that have are counted.
@@ -1606,6 +1670,15 @@ impl fmt::Debug for SubscriptionRequest<'_> {
 }
 
 impl Socket<XSub> {
+    /// Whether the later frames of a message [`send`](Self::send) is given
+    /// are read as subscriptions only when its first frame is one, as
+    /// libzmq's `ZMQ_ONLY_FIRST_SUBSCRIBE`, a draft option. Off by default:
+    /// every frame that starts with `0x01` or `0x00` is read as one.
+    #[cfg(feature = "draft")]
+    pub fn set_only_first_subscribe(&mut self, on: bool) {
+        self.routing.set_only_first_subscribe(on);
+    }
+
     /// Whether every unsubscription goes to the publishers, as libzmq's
     /// `ZMQ_XSUB_VERBOSE_UNSUBSCRIBE`, a draft option: even one of a topic
     /// subscribed more than once, or not at all. Off by default: only the
@@ -1641,8 +1714,12 @@ impl Socket<XSub> {
     }
 
     /// Sends `message` to every publisher. Never blocks. As in libzmq, a
-    /// single frame starting with `0x01` or `0x00` is a subscription and
-    /// subscribes or unsubscribes to the rest.
+    /// frame starting with `0x01` or `0x00` is a subscription and
+    /// subscribes or unsubscribes to the rest of it, so one message can
+    /// hold several; a publisher reads them the same way. An
+    /// unsubscription the publishers are not to hear of, there being
+    /// another subscription to its topic or none, is left out of what is
+    /// sent.
     ///
     /// `message` is anything a [`Message`] is made from. Bytes borrowed for
     /// less than `'static` are copied in with
@@ -2139,9 +2216,9 @@ impl Socket<Router> {
     /// use zmq::{Context, Router, RoutingId};
     ///
     /// let context = Context::new()?;
-    /// let mut bound = context.socket::<Router>();
+    /// let mut bound = context.socket::<Router>()?;
     /// bound.bind("inproc://routers")?;
-    /// let mut connecting = context.socket::<Router>();
+    /// let mut connecting = context.socket::<Router>()?;
     /// let peer = RoutingId::new("bound")?;
     /// connecting.connect_with_routing_id("inproc://routers", peer.clone())?;
     /// connecting.send(&peer, "hello")?;

@@ -40,7 +40,8 @@ pub enum EventKind {
     Accepted,
     /// A listener failed to accept a connection.
     AcceptFailed(io::ErrorKind),
-    /// A listener closed.
+    /// A listener closed, or a connection attempt failed and its socket
+    /// closed, as libzmq's `ZMQ_EVENT_CLOSED` reports both.
     Closed,
     /// A connection the socket made is up; its handshake follows.
     Connected,

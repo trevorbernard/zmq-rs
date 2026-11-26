@@ -10,14 +10,14 @@ use crate::support::{FIVE, settle};
 fn test() {
     let context = Context::new().unwrap();
     // First, create an intermediate device
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     let endpoint1 = xpub.bind(free_endpoint()).unwrap().to_string();
-    let mut xsub = context.socket::<XSub>();
+    let mut xsub = context.socket::<XSub>().unwrap();
     let endpoint2 = xsub.bind(free_endpoint()).unwrap().to_string();
 
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect(&endpoint2).unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect(&endpoint1).unwrap();
     subscriber.subscribe("");
 

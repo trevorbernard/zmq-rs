@@ -18,14 +18,14 @@ fn expect(subscriber: &mut zmq::Socket<Sub>, topic: &str) {
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher
         .bind("inproc://libzmq-pub-invert-matching")
         .unwrap();
 
-    let mut sub1 = context.socket::<Sub>();
+    let mut sub1 = context.socket::<Sub>().unwrap();
     sub1.connect("inproc://libzmq-pub-invert-matching").unwrap();
-    let mut sub2 = context.socket::<Sub>();
+    let mut sub2 = context.socket::<Sub>().unwrap();
     sub2.connect("inproc://libzmq-pub-invert-matching").unwrap();
 
     // Subscribe sub1 to one prefix and sub2 to another prefix.

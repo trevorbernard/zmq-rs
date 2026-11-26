@@ -13,11 +13,15 @@ fn our_immediate_push_sends_only_to_the_libzmq_pull_that_is_up() {
     let pull = Socket::new(Kind::Pull);
     let alive = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions::new().immediate(true).reconnect(
-        Reconnect::Fixed {
-            interval: Duration::from_millis(10),
-        },
-    ));
+    let mut push = context
+        .socket_with::<Push>(
+            SocketOptions::new()
+                .immediate(true)
+                .reconnect(Reconnect::Fixed {
+                    interval: Duration::from_millis(10),
+                }),
+        )
+        .unwrap();
     push.connect(format!("tcp://{dead}")).unwrap();
     push.connect(format!("tcp://{alive}")).unwrap();
     let started = Instant::now();

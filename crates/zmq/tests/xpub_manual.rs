@@ -28,13 +28,13 @@ fn cancelled(topic: &str) -> XPubEvent {
 }
 
 fn bound(context: &Context, name: &str) -> zmq::Socket<ManualXPub> {
-    let mut xpub = context.socket::<ManualXPub>();
+    let mut xpub = context.socket::<ManualXPub>().unwrap();
     xpub.bind(format!("inproc://{name}")).unwrap();
     xpub
 }
 
 fn subscriber(context: &Context, name: &str, topic: &str) -> zmq::Socket<Sub> {
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe(topic);
     sub.connect(format!("inproc://{name}")).unwrap();
     sub
@@ -152,7 +152,7 @@ fn a_departed_peers_topics_are_cancelled_with_no_peer_to_answer() {
 fn accepting_a_message_says_whether_its_peer_is_still_there() {
     let context = Context::new().unwrap();
     let mut xpub = bound(&context, "message-from");
-    let mut xsub = context.socket::<zmq::XSub>();
+    let mut xsub = context.socket::<zmq::XSub>().unwrap();
     xsub.connect("inproc://message-from").unwrap();
     xsub.send("still here").unwrap();
     let mut request = xpub.recv().unwrap();
@@ -175,7 +175,7 @@ fn accepting_a_message_says_whether_its_peer_is_still_there() {
 #[test]
 fn a_welcome_reaches_a_subscriber_before_anything_is_accepted() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<ManualXPub>();
+    let mut xpub = context.socket::<ManualXPub>().unwrap();
     xpub.set_welcome(Some(Message::from("welcome")));
     xpub.bind("inproc://welcome").unwrap();
     let mut sub = subscriber(&context, "welcome", "w");

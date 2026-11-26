@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 
 use zmq::{
     Context, Dealer, EventKind, Heartbeat, Keypair, Monitor, Pair, Pub, PublicKey, Pull, Push, Rep,
-    Req, Router, SecretKey, Security, Socket, SocketOptions, SocketType, Sub,
+    Req, Router, SecretKey, Security, Socket, SocketOptions, SocketType, Sub, Ttl, TtlTooLong,
 };
 use zmq_test_ports::{free_endpoint, free_port};
 
@@ -71,7 +71,7 @@ fn server<T: SocketType>(
     if heartbeats {
         options = options.heartbeat(Heartbeat::every(Duration::from_millis(50)));
     }
-    let mut server = context.socket_with::<T>(options);
+    let mut server = context.socket_with::<T>(options).unwrap();
     let monitor = server.monitor();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
     (server, monitor, endpoint)
@@ -146,11 +146,13 @@ fn heartbeat_timeout_router_mock_ping() {
 fn heartbeat_ttl<C: SocketType, S: SocketType>() {
     let context = Context::new().unwrap();
     let (_server, mut monitor, endpoint) = server::<S>(&context, false, false);
-    let mut client = context.socket_with::<C>(SocketOptions::new().heartbeat(Heartbeat {
-        interval: Duration::from_millis(250),
-        timeout: Duration::from_millis(250),
-        ttl: Duration::from_millis(100),
-    }));
+    let mut client = context
+        .socket_with::<C>(SocketOptions::new().heartbeat(Heartbeat {
+            interval: Duration::from_millis(250),
+            timeout: Duration::from_millis(250),
+            ttl: Ttl::from_deciseconds(1),
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
 
     assert_eq!(next_event(&mut monitor, FIVE), Some(EventKind::Accepted));
@@ -165,14 +167,16 @@ fn heartbeat_ttl<C: SocketType, S: SocketType>() {
 fn heartbeat_notimeout<C: SocketType, S: SocketType>(curve: bool) {
     let context = Context::new().unwrap();
     let (_server, mut monitor, endpoint) = server::<S>(&context, true, curve);
-    let mut client = context.socket_with::<C>(SocketOptions::new().security(if curve {
-        Security::curve_client(
-            keypair(CLIENT_SECRET),
-            PublicKey::from_z85(SERVER_PUBLIC).unwrap(),
-        )
-    } else {
-        Security::Null
-    }));
+    let mut client = context
+        .socket_with::<C>(SocketOptions::new().security(if curve {
+            Security::curve_client(
+                keypair(CLIENT_SECRET),
+                PublicKey::from_z85(SERVER_PUBLIC).unwrap(),
+            )
+        } else {
+            Security::Null
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
     settle();
 
@@ -237,14 +241,16 @@ mod draft {
 
 /// The TTL, in deciseconds, of the first PING a PAIR client heartbeating
 /// with `ttl` sends to a hand-written ZMTP 3.1 server.
-fn announced_ttl(ttl: Duration) -> u16 {
+fn announced_ttl(ttl: Ttl) -> u16 {
     let listener = TcpListener::bind(free_port()).unwrap();
     let endpoint = format!("tcp://{}", listener.local_addr().unwrap());
     let context = Context::new().unwrap();
-    let mut client = context.socket_with::<Pair>(SocketOptions::new().heartbeat(Heartbeat {
-        ttl,
-        ..Heartbeat::every(Duration::from_millis(10))
-    }));
+    let mut client = context
+        .socket_with::<Pair>(SocketOptions::new().heartbeat(Heartbeat {
+            ttl,
+            ..Heartbeat::every(Duration::from_millis(10))
+        }))
+        .unwrap();
     client.connect(&endpoint).unwrap();
 
     let (mut stream, _) = listener.accept().unwrap();
@@ -269,19 +275,18 @@ const DECISECOND: Duration = Duration::from_millis(100);
 #[test]
 fn setsockopt_heartbeat_ttl_max() {
     let max = DECISECOND * 0x10000 - Duration::from_millis(1);
-    assert_eq!(announced_ttl(max), 0xffff);
+    assert_eq!(announced_ttl(Ttl::try_from(max).unwrap()), 0xffff);
 }
 
-/// libzmq refuses a TTL above the maximum with `EINVAL`; zmq-rs announces
-/// the maximum (`Ttl::from_duration` saturates).
+/// libzmq's `EINVAL` is the `Ttl`'s refusal.
 #[test]
 fn setsockopt_heartbeat_ttl_more_than_max_fails() {
-    assert_eq!(announced_ttl(DECISECOND * 0x10000), 0xffff);
+    assert_eq!(Ttl::try_from(DECISECOND * 0x10000), Err(TtlTooLong));
 }
 
-/// libzmq rounds 99 ms down to no TTL at all; zmq-rs rounds up to whole
-/// deciseconds (`Ttl::from_duration`), so a TTL asked for is never lost.
+/// 99 ms is no TTL at all, as libzmq reads it back as 0.
 #[test]
 fn setsockopt_heartbeat_ttl_near_zero() {
-    assert_eq!(announced_ttl(DECISECOND - Duration::from_millis(1)), 1);
+    let near_zero = Ttl::try_from(DECISECOND - Duration::from_millis(1)).unwrap();
+    assert_eq!(near_zero, Ttl::ZERO);
 }

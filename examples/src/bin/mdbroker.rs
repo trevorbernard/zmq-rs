@@ -53,7 +53,7 @@ struct Broker {
 impl Broker {
     fn new(context: &Context, verbose: bool) -> Self {
         Self {
-            socket: context.socket::<Router>(),
+            socket: context.socket::<Router>().unwrap(),
             verbose,
             services: HashMap::new(),
             workers: HashMap::new(),

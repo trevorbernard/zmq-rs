@@ -27,7 +27,7 @@ fn recv(router: zmq::Socket<Router>) -> (Vec<u8>, Message, zmq::Socket<Router>) 
 
 fn router_notify(connect: bool, disconnect: bool) {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_notify(
         RouterNotify::default()
             .connect(connect)
@@ -35,7 +35,7 @@ fn router_notify(connect: bool, disconnect: bool) {
     );
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
-    let mut dealer = context.socket_with::<Dealer>(named("X"));
+    let mut dealer = context.socket_with::<Dealer>(named("X")).unwrap();
     dealer.connect(&endpoint).unwrap();
 
     if connect {
@@ -82,7 +82,7 @@ fn router_notify_both() {
 #[test]
 fn handshake_fail() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_notify(RouterNotify::default().connect(true).disconnect(true));
     let endpoint = router.bind(free_endpoint()).unwrap();
 
@@ -100,15 +100,17 @@ fn handshake_fail() {
 #[test]
 fn error_during_multipart() {
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(
-        SocketOptions::new()
-            // The handshake fails if this is too small.
-            .max_message_size(64),
-    );
+    let mut router = context
+        .socket_with::<Router>(
+            SocketOptions::new()
+                // The handshake fails if this is too small.
+                .max_message_size(64),
+        )
+        .unwrap();
     router.set_notify(RouterNotify::default().connect(false).disconnect(true));
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
-    let mut dealer = context.socket_with::<Dealer>(named("X"));
+    let mut dealer = context.socket_with::<Dealer>(named("X")).unwrap();
     dealer.connect(&endpoint).unwrap();
 
     // The second part makes the router drop the connection.

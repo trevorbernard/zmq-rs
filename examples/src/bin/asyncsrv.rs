@@ -20,8 +20,9 @@ type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 /// make tracing easier.
 fn client_task(context: Context) -> TaskResult {
     let name = format!("{:04X}-{:04X}", randof(0x10000), randof(0x10000));
-    let mut client =
-        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new(name.clone())?));
+    let mut client = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new(name.clone())?))
+        .unwrap();
     client.connect("tcp://localhost:5570")?;
 
     let mut request_nbr = 0;
@@ -41,9 +42,9 @@ fn client_task(context: Context) -> TaskResult {
 /// replies back to clients. One worker handles one request at a time, but
 /// one client can talk to several workers at once.
 fn server_task(context: Context) -> TaskResult {
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>().unwrap();
     frontend.bind("tcp://*:5570")?;
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     backend.bind("inproc://backend")?;
 
     // Launch pool of worker threads, precise number is not critical
@@ -60,7 +61,7 @@ fn server_task(context: Context) -> TaskResult {
 /// A worker: works on one request at a time and sends a random number of
 /// replies back, with random delays between them.
 fn server_worker(context: Context) -> TaskResult {
-    let mut worker = context.socket::<Dealer>();
+    let mut worker = context.socket::<Dealer>().unwrap();
     worker.connect("inproc://backend")?;
 
     loop {

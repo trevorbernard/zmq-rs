@@ -9,7 +9,7 @@ use zmq_test_ports::free_endpoint;
 #[test]
 fn a_libzmq_dealer_receives_our_routers_hello_first() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Router>();
+    let mut ours = context.socket::<Router>().unwrap();
     ours.set_hello_message("H");
     let endpoint = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Dealer);
@@ -22,7 +22,7 @@ fn a_libzmq_router_receives_our_dealers_hello_first() {
     let theirs = Socket::new(Kind::Router);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Dealer>();
+    let mut ours = context.socket::<Dealer>().unwrap();
     ours.set_hello_message("H");
     ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send("after").unwrap();

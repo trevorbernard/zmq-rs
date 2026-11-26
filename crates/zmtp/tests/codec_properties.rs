@@ -181,7 +181,7 @@ proptest! {
         arrival in arrival(),
         max in prop_oneof![Just(0u64), Just(255), Just(256), 0u64..10_000],
     ) {
-        let config = DecoderConfig { max_message_size: Some(max) };
+        let config = DecoderConfig { max_multipart_size: Some(max), ..DecoderConfig::default() };
         let input = encode(version, &items);
         let (decoded, error) = decode(version, config, &input, &arrival);
         let over = |item: &Item| {
@@ -202,6 +202,32 @@ proptest! {
         prop_assert_eq!(error, expected_error);
     }
 
+    /// Decoding stops at the first frame over the frame limit, whatever
+    /// its message comes to, as libzmq's `ZMQ_MAXMSGSIZE` does.
+    #[test]
+    fn stops_at_the_first_frame_over_the_limit(
+        (version, items) in traffic(),
+        arrival in arrival(),
+        max in prop_oneof![Just(0u64), Just(255), Just(256), 0u64..10_000],
+    ) {
+        let config = DecoderConfig { max_message_size: Some(max), ..DecoderConfig::default() };
+        let input = encode(version, &items);
+        let (decoded, error) = decode(version, config, &input, &arrival);
+        let over = |item: &Item| {
+            item.frames()
+                .iter()
+                .map(|frame| frame.len() as u64)
+                .find(|&size| size > max)
+        };
+        let first_over = items.iter().position(|item| over(item).is_some());
+        let whole = first_over.unwrap_or(items.len());
+        let expected: Vec<Incoming> = items[..whole].iter().map(Item::incoming).collect();
+        prop_assert_eq!(decoded, expected);
+        let expected_error = first_over
+            .map(|i| DecodeError::MessageTooLarge { size: over(&items[i]).expect("over the limit") });
+        prop_assert_eq!(error, expected_error);
+    }
+
     /// On any input, valid or not, the result depends only on the octets,
     /// never on how they were split into reads; and nothing panics.
     #[test]
@@ -210,6 +236,7 @@ proptest! {
         corruption in prop::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 0..8),
         truncate in any::<prop::sample::Index>(),
         max in prop::option::of(0u64..100_000),
+        multipart_max in prop::option::of(0u64..100_000),
         arrival in arrival(),
     ) {
         let mut input = encode(version, &items);
@@ -218,7 +245,7 @@ proptest! {
             input[at] = octet;
         }
         input.truncate(truncate.index(input.len() + 1));
-        let config = DecoderConfig { max_message_size: max };
+        let config = DecoderConfig { max_message_size: max, max_multipart_size: multipart_max };
         let whole = Arrival { prefix: input.len(), reads: vec![1] };
         prop_assert_eq!(
             decode(version, config, &input, &arrival),

@@ -8,11 +8,11 @@ use crate::support::FIVE;
 
 fn test(address: &str) {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_hello_message("H");
     let endpoint = router.bind(address).unwrap().to_string();
 
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect(&endpoint).unwrap();
 
     let hello = dealer.recv_timeout(FIVE).unwrap().expect("the hello");
@@ -33,10 +33,10 @@ fn inproc() {
 fn inproc_late_bind() {
     let address = "inproc://late-hello-msg";
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.set_hello_message("W");
 
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.set_hello_message("H");
     client.connect(address).unwrap();
 

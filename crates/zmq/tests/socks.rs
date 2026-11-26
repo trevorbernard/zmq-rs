@@ -51,9 +51,9 @@ fn refusing_proxy(reply: u8) -> (String, mpsc::Receiver<()>) {
 fn a_connection_the_proxy_refuses_is_tried_again() {
     let (address, clients) = refusing_proxy(5);
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let endpoint = push.bind(free_endpoint()).unwrap().to_string();
-    let mut pull = context.socket_with::<Pull>(proxied(&address));
+    let mut pull = context.socket_with::<Pull>(proxied(&address)).unwrap();
     pull.connect(&endpoint).unwrap();
 
     for _ in 0..3 {
@@ -67,9 +67,9 @@ fn ipc_and_inproc_connections_do_not_go_through_the_proxy() {
     let (address, clients) = refusing_proxy(5);
     let context = Context::new().unwrap();
     for endpoint in ["ipc://*", "inproc://past-the-proxy"] {
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         let bound = push.bind(endpoint).unwrap().to_string();
-        let mut pull = context.socket_with::<Pull>(proxied(&address));
+        let mut pull = context.socket_with::<Pull>(proxied(&address)).unwrap();
         pull.connect(&bound).unwrap();
         push.send_timeout("direct", FIVE).unwrap();
         let message = pull.recv_timeout(FIVE).unwrap().expect("the message");
@@ -83,9 +83,9 @@ fn ipc_and_inproc_connections_do_not_go_through_the_proxy() {
 fn binds_do_not_go_through_the_proxy() {
     let (address, clients) = refusing_proxy(5);
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(proxied(&address));
+    let mut pull = context.socket_with::<Pull>(proxied(&address)).unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     push.send_timeout("direct", FIVE).unwrap();
     let message = pull.recv_timeout(FIVE).unwrap().expect("the message");

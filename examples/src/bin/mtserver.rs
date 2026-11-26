@@ -7,7 +7,7 @@ use zguide::{body, sleep_ms};
 use zmq::{Context, Dealer, Proxy, Rep, Router};
 
 fn worker_routine(context: Context) -> Result<(), zmq::Error> {
-    let mut receiver = context.socket::<Rep>();
+    let mut receiver = context.socket::<Rep>().unwrap();
     receiver.connect("inproc://workers")?;
 
     loop {
@@ -23,11 +23,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // Socket to talk to clients
-    let mut clients = context.socket::<Router>();
+    let mut clients = context.socket::<Router>()?;
     clients.bind("tcp://*:5555")?;
 
     // Socket to talk to workers
-    let mut workers = context.socket::<Dealer>();
+    let mut workers = context.socket::<Dealer>()?;
     workers.bind("inproc://workers")?;
 
     for _ in 0..5 {

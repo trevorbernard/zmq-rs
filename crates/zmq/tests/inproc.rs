@@ -28,7 +28,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn bind_returns_the_endpoint() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("inproc://work").unwrap();
     assert_eq!(bound, Endpoint::Inproc("work".to_owned()));
     assert_eq!(bound.to_string(), "inproc://work");
@@ -41,9 +41,9 @@ fn bind_returns_the_endpoint() {
 #[test]
 fn push_and_pull_over_inproc() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://pipeline").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://pipeline").unwrap();
     for i in 0..10 {
         push.send(format!("{i}")).unwrap();
@@ -58,10 +58,10 @@ fn push_and_pull_over_inproc() {
 #[test]
 fn connect_may_come_before_bind() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://later").unwrap();
     push.send("queued before bind").unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://later").unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),
@@ -72,12 +72,12 @@ fn connect_may_come_before_bind() {
 #[test]
 fn dealer_and_router_exchange_identities() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://broker").unwrap();
     let named = SocketOptions::new().identity(Identity::new("worker").unwrap());
-    let mut worker = context.socket_with::<Dealer>(named);
+    let mut worker = context.socket_with::<Dealer>(named).unwrap();
     worker.connect("inproc://broker").unwrap();
-    let mut anonymous = context.socket::<Dealer>();
+    let mut anonymous = context.socket::<Dealer>().unwrap();
     anonymous.connect("inproc://broker").unwrap();
     worker.send("from worker").unwrap();
     anonymous.send("from anonymous").unwrap();
@@ -114,7 +114,7 @@ fn dealer_and_router_exchange_identities() {
 #[test]
 fn req_and_rep_over_inproc() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://service").unwrap();
     let server = thread::spawn(move || {
         let request = rep.recv().unwrap();
@@ -124,7 +124,7 @@ fn req_and_rep_over_inproc() {
         );
         request.reply(answer).unwrap();
     });
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect("inproc://service").unwrap();
     assert_eq!(
         within(FIVE, move || req.request("hi")),
@@ -136,9 +136,9 @@ fn req_and_rep_over_inproc() {
 #[test]
 fn a_name_can_be_bound_once() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     first.bind("inproc://taken").unwrap();
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     assert!(matches!(
         second.bind("inproc://taken"),
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
@@ -148,12 +148,12 @@ fn a_name_can_be_bound_once() {
 #[test]
 fn a_name_is_free_again_once_its_socket_is_gone() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     first.bind("inproc://reused").unwrap();
     drop(first);
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     second.bind("inproc://reused").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://reused").unwrap();
     push.send("to the new owner").unwrap();
     assert_eq!(
@@ -163,25 +163,27 @@ fn a_name_is_free_again_once_its_socket_is_gone() {
 }
 
 #[test]
-fn incompatible_sockets_are_never_paired() {
+fn any_two_socket_types_are_paired() {
+    // As in libzmq, where only a handshake checks them.
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
-    pull.bind("inproc://wrong").unwrap();
-    let mut router = context.socket::<Router>();
-    router.connect("inproc://wrong").unwrap();
-    let mut dealer = context.socket::<Dealer>();
-    dealer.connect("inproc://wrong").unwrap();
-    assert!(dealer.try_send("dealers cannot feed a PULL").is_err());
-    assert_eq!(pull.try_recv().unwrap(), None);
+    let mut pull = context.socket::<Pull>().unwrap();
+    pull.bind("inproc://any").unwrap();
+    let mut dealer = context.socket::<Dealer>().unwrap();
+    dealer.connect("inproc://any").unwrap();
+    dealer.try_send("a dealer can feed a PULL").unwrap();
+    assert_eq!(
+        pull.recv_timeout(FIVE).unwrap(),
+        Some(Message::from("a dealer can feed a PULL"))
+    );
 }
 
 #[test]
 fn contexts_do_not_share_inproc_names() {
     let first = Context::new().unwrap();
     let second = Context::new().unwrap();
-    let mut pull = first.socket::<Pull>();
+    let mut pull = first.socket::<Pull>().unwrap();
     pull.bind("inproc://private").unwrap();
-    let mut push = second.socket::<Push>();
+    let mut push = second.socket::<Push>().unwrap();
     push.connect("inproc://private").unwrap();
     push.send("never arrives").unwrap();
     thread::sleep(Duration::from_millis(100));
@@ -191,9 +193,9 @@ fn contexts_do_not_share_inproc_names() {
 #[test]
 fn large_frames_cross_without_copying() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://zero-copy").unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://zero-copy").unwrap();
     let frame = Frame::from(vec![7u8; 64 * 1024]);
     let address = frame.as_ptr() as usize;
@@ -206,9 +208,13 @@ fn large_frames_cross_without_copying() {
 fn the_high_water_mark_is_the_sum_of_both_sides() {
     let context = Context::new().unwrap();
     let hwm = |n| Hwm::from(n);
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)))
+        .unwrap();
     pull.bind("inproc://bounded").unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)))
+        .unwrap();
     push.connect("inproc://bounded").unwrap();
     for i in 0..5 {
         push.try_send(format!("{i}")).expect("2 + 3 messages fit");
@@ -219,7 +225,7 @@ fn the_high_water_mark_is_the_sum_of_both_sides() {
 #[test]
 fn empty_inproc_names_are_invalid() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     assert!(matches!(
         pull.bind("inproc://"),
         Err(Error::InvalidEndpoint(_))
@@ -230,9 +236,13 @@ fn empty_inproc_names_are_invalid() {
 fn the_sum_holds_towards_the_connecting_side_too() {
     let context = Context::new().unwrap();
     let hwm = |n| Hwm::from(n);
-    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)));
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().send_hwm(hwm(2)))
+        .unwrap();
     push.bind("inproc://outbound").unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(3)))
+        .unwrap();
     pull.connect("inproc://outbound").unwrap();
     // The bound PUSH learns of its peer as it next sends.
     for i in 0..5 {
@@ -251,9 +261,9 @@ fn question() -> Message {
 #[test]
 fn a_reply_to_a_requester_that_left_is_dropped_and_says_so() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://left").unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://left").unwrap();
     dealer.send(question()).unwrap();
     let request = rep.recv_timeout(FIVE).unwrap().expect("a request");
@@ -264,9 +274,13 @@ fn a_reply_to_a_requester_that_left_is_dropped_and_says_so() {
 #[test]
 fn a_reply_to_a_requester_with_no_room_is_dropped_and_says_so() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket_with::<Rep>(SocketOptions::new().send_hwm(1));
+    let mut rep = context
+        .socket_with::<Rep>(SocketOptions::new().send_hwm(1))
+        .unwrap();
     rep.bind("inproc://no-room").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(SocketOptions::new().recv_hwm(1));
+    let mut dealer = context
+        .socket_with::<Dealer>(SocketOptions::new().recv_hwm(1))
+        .unwrap();
     dealer.connect("inproc://no-room").unwrap();
     for _ in 0..3 {
         dealer.send(question()).unwrap();

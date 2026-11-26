@@ -9,7 +9,7 @@
 
 use std::time::Duration;
 
-use zmq::{Context, Hwm, Message, SocketOptions, Sub, XPub, XPubEvent};
+use zmq::{Context, Hwm, Message, SocketOptions, Sub, TrySendError, XPub, XPubEvent};
 
 use crate::support::FIVE;
 
@@ -18,10 +18,12 @@ const HWM: usize = 2000;
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<XPub>(SocketOptions::new().send_hwm(Hwm::from(HWM)));
+    let mut publisher = context
+        .socket_with::<XPub>(SocketOptions::new().send_hwm(Hwm::from(HWM)))
+        .unwrap();
     publisher.bind("inproc://libzmq-xpub-nodrop").unwrap();
 
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://libzmq-xpub-nodrop").unwrap();
     subscriber.subscribe("");
 
@@ -52,9 +54,13 @@ fn test() {
     // Now test real blocking behavior: send until the subscriber is full,
     // when the send is refused rather than dropped
     let mut send_count = 0;
-    while publisher.try_send_all(Message::from("")).is_ok() {
-        send_count += 1;
-    }
+    let refused = loop {
+        match publisher.try_send_all(Message::from("")) {
+            Ok(_) => send_count += 1,
+            Err(refused) => break refused,
+        }
+    };
+    assert!(matches!(refused, TrySendError::Full(_)));
     let mut recv_count = 0;
     if send_count > 0 {
         subscriber

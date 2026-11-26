@@ -6,7 +6,7 @@ use zmq::{Context, Message, Pub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind("tcp://*:5563")?;
 
     loop {

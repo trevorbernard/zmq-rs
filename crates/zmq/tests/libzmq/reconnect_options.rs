@@ -3,9 +3,9 @@
 //! (zmq-rs's `set_reconnect_stop`, with the `draft` feature) ends the
 //! retrying.
 //!
-//! zmq-rs's monitor reports neither `ZMQ_EVENT_CONNECT_DELAYED` nor a
-//! `ZMQ_EVENT_CLOSED` for a connection attempt, so where libzmq's test
-//! ends on a `CLOSED`, these check that no retry follows.
+//! zmq-rs's monitor does not report `ZMQ_EVENT_CONNECT_DELAYED`, which is
+//! left out of the events expected. Where libzmq's test ends on a `CLOSED`,
+//! these also check that no retry follows.
 
 use std::time::Duration;
 
@@ -37,13 +37,15 @@ fn expect_nothing(monitor: &mut Monitor, wait: Duration) {
 }
 
 fn publisher(context: &Context, endpoint: &str) -> Socket<Pub> {
-    let mut publisher = context.socket_with::<Pub>(zero_linger());
+    let mut publisher = context.socket_with::<Pub>(zero_linger()).unwrap();
     publisher.bind(endpoint).unwrap();
     publisher
 }
 
 fn subscriber(context: &Context, interval: Duration) -> Socket<Sub> {
-    context.socket_with::<Sub>(zero_linger().reconnect(Reconnect::Fixed { interval }))
+    context
+        .socket_with::<Sub>(zero_linger().reconnect(Reconnect::Fixed { interval }))
+        .unwrap()
 }
 
 /// Connects to a publisher at `endpoint` that then goes away, as each of
@@ -99,11 +101,12 @@ mod stop {
     #[test]
     fn reconnect_stop_on_refused() {
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         sub.set_reconnect_stop(ReconnectStop::default().connection_refused(true));
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
         // The one retry is refused, and is the last.
+        expect(&mut monitor, EventKind::Closed);
         expect_nothing(&mut monitor, RETRIES);
     }
 
@@ -111,10 +114,12 @@ mod stop {
     #[test]
     fn a_refusal_is_retried_by_default() {
         let context = Context::new().unwrap();
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         let mut monitor = sub.monitor();
         lose_the_publisher(&context, &mut sub, &mut monitor);
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
     }
 
@@ -125,8 +130,9 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub =
-            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
+        let mut sub = context
+            .socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)))
+            .unwrap();
         sub.set_reconnect_stop(ReconnectStop::default().handshake_failed(true));
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
@@ -147,8 +153,9 @@ mod stop {
         let endpoint = format!("tcp://{}", dummy.local_addr().unwrap());
 
         let context = Context::new().unwrap();
-        let mut sub =
-            context.socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)));
+        let mut sub = context
+            .socket_with::<Sub>(zero_linger().handshake_timeout(Duration::from_secs(1)))
+            .unwrap();
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
 
@@ -161,26 +168,36 @@ mod stop {
         expect_retry(&mut monitor);
     }
 
-    /// libzmq's needs `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` for this;
-    /// zmq-rs never retries an endpoint the socket has disconnected.
+    /// libzmq's sets `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT`, without which
+    /// its retries stop only when the socket is next called; zmq-rs has no
+    /// such flag and stops at once.
     #[cfg(unix)]
     #[test]
     fn reconnect_stop_after_disconnect() {
         let context = Context::new().unwrap();
         // An endpoint that cannot be connected to: nothing is bound to it
         // any more.
-        let endpoint = context.socket::<Pub>().bind("ipc://*").unwrap().to_string();
+        let endpoint = context
+            .socket::<Pub>()
+            .unwrap()
+            .bind("ipc://*")
+            .unwrap()
+            .to_string();
 
-        let mut sub = context.socket_with::<Sub>(zero_linger());
+        let mut sub = context.socket_with::<Sub>(zero_linger()).unwrap();
         let mut monitor = sub.monitor();
         sub.connect(&endpoint).unwrap();
+        expect(&mut monitor, EventKind::Closed);
         expect_retry(&mut monitor);
 
         sub.disconnect(&endpoint).unwrap();
-        // One retry may have been on its way.
-        if let Ok(Some(event)) = monitor.recv_timeout(SETTLE) {
+        // One attempt may have been on its way.
+        while let Ok(Some(event)) = monitor.recv_timeout(SETTLE) {
             assert!(
-                matches!(event.kind, EventKind::ConnectRetried { .. }),
+                matches!(
+                    event.kind,
+                    EventKind::Closed | EventKind::ConnectRetried { .. }
+                ),
                 "{event:?}"
             );
         }

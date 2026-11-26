@@ -6,9 +6,9 @@ use zmq::{Context, Dealer, Message, Router, RoutingId};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>()?;
     frontend.bind("tcp://*:5559")?;
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>()?;
     backend.bind("tcp://*:5560")?;
 
     // Switch messages between sockets

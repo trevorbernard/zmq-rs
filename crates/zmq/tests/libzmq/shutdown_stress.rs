@@ -17,14 +17,14 @@ fn test(address: fn() -> String) {
     within(Duration::from_secs(60), move || {
         for _ in 0..10 {
             let context = Context::with_io_threads(7).unwrap();
-            let mut socket = context.socket::<Pub>();
+            let mut socket = context.socket::<Pub>().unwrap();
             let endpoint = socket.bind(address()).unwrap().to_string();
             let workers: Vec<_> = (0..THREAD_COUNT)
                 .map(|_| {
                     let context = context.clone();
                     let endpoint = endpoint.clone();
                     thread::spawn(move || {
-                        let mut socket = context.socket::<Sub>();
+                        let mut socket = context.socket::<Sub>().unwrap();
                         socket.connect(&endpoint).unwrap();
                         // Start closing the socket while the connecting
                         // process is underway.

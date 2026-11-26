@@ -12,7 +12,7 @@ use zmq::{Context, Sub};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare our context and updates socket
     let context = Context::new()?;
-    let mut updates = context.socket::<Sub>();
+    let mut updates = context.socket::<Sub>()?;
     updates.subscribe("");
     updates.connect("tcp://localhost:5556")?;
 

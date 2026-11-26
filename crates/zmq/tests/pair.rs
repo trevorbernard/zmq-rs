@@ -24,9 +24,9 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn a_pair_talks_both_ways_over_tcp() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     let bound = left.bind(free_endpoint()).unwrap();
-    let mut right = context.socket::<Pair>();
+    let mut right = context.socket::<Pair>().unwrap();
     right.connect(&bound).unwrap();
     right.send("ping").unwrap();
     let (received, mut left) = within(FIVE, move || (left.recv().unwrap(), left));
@@ -41,9 +41,9 @@ fn a_pair_talks_both_ways_over_tcp() {
 #[test]
 fn a_pair_talks_both_ways_over_inproc() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.bind("inproc://pair").unwrap();
-    let mut right = context.socket::<Pair>();
+    let mut right = context.socket::<Pair>().unwrap();
     right.connect("inproc://pair").unwrap();
     left.send("to right").unwrap();
     right.send("to left").unwrap();
@@ -54,7 +54,7 @@ fn a_pair_talks_both_ways_over_inproc() {
 #[test]
 fn sending_waits_until_a_peer_connects() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.bind("inproc://later").unwrap();
     assert_eq!(
         left.try_send("too early"),
@@ -62,7 +62,7 @@ fn sending_waits_until_a_peer_connects() {
     );
     let sender = thread::spawn(move || left.send("waited").unwrap());
     thread::sleep(Duration::from_millis(50));
-    let mut right = context.socket::<Pair>();
+    let mut right = context.socket::<Pair>().unwrap();
     right.connect("inproc://later").unwrap();
     assert_eq!(
         within(FIVE, move || right.recv().unwrap()),
@@ -74,11 +74,11 @@ fn sending_waits_until_a_peer_connects() {
 #[test]
 fn a_second_peer_is_turned_away() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.bind("inproc://taken").unwrap();
-    let mut first = context.socket::<Pair>();
+    let mut first = context.socket::<Pair>().unwrap();
     first.connect("inproc://taken").unwrap();
-    let mut second = context.socket::<Pair>();
+    let mut second = context.socket::<Pair>().unwrap();
     second.connect("inproc://taken").unwrap();
     left.send("for the first").unwrap();
     assert_eq!(
@@ -95,13 +95,13 @@ fn a_second_peer_is_turned_away() {
 #[test]
 fn the_next_peer_is_accepted_once_the_first_leaves() {
     let context = Context::new().unwrap();
-    let mut left = context.socket::<Pair>();
+    let mut left = context.socket::<Pair>().unwrap();
     left.bind("inproc://succession").unwrap();
-    let mut first = context.socket::<Pair>();
+    let mut first = context.socket::<Pair>().unwrap();
     first.connect("inproc://succession").unwrap();
     first.send("goodbye").unwrap();
     drop(first);
-    let mut second = context.socket::<Pair>();
+    let mut second = context.socket::<Pair>().unwrap();
     second.connect("inproc://succession").unwrap();
     second.send("hello").unwrap();
     assert_eq!(left.try_recv().unwrap(), Some(Message::from("goodbye")));

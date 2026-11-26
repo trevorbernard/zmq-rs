@@ -19,11 +19,15 @@ fn hwm(messages: usize) -> Hwm {
 }
 
 fn sender(context: &Context, send_hwm: usize) -> Socket<Push> {
-    context.socket_with::<Push>(SocketOptions::new().send_hwm(hwm(send_hwm)))
+    context
+        .socket_with::<Push>(SocketOptions::new().send_hwm(hwm(send_hwm)))
+        .unwrap()
 }
 
 fn receiver(context: &Context, recv_hwm: usize) -> Socket<Pull> {
-    context.socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(recv_hwm)))
+    context
+        .socket_with::<Pull>(SocketOptions::new().recv_hwm(hwm(recv_hwm)))
+        .unwrap()
 }
 
 /// Sends until the PUSH would block, at most [`MAX_SENDS`].
@@ -46,9 +50,9 @@ fn receive_all(socket: &mut Socket<Pull>) -> usize {
 #[test]
 fn defaults() {
     let context = Context::new().unwrap();
-    let mut bind_socket = context.socket::<Pull>();
+    let mut bind_socket = context.socket::<Pull>().unwrap();
     bind_socket.bind("inproc://libzmq-hwm-defaults").unwrap();
-    let mut connect_socket = context.socket::<Push>();
+    let mut connect_socket = context.socket::<Push>().unwrap();
     connect_socket
         .connect("inproc://libzmq-hwm-defaults")
         .unwrap();

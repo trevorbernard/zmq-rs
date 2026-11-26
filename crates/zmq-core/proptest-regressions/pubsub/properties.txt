@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 5c7b724d0e9bfbc04182b1b96fbc48ad830bc61a6901081c8afa85d4fb1917c4 # shrinks to (mode, invert, count, ops) = (XPub(Changes), false, 1, [Send(0, Cancel([]))])
+cc 1bc7928b665bbcef1b333668ebcb290cf809e24046c62b3854374ba749df1c75 # shrinks to (mode, invert, count, ops) = (XPub(Changes), false, 2, [Send(0, Other([[0], []]))])

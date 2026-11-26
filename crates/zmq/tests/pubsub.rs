@@ -39,9 +39,9 @@ fn publish_until(publisher: &mut zmq::Socket<Pub>, message: &str, subscribers: u
 #[test]
 fn subscribers_receive_only_their_topics_over_tcp() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("news");
     subscriber.connect(&bound).unwrap();
 
@@ -60,9 +60,9 @@ fn subscribers_receive_only_their_topics_over_tcp() {
 #[test]
 fn subscribing_after_connecting_works_too() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://late-subscription").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://late-subscription").unwrap();
     assert_eq!(publisher.send("before").unwrap(), 0);
     subscriber.subscribe("");
@@ -76,9 +76,9 @@ fn subscribing_after_connecting_works_too() {
 #[test]
 fn a_subscriber_that_subscribed_to_nothing_receives_nothing() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://silence").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://silence").unwrap();
     assert_eq!(publisher.send("x").unwrap(), 0);
     assert_eq!(subscriber.try_recv().unwrap(), None);
@@ -87,11 +87,11 @@ fn a_subscriber_that_subscribed_to_nothing_receives_nothing() {
 #[test]
 fn every_subscriber_gets_a_copy() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://fan-out").unwrap();
     let mut subscribers: Vec<_> = (0..3)
         .map(|_| {
-            let mut subscriber = context.socket::<Sub>();
+            let mut subscriber = context.socket::<Sub>().unwrap();
             subscriber.subscribe("");
             subscriber.connect("inproc://fan-out").unwrap();
             subscriber
@@ -109,9 +109,9 @@ fn every_subscriber_gets_a_copy() {
 #[test]
 fn unsubscribing_stops_delivery() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://unsubscribe").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://unsubscribe").unwrap();
     subscriber.subscribe("a");
     subscriber.subscribe("a");
@@ -127,9 +127,9 @@ fn unsubscribing_stops_delivery() {
 #[test]
 fn messages_queued_before_unsubscribing_are_filtered_out() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://in-flight").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect("inproc://in-flight").unwrap();
     subscriber.subscribe("a");
     assert_eq!(publisher.send("a1").unwrap(), 1);
@@ -141,9 +141,13 @@ fn messages_queued_before_unsubscribing_are_filtered_out() {
 fn a_publisher_drops_for_slow_subscribers_instead_of_blocking() {
     let context = Context::new().unwrap();
     let one = Hwm::from(1);
-    let mut publisher = context.socket_with::<Pub>(SocketOptions::new().send_hwm(one));
+    let mut publisher = context
+        .socket_with::<Pub>(SocketOptions::new().send_hwm(one))
+        .unwrap();
     publisher.bind("inproc://slow").unwrap();
-    let mut subscriber = context.socket_with::<Sub>(SocketOptions::new().recv_hwm(one));
+    let mut subscriber = context
+        .socket_with::<Sub>(SocketOptions::new().recv_hwm(one))
+        .unwrap();
     subscriber.subscribe("");
     subscriber.connect("inproc://slow").unwrap();
     let delivered: Vec<usize> = (0..5)
@@ -159,9 +163,9 @@ fn a_publisher_drops_for_slow_subscribers_instead_of_blocking() {
 fn subscriptions_are_never_dropped_however_many() {
     // A SUB's queue towards its peers is unbounded, whatever its HWM.
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://many-topics").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     for i in 0..3000 {
         subscriber.subscribe(format!("topic {i}"));
     }
@@ -179,10 +183,10 @@ fn subscriptions_are_never_dropped_however_many() {
 #[test]
 fn a_bound_subscriber_tells_publishers_that_connect() {
     let context = Context::new().unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("x");
     let bound = subscriber.bind(free_endpoint()).unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect(&bound).unwrap();
     let (done, received) = mpsc::channel();
     thread::spawn(move || done.send(subscriber.recv().unwrap()));
@@ -196,9 +200,9 @@ fn a_bound_subscriber_tells_publishers_that_connect() {
 #[test]
 fn unsubscribing_drops_a_message_a_poll_already_took() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.bind("inproc://held").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("a");
     subscriber.connect("inproc://held").unwrap();
     assert_eq!(publisher.send("a1").unwrap(), 1);

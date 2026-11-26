@@ -22,8 +22,8 @@ fn message(frames: &[&[u8]]) -> Message {
 #[test]
 fn req_correlate() {
     let context = Context::new().unwrap();
-    let mut req = context.socket::<Req>();
-    let mut router = context.socket::<Router>();
+    let mut req = context.socket::<Req>().unwrap();
+    let mut router = context.socket::<Router>().unwrap();
     req.set_correlation(true);
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
     req.connect(&endpoint).unwrap();

@@ -11,8 +11,9 @@ const MAX_RETRIES: usize = 3;
 
 fn try_request(context: &Context, endpoint: &str, request: &Message) -> Option<Message> {
     println!("I: trying echo service at {endpoint}...");
-    let mut client =
-        context.socket_with::<Req>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
+    let mut client = context
+        .socket_with::<Req>(SocketOptions::new().linger(Linger::For(Duration::ZERO)))
+        .unwrap();
     client.connect(endpoint).ok()?;
     client
         .request_timeout(request.clone(), REQUEST_TIMEOUT)

@@ -12,7 +12,7 @@
 //! # use zguide::bstar::{BinaryStar, Event, Role};
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! # let context = zmq::Context::new()?;
-//! # let mut other = context.socket::<zmq::Pull>();
+//! # let mut other = context.socket::<zmq::Pull>()?;
 //! let mut bstar = BinaryStar::new(
 //!     &context,
 //!     Role::Primary,
@@ -135,15 +135,15 @@ impl BinaryStar {
         voter: &str,
     ) -> Result<Self, zmq::Error> {
         // Create publisher for state going to peer
-        let mut statepub = context.socket::<Pub>();
+        let mut statepub = context.socket::<Pub>()?;
         statepub.bind(local)?;
 
         // Create subscriber for state coming from peer
-        let mut statesub = context.socket::<Sub>();
+        let mut statesub = context.socket::<Sub>()?;
         statesub.subscribe("");
         statesub.connect(remote)?;
 
-        let mut voter_socket = context.socket::<Router>();
+        let mut voter_socket = context.socket::<Router>()?;
         voter_socket.bind(voter)?;
 
         let now = Instant::now();

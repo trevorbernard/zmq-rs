@@ -37,11 +37,11 @@ fn wait_for(child: libc::pid_t) -> Option<i32> {
 #[test]
 fn a_forked_child_closes_what_it_inherited_and_the_parent_goes_on() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("tcp://127.0.0.1:*").unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
 
     // SAFETY: the child drops what it inherited, uses sockets of its own
@@ -55,7 +55,7 @@ fn a_forked_child_closes_what_it_inherited_and_the_parent_goes_on() {
         drop(context);
         // As libzmq's test_fork: a context of its own works.
         let own = Context::new().unwrap();
-        let mut push = own.socket::<Push>();
+        let mut push = own.socket::<Push>().unwrap();
         push.connect(&bound).unwrap();
         push.send("from the child").unwrap();
         drop(push);

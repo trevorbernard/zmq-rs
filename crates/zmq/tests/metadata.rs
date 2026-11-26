@@ -22,9 +22,9 @@ fn received_over(transport: &str) -> (Message, Message) {
 
 fn received_with(transport: &str, options: SocketOptions) -> (Message, Message) {
     let context = Context::new().unwrap();
-    let mut server = context.socket_with::<Dealer>(options);
+    let mut server = context.socket_with::<Dealer>(options).unwrap();
     let endpoint = server.bind(transport).unwrap().to_string();
-    let mut client = context.socket_with::<Dealer>(named("id"));
+    let mut client = context.socket_with::<Dealer>(named("id")).unwrap();
     client.connect(&endpoint).unwrap();
     client.send("first").unwrap();
     client.send("second").unwrap();
@@ -114,17 +114,17 @@ fn of_two_properties_with_one_name_the_first_is_kept() {
 #[test]
 fn a_message_passed_on_drops_its_first_connections_metadata() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     push.send("passed on").unwrap();
     let message = pull.recv_timeout(FIVE).unwrap().expect("over tcp");
     assert!(message.metadata().is_some());
 
-    let mut onward = context.socket::<Pull>();
+    let mut onward = context.socket::<Pull>().unwrap();
     onward.bind("inproc://onward").unwrap();
-    let mut forwarder = context.socket::<Push>();
+    let mut forwarder = context.socket::<Push>().unwrap();
     forwarder.connect("inproc://onward").unwrap();
     forwarder.send(message).unwrap();
     let message = onward.recv_timeout(FIVE).unwrap().expect("over inproc");
@@ -136,10 +136,10 @@ fn a_message_passed_on_drops_its_first_connections_metadata() {
 #[test]
 fn a_conflated_message_carries_its_connections_metadata() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.set_conflate(true);
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     for i in 0..100 {
         push.send(format!("m{i}")).unwrap();
@@ -186,12 +186,14 @@ fn application_properties_are_announced_under_every_mechanism() {
     ];
     for (mechanism, server_security, client_security) in mechanisms {
         let context = Context::new().unwrap();
-        let mut server =
-            context.socket_with::<Dealer>(SocketOptions::new().security(server_security));
+        let mut server = context
+            .socket_with::<Dealer>(SocketOptions::new().security(server_security))
+            .unwrap();
         server.add_metadata("X-Side", "server").unwrap();
         let endpoint = server.bind(free_endpoint()).unwrap().to_string();
-        let mut client =
-            context.socket_with::<Dealer>(SocketOptions::new().security(client_security));
+        let mut client = context
+            .socket_with::<Dealer>(SocketOptions::new().security(client_security))
+            .unwrap();
         client.add_metadata("X-Side", "client").unwrap();
         client.connect(&endpoint).unwrap();
 
@@ -218,9 +220,9 @@ fn application_properties_are_announced_under_every_mechanism() {
 #[test]
 fn a_property_added_after_connecting_is_not_announced_on_that_connection() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Dealer>();
+    let mut server = context.socket::<Dealer>().unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
-    let mut client = context.socket::<Dealer>();
+    let mut client = context.socket::<Dealer>().unwrap();
     client.connect(&endpoint).unwrap();
     client.add_metadata("X-Late", "yes").unwrap();
     client.send("hi").unwrap();
@@ -233,9 +235,9 @@ fn a_property_added_after_connecting_is_not_announced_on_that_connection() {
 #[test]
 fn a_request_and_its_reply_carry_their_connections_properties() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<zmq::Rep>();
+    let mut rep = context.socket::<zmq::Rep>().unwrap();
     let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
-    let mut req = context.socket::<zmq::Req>();
+    let mut req = context.socket::<zmq::Req>().unwrap();
     req.connect(&endpoint).unwrap();
     let asking = std::thread::spawn(move || req.request("ping"));
     let request = rep.recv_timeout(FIVE).unwrap().expect("the request");

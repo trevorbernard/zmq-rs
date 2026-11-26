@@ -100,7 +100,7 @@ signal again for data it has already reported.
   connection sends them before anything else in the pipe. The new peer
   starts with no subscriptions, so this is how it learns them.
 - `Reconnect::Fixed` waits the interval plus random jitter below it, and
-  `Reconnect::Backoff` doubles from `initial` up to `max`, resetting once a
+  `Reconnect::Backoff` doubles from `initial` up to `max` with no jitter, resetting once a
   connection is made, before its handshake; both follow libzmq's
   `get_new_reconnect_ivl`.
 - `ReconnectStop` (`Socket::set_reconnect_stop`, with the `draft` feature)
@@ -108,9 +108,9 @@ signal again for data it has already reported.
   failed on a protocol error does, when a TCP connection attempt is
   refused, or when a connection breaks or times out before its handshake
   completes. `ZMQ_RECONNECT_STOP_AFTER_DISCONNECT` has no flag, as
-  `disconnect` always ends the session. The monitor reports no event for
-  giving up, where libzmq's reports the attempt's `CLOSED`: the last
-  `ConnectRetried` or `Disconnected` is followed by nothing.
+  `disconnect` always ends the session. Nothing follows the last event:
+  the `Closed` of a refused attempt, as in libzmq, or the `Disconnected`
+  of a failed handshake.
 - Dropping a connection's sender starts its linger: queued messages keep
   being delivered, across reconnects, until the queue is written or the
   `Linger` deadline passes. `Linger::For(Duration::ZERO)` discards them at
@@ -229,6 +229,18 @@ In the `zmq` crate, `Socket<T>` only has the methods its type allows:
 `Socket<Push>` has `send`, `Socket<Pull>` has `recv`, and calling the other
 is a compile error.
 
+A socket has no file descriptor, as libzmq's has in its mailbox's
+signaler, until `Socket::fd` asks for one (`events.rs`). It is then an
+eventfd, or a pipe where there is none (`wake_fd.rs`), written by a waker
+that stands in the same slots as a blocked thread's or a task's.
+`Socket::events` and the `try_` methods register it whenever they find the
+socket not ready, having emptied the descriptor first, which makes it edge
+triggered as `ZMQ_FD` is. A pipe wakes only a reader that waits, so the
+descriptor is written when a socket turns readable and not for each
+message, and a socket never asked for one pays nothing. `zmq::poll` parks
+the thread unless an item is a file descriptor; then it waits in `poll(2)`,
+on a wake descriptor of the thread's beside the items'.
+
 ## Security
 
 `ConnectionConfig::security` (and `SocketOptions::security`) selects NULL,
@@ -289,15 +301,18 @@ makes or accepts shares its `ConnectionConfig::monitor` sink, so sessions
 and listeners on the I/O threads report straight to the socket's
 monitors; binding reports from the socket's thread.
 
-- `Listening`, `BindFailed`, `Accepted`, `AcceptFailed` and `Closed` come
-  from listeners, and carry the bound endpoint, as do the events of the
+- `Listening`, `BindFailed`, `Accepted`, `AcceptFailed` and a listener's
+  `Closed` come from listeners, and carry the bound endpoint, as do the events of the
   connections they accept.
 - `Connected` (connections we make), `HandshakeSucceeded`,
   `HandshakeFailed` and `Disconnected` come from sessions as their engine
   progresses. As in libzmq, a connection that was up reports
   `Disconnected` when it ends, after `HandshakeFailed` if its handshake
-  never finished. A connection attempt that never connected reports only
-  `ConnectRetried { interval }`.
+  never finished. A connection attempt that never connected reports
+  `Closed`, as libzmq does for the attempt's socket, and then
+  `ConnectRetried { interval }` if it is to be tried again. A `tcp`
+  attempt that fails before it has a socket, as on a host name that does
+  not resolve, reports only the latter.
 - `HandshakeFailure` is `Authentication { status }` (300, 400 or 500, from
   our authenticator, or from the server's ERROR for a client), `Protocol`
   with the typed error, or `NoDetail` for a broken connection or timeout.
@@ -350,9 +365,9 @@ connections waiting for a name.
   the name is bound. A parked connection whose socket is dropped is
   forgotten.
 - Pairing fills both `PeerSlot`s with what a handshake would have
-  established (ZMTP 3.1, the other side's socket type and identity). An
-  incompatible pair is never paired: the far end is dropped, which closes
-  the connection.
+  established (ZMTP 3.1, the other side's socket type and identity). Any
+  two socket types are paired, as in libzmq, where only a handshake
+  checks them.
 - As in libzmq, each direction's HWM is the sender's send HWM plus the
   receiver's receive HWM, unlimited if either is. A connection made
   before the bind only knows its own side, so it uses its own HWMs.
@@ -382,8 +397,9 @@ heartbeats run over a `Stream` that is either kind. Unix only.
     `AddrInUse` from the kernel, and the name is free once its listener
     closes.
   - `ipc://@` alone is `InvalidEndpoint`, as libzmq's `EINVAL`.
-  - A name over 107 octets is `InvalidInput`, where libzmq reports
-    `ENAMETOOLONG`.
+  - A name over 106 octets is `Error::NameTooLong`, as libzmq's
+    `ENAMETOOLONG`: with its `@`, it must leave `sun_path` an octet to
+    spare, as a path must. A bind and a connect both say so.
   - `ipc://@*` is the literal name `*`, not a wildcard, as in libzmq.
   - Elsewhere, `ipc://@name` is an ordinary relative path starting with
     `@`, as in libzmq.

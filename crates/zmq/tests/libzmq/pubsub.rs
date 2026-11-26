@@ -11,9 +11,9 @@ use crate::support::{FIVE, settle};
 
 fn test(address: &str) {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let endpoint = publisher.bind(address).unwrap().to_string();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.connect(&endpoint).unwrap();
     subscriber.subscribe("");
 

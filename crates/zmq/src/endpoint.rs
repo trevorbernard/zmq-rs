@@ -7,15 +7,25 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 
-/// Why binding or connecting failed.
+/// Why making a socket, binding or connecting failed.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Error {
     /// The endpoint is not `transport://address`, or the address is
-    /// malformed for its transport.
+    /// malformed for its transport (libzmq's `EINVAL`).
     InvalidEndpoint(String),
-    /// The transport is not supported (yet).
+    /// The transport is not supported (yet) (libzmq's `EPROTONOSUPPORT`).
     UnsupportedTransport(String),
+    /// The transport is not one this type of socket can use this way:
+    /// over `udp`, only a DISH binds and only a RADIO connects (libzmq's
+    /// `ENOCOMPATPROTO`).
+    IncompatibleTransport(String),
+    /// The endpoint to bind names no interface, address or host of this
+    /// machine (libzmq's `ENODEV`).
+    NoSuchDevice(String),
+    /// The `ipc` endpoint's path or name is too long for a Unix socket
+    /// address (libzmq's `ENAMETOOLONG`).
+    NameTooLong(String),
     /// The operating system refused, e.g. the address is in use.
     Io(io::Error),
     /// The socket is not bound or connected there, for
@@ -27,6 +37,13 @@ pub enum Error {
     /// Another peer of the socket has that routing id, for
     /// [`Socket::connect_with_routing_id`](crate::Socket::connect_with_routing_id).
     RoutingIdInUse,
+    /// The context has no I/O thread, so only `inproc` can be bound or
+    /// connected to (libzmq's `EMTHREAD`).
+    NoIoThread,
+    /// The socket's `immediate` option is set, with which a peer cannot be
+    /// named before its connection is up, for `connect_peer` (libzmq's
+    /// `EFAULT`).
+    Immediate,
 }
 
 impl From<crate::Terminated> for Error {
@@ -174,6 +191,28 @@ impl Target {
     }
 }
 
+/// How many octets a Unix socket address holds of a path, with the zero
+/// that ends it: the size of `sun_path`.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+const SUN_PATH: usize = 108;
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+const SUN_PATH: usize = 104;
+
+/// Refuses `udp` to a socket of type `kind` that cannot use it to bind,
+/// or else to connect, as libzmq does. Only a DISH binds over it and only
+/// a RADIO connects.
+pub(crate) fn compatible(endpoint: &str, kind: zmtp::SocketType, bind: bool) -> Result<(), Error> {
+    let user = if bind {
+        zmtp::SocketType::Dish
+    } else {
+        zmtp::SocketType::Radio
+    };
+    if endpoint.starts_with("udp://") && kind != user {
+        return Err(Error::IncompatibleTransport("udp".to_owned()));
+    }
+    Ok(())
+}
+
 /// Parses `endpoint` for binding.
 pub(crate) fn bind_target(endpoint: &str) -> Result<Target, Error> {
     match local_target(endpoint)? {
@@ -206,6 +245,10 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
         if !cfg!(unix) {
             return Err(Error::UnsupportedTransport("ipc".to_owned()));
         }
+        // As libzmq measures it, the `@` of an abstract name included.
+        if path.len() >= SUN_PATH {
+            return Err(Error::NameTooLong(endpoint.to_owned()));
+        }
         #[cfg(any(target_os = "linux", target_os = "android"))]
         if let Some(name) = path.strip_prefix('@') {
             return match name {
@@ -226,14 +269,19 @@ fn local_target(endpoint: &str) -> Result<Option<Target>, Error> {
 /// address, an interface name or a host name, as libzmq binds. `*` as
 /// the port means any free port.
 fn bind_addr(endpoint: &str) -> Result<SocketAddr, Error> {
-    let (host, port) = host_port(tcp_address(endpoint)?, endpoint)?;
+    let address = tcp_address(endpoint)?;
+    // No host at all is one that does not resolve.
+    if address.len() > 1 && address.starts_with(':') {
+        return Err(Error::NoSuchDevice(endpoint.to_owned()));
+    }
+    let (host, port) = host_port(address, endpoint)?;
     let port = local_port(port, endpoint)?;
     if let Some(addr) = local_addr(host, port) {
         return Ok(addr);
     }
     // A host name is resolved at once, as libzmq's bind does. One
-    // that does not resolve is libzmq's EINVAL.
-    zmq_core::resolve_tcp(host, port).map_err(|_| invalid(endpoint))
+    // that does not resolve is libzmq's ENODEV.
+    zmq_core::resolve_tcp(host, port).map_err(|_| Error::NoSuchDevice(endpoint.to_owned()))
 }
 
 /// What to connect to for `endpoint`. A host name is resolved only when
@@ -321,6 +369,9 @@ fn tcp_address(endpoint: &str) -> Result<&str, Error> {
     let (transport, address) = endpoint
         .split_once("://")
         .ok_or_else(|| invalid(endpoint))?;
+    if transport.is_empty() {
+        return Err(invalid(endpoint));
+    }
     if transport != "tcp" {
         return Err(Error::UnsupportedTransport(transport.to_owned()));
     }
@@ -355,6 +406,16 @@ impl fmt::Display for Error {
             Self::UnsupportedTransport(transport) => {
                 write!(f, "unsupported transport \"{transport}\"")
             }
+            Self::IncompatibleTransport(transport) => {
+                write!(
+                    f,
+                    "transport \"{transport}\" is not for this type of socket"
+                )
+            }
+            Self::NoSuchDevice(endpoint) => {
+                write!(f, "no interface or address to bind for \"{endpoint}\"")
+            }
+            Self::NameTooLong(endpoint) => write!(f, "\"{endpoint}\" is too long"),
             // The io error is the source, so reporters that walk sources
             // print it once.
             Self::Io(_) => f.write_str("the operating system refused"),
@@ -363,6 +424,8 @@ impl fmt::Display for Error {
             }
             Self::Terminated => crate::Terminated.fmt(f),
             Self::RoutingIdInUse => f.write_str("another peer has that routing id"),
+            Self::NoIoThread => f.write_str("the context has no I/O thread"),
+            Self::Immediate => f.write_str("the socket's immediate option is set"),
         }
     }
 }
@@ -472,11 +535,13 @@ mod tests {
     }
 
     #[test]
-    fn binding_a_host_that_does_not_resolve_is_invalid() {
-        assert!(matches!(
-            bind_addr("tcp://no-such-host.invalid:5555"),
-            Err(Error::InvalidEndpoint(_))
-        ));
+    fn binding_a_host_that_does_not_resolve_is_no_such_device() {
+        for endpoint in ["tcp://no-such-host.invalid:5555", "tcp://:5"] {
+            assert!(
+                matches!(bind_addr(endpoint), Err(Error::NoSuchDevice(_))),
+                "{endpoint}"
+            );
+        }
         assert_eq!(bind_addr("tcp://localhost:7").unwrap(), addr("127.0.0.1:7"));
     }
 
@@ -496,13 +561,65 @@ mod tests {
             "127.0.0.1:5555",
             "tcp://127.0.0.1",
             "tcp://127.0.0.1:port",
-            "tcp://:5",
+            "tcp://:",
+            "://x",
         ] {
             assert!(
                 matches!(bind_addr(endpoint), Err(Error::InvalidEndpoint(_))),
                 "{endpoint}"
             );
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_ipc_path_must_fit_a_socket_address() {
+        let ipc = |length| format!("ipc://{}", "x".repeat(length));
+        for parse in [bind_target, connect_target] {
+            assert!(parse(&ipc(SUN_PATH - 1)).is_ok());
+            assert!(matches!(
+                parse(&ipc(SUN_PATH)),
+                Err(Error::NameTooLong(endpoint)) if endpoint == ipc(SUN_PATH)
+            ));
+        }
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    #[test]
+    fn an_abstract_name_must_fit_a_socket_address_with_its_at_sign() {
+        let name = |length| format!("ipc://@{}", "x".repeat(length));
+        for parse in [bind_target, connect_target] {
+            assert!(parse(&name(SUN_PATH - 2)).is_ok());
+            assert!(matches!(
+                parse(&name(SUN_PATH - 1)),
+                Err(Error::NameTooLong(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn udp_is_for_a_dish_that_binds_and_a_radio_that_connects() {
+        use zmtp::SocketType::{Dish, Push, Radio};
+        let udp = "udp://127.0.0.1:5555";
+        for (kind, bind, allowed) in [
+            (Dish, true, true),
+            (Dish, false, false),
+            (Radio, true, false),
+            (Radio, false, true),
+            (Push, true, false),
+            (Push, false, false),
+        ] {
+            assert_eq!(
+                compatible(udp, kind, bind).is_ok(),
+                allowed,
+                "{kind:?} bind {bind}"
+            );
+            assert!(compatible("tcp://127.0.0.1:5555", kind, bind).is_ok());
+        }
+        assert!(matches!(
+            compatible(udp, Push, true),
+            Err(Error::IncompatibleTransport(transport)) if transport == "udp"
+        ));
     }
 
     #[test]
@@ -582,6 +699,18 @@ mod tests {
         assert_eq!(
             Error::UnsupportedTransport("ipc".into()).to_string(),
             "unsupported transport \"ipc\""
+        );
+        assert_eq!(
+            Error::IncompatibleTransport("udp".into()).to_string(),
+            "transport \"udp\" is not for this type of socket"
+        );
+        assert_eq!(
+            Error::NoSuchDevice("tcp://eth9:5".into()).to_string(),
+            "no interface or address to bind for \"tcp://eth9:5\""
+        );
+        assert_eq!(
+            Error::NameTooLong("ipc://x".into()).to_string(),
+            "\"ipc://x\" is too long"
         );
         let refused = Error::Io(io::Error::from(io::ErrorKind::AddrInUse));
         assert_eq!(refused.to_string(), "the operating system refused");

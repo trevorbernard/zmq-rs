@@ -25,7 +25,7 @@ use crate::{Socket, Terminated, ToEndpoint, TrySendError, wait};
 ///
 /// ```compile_fail,E0277
 /// let context = zmq::Context::new().unwrap();
-/// let mut client = context.socket::<zmq::Client>();
+/// let mut client = context.socket::<zmq::Client>().unwrap();
 /// let message = zmq::Message::try_from(vec![zmq::Frame::from("a"), zmq::Frame::from("b")]);
 /// client.send(message.unwrap());
 /// ```
@@ -239,12 +239,12 @@ fn poll_single_part(
 ///
 /// ```compile_fail,E0599
 /// let context = zmq::Context::new().unwrap();
-/// context.socket::<zmq::Scatter>().recv();
+/// context.socket::<zmq::Scatter>().unwrap().recv();
 /// ```
 ///
 /// ```compile_fail,E0599
 /// let context = zmq::Context::new().unwrap();
-/// context.socket::<zmq::Gather>().send("upstream");
+/// context.socket::<zmq::Gather>().unwrap().send("upstream");
 /// ```
 #[derive(Debug)]
 pub enum Scatter {}
@@ -435,11 +435,18 @@ impl PeerId {
 
 impl Socket<Peer> {
     /// Connects to the PEER at `endpoint` and returns its id. Messages to
-    /// it queue until the connection is up.
+    /// it queue until the connection is up. Fails with
+    /// [`Error::Immediate`](crate::Error::Immediate) if the socket's
+    /// [`immediate`](crate::SocketOptions::immediate) option is set, with
+    /// which there is no peer to name yet, as libzmq's `zmq_connect_peer`
+    /// does.
     pub fn connect_peer(&mut self, endpoint: impl ToEndpoint) -> Result<PeerId, crate::Error> {
+        if self.is_immediate() {
+            return Err(crate::Error::Immediate);
+        }
         let key = self
             .connect_key(&endpoint.written())?
-            .expect("PEER never connects with ZMQ_IMMEDIATE");
+            .expect("a connection without immediate is a peer at once");
         let mut cx = noop();
         let (peers, table) = self.parts_accepting(&mut cx);
         let id = table

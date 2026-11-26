@@ -8,11 +8,11 @@ use crate::support::FIVE;
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher.bind("inproc://libzmq-xpub-welcome-msg").unwrap();
     publisher.set_welcome(Some(Message::from("W")));
 
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     // Subscribe to the welcome message
     subscriber.subscribe("W");
     subscriber

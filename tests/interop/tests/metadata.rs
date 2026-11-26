@@ -1,18 +1,21 @@
 //! Connection metadata (`zmq_msg_gets`) between our sockets and libzmq's:
 //! what each reads from the properties the other announces.
 
+use std::net::TcpListener;
 use std::time::Duration;
 
 use zmq::{Context, Dealer, Identity, SocketOptions};
 use zmq_interop::libzmq::{Kind, Msg, Socket};
+use zmq_interop::{Peer, Security};
 use zmq_test_ports::{free_endpoint, free_port};
+use zmtp::SocketType;
 
 const FIVE: Duration = Duration::from_secs(5);
 
 #[test]
 fn we_read_what_a_libzmq_peer_announces() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Dealer>();
+    let mut ours = context.socket::<Dealer>().unwrap();
     let endpoint = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Dealer);
     theirs.set_routing_id(b"theirs");
@@ -38,7 +41,8 @@ fn libzmq_reads_what_we_announce_as_we_would() {
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
     let mut ours = context
-        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("ours").unwrap()));
+        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("ours").unwrap()))
+        .unwrap();
     ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send_timeout("hi", FIVE).expect("sent");
 
@@ -60,10 +64,11 @@ fn messages_after_a_reconnect_carry_the_new_connections_metadata() {
     let addr = free_port();
     first.bind(&format!("tcp://{addr}"));
     let context = Context::new().unwrap();
-    let mut ours =
-        context.socket_with::<zmq::Pull>(SocketOptions::new().reconnect(zmq::Reconnect::Fixed {
+    let mut ours = context
+        .socket_with::<zmq::Pull>(SocketOptions::new().reconnect(zmq::Reconnect::Fixed {
             interval: Duration::from_millis(10),
-        }));
+        }))
+        .unwrap();
     ours.connect(format!("tcp://{addr}")).unwrap();
     first.send(&[b"one"]).unwrap();
     let message = ours
@@ -93,7 +98,7 @@ fn libzmq_reads_the_application_properties_we_announce() {
     let theirs = Socket::new(Kind::Dealer);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Dealer>();
+    let mut ours = context.socket::<Dealer>().unwrap();
     ours.add_metadata("X-Hello", "World").unwrap();
     ours.add_metadata("X-bin", "009c6").unwrap();
     ours.connect(format!("tcp://{addr}")).unwrap();
@@ -105,4 +110,54 @@ fn libzmq_reads_the_application_properties_we_announce() {
     assert_eq!(msg.gets("X-bin").as_deref(), Some("009c6"));
     assert_eq!(msg.gets("Socket-Type").as_deref(), Some("DEALER"));
     assert_eq!(msg.gets("X-foobar"), None);
+}
+
+/// The names of the READY properties `peer` was sent, in order.
+fn announced(peer: &Peer) -> Vec<String> {
+    peer.established
+        .metadata
+        .iter()
+        .map(|(name, _)| String::from_utf8_lossy(name.as_bytes()).into_owned())
+        .collect()
+}
+
+fn accept(listener: &TcpListener) -> Peer {
+    Peer::accept(
+        listener,
+        SocketType::Pull,
+        zmtp::Identity::default(),
+        Security::Null,
+    )
+    .unwrap()
+}
+
+#[test]
+fn libzmq_announces_application_metadata_sorted_by_name() {
+    let listener = TcpListener::bind(free_port()).unwrap();
+    let theirs = Socket::new(Kind::Push);
+    for name in ["X-b", "X-c", "X-a"] {
+        theirs.set_metadata(name, "1");
+    }
+    theirs.connect(listener.local_addr().unwrap());
+    assert_eq!(
+        announced(&accept(&listener)),
+        ["Socket-Type", "X-a", "X-b", "X-c"]
+    );
+}
+
+#[cfg(feature = "draft")]
+#[test]
+fn we_announce_application_metadata_sorted_by_name() {
+    let listener = TcpListener::bind(free_port()).unwrap();
+    let context = Context::new().unwrap();
+    let mut ours = context.socket::<zmq::Push>().unwrap();
+    for name in ["X-b", "X-c", "X-a"] {
+        ours.add_metadata(name, "1").unwrap();
+    }
+    ours.connect(format!("tcp://{}", listener.local_addr().unwrap()))
+        .unwrap();
+    assert_eq!(
+        announced(&accept(&listener)),
+        ["Socket-Type", "X-a", "X-b", "X-c"]
+    );
 }
