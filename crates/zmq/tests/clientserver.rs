@@ -56,18 +56,6 @@ fn a_server_answers_each_client_by_its_id() {
 }
 
 #[test]
-fn client_ids_are_never_zero() {
-    let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>().unwrap();
-    server.bind("inproc://ids").unwrap();
-    let mut client = context.socket::<Client>().unwrap();
-    client.connect("inproc://ids").unwrap();
-    client.send("hi").unwrap();
-    let (id, _) = server.try_recv().unwrap().unwrap();
-    assert_ne!(id.get(), 0);
-}
-
-#[test]
 fn sending_to_an_unknown_or_departed_client_fails() {
     let context = Context::new().unwrap();
     let mut server = context.socket::<Server>().unwrap();

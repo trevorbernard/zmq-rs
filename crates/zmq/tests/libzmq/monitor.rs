@@ -8,7 +8,9 @@
 //! `test_monitor_versioned_invalid_socket_type`, which check the endpoint
 //! and the reading socket's type; the `_tipc` case, as zmq-rs has no TIPC;
 //! and the `test_monitor_versioned_stats_*` cases, as it has no
-//! `ZMQ_EVENT_PIPES_STATS`. An event carries one endpoint where libzmq's
+//! `ZMQ_EVENT_PIPES_STATS`; and `test_monitor_versioned_basic_tcp_ipv4`,
+//! which here would be `monitor_basic_tcp` again, as zmq-rs has one version
+//! of events. An event carries one endpoint where libzmq's
 //! version 2 events carry a local and a remote address: the connecting
 //! socket's events name what it connected to, and the listening socket's
 //! name where it is bound.
@@ -95,11 +97,6 @@ fn monitor_basic(bind: &str) {
 
 #[test]
 fn monitor_basic_tcp() {
-    monitor_basic(&free_endpoint());
-}
-
-#[test]
-fn monitor_versioned_basic_tcp_ipv4() {
     monitor_basic(&free_endpoint());
 }
 

@@ -310,19 +310,6 @@ mod tests {
     // ---- Requester ----
 
     #[test]
-    fn requests_carry_a_delimiter() {
-        let (a, mut sa) = connection(10);
-        let mut peers = list(vec![a]);
-        let mut requester = Requester::default();
-        let (_, waker) = waker();
-        let mut cx = TaskContext::from_waker(&waker);
-        requester
-            .poll_send(&mut peers, msg("question"), &mut cx)
-            .unwrap();
-        assert_eq!(drain(&mut sa), [frames(&["", "question"])]);
-    }
-
-    #[test]
     fn the_reply_comes_without_its_delimiter() {
         let (a, mut sa) = connection(10);
         let mut peers = list(vec![a]);

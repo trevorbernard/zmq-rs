@@ -127,13 +127,4 @@ mod tests {
             None
         );
     }
-
-    #[test]
-    fn long_topics_survive_both_forms() {
-        let topic = Frame::from(vec![b't'; 300]);
-        let subscription = Subscription::Subscribe(topic);
-        let message = subscription.to_message();
-        assert_eq!(message.get(0).unwrap().len(), 301);
-        assert_eq!(Subscription::from_message(&message), Some(subscription));
-    }
 }

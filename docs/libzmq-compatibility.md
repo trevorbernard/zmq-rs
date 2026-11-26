@@ -286,11 +286,12 @@ known to fall short of the bar:
   against the Reference's on 2026-11-22. Of 81, 43 have every case and
   assert what libzmq's assert. The others, by what keeps them from it:
   - **Cases left out**, for a Gap, an Exclusion or the API's shape:
-    `poller` (8 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
+    `poller` (7 of 49), `security_zap` (12 of 30), `monitor` (3 of 10),
     `radio_dish` (9 of 16), `router_notify`, `connect_rid`,
     `unbind_wildcard`, `router_mandatory`, `security_curve`, `pair_tcp`,
     `client_server`, `channel`, `scatter_gather`, `spec_dealer`,
-    `spec_pushpull`, `pubsub` and `proxy_single_socket`; and the options
+    `spec_pushpull`, `pubsub`, `xpub_manual_last_value` and
+    `proxy_single_socket`; and the options
     read back in `sockopt_hwm`, `socks` and `diffserv`.
   - **An Exception asserted** in place of libzmq's outcome:
     `router_mandatory`, `bind_src_address`, `req_relaxed`, `reqrep_ipc`,
@@ -301,7 +302,7 @@ known to fall short of the bar:
     or explained: which events a server's monitor reports, and how many,
     in `security_curve` and `security_zap`; how often a client retries
     in `monitor`; the non-blocking send in `spec_req`; the upper bound in
-    `proxy_hwm`; `poller`'s two cases of waiting on nothing; and
+    `proxy_hwm`; `poller`'s case of waiting on nothing; and
     `pair_tcp_cap_net_admin`, which passes without the capability where
     libzmq's fails.
 - **Not settled by reading the sources**:

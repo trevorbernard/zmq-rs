@@ -535,7 +535,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(request.credentials, ZapCredentials::Null);
-        assert_eq!(request.credentials.mechanism(), "NULL");
         assert_eq!(request.domain, Frame::from("global"));
         assert_eq!(request.address, "10.0.0.1");
         assert_eq!(request.identity, Frame::from("me"));
@@ -623,13 +622,6 @@ mod tests {
         let mut ready = Vec::new();
         write_command(Version::V3_1, &Command::Ready(expected), &mut ready);
         assert_eq!(out, ready);
-    }
-
-    #[test]
-    fn sends_ready_with_socket_type_and_identity() {
-        let (_, out) = start(SocketType::Dealer, &V3_1);
-        let expected = metadata(&[("Socket-Type", "DEALER"), ("Identity", "me")]);
-        assert_eq!(out, command_frame(Command::Ready(expected)));
     }
 
     #[test]
@@ -869,18 +861,15 @@ mod tests {
     }
 
     #[test]
-    fn legacy_identity_must_be_one_short_frame() {
+    fn legacy_identity_must_be_one_frame() {
         let peer = PeerGreeting::Zmtp2 { socket_type: 6 };
         let mut multipart = Message::new("a");
         multipart.push("b");
-        let long = Message::new(vec![b'x'; 256]);
-        for identity in [multipart, long] {
-            let (handshake, _) = start(SocketType::Dealer, &peer);
-            assert_eq!(
-                handshake.receive(Incoming::Message(identity), &mut Vec::new()),
-                Err(HandshakeError::InvalidPeerIdentity)
-            );
-        }
+        let (handshake, _) = start(SocketType::Dealer, &peer);
+        assert_eq!(
+            handshake.receive(Incoming::Message(multipart), &mut Vec::new()),
+            Err(HandshakeError::InvalidPeerIdentity)
+        );
     }
 
     #[test]

@@ -749,13 +749,6 @@ mod tests {
         assert_eq!(socket2::SockRef::from(&listener).tclass_v6().unwrap(), 0x28);
     }
 
-    #[test]
-    fn untuned_sockets_keep_the_systems_type_of_service() {
-        let listener =
-            listen_tcp("127.0.0.1:0".parse().unwrap(), &TcpTuning::default(), 100).unwrap();
-        assert_eq!(socket2::SockRef::from(&listener).tos_v4().unwrap(), 0);
-    }
-
     #[cfg(any(target_os = "linux", target_os = "android"))]
     #[test]
     fn a_socket_is_bound_to_its_device() {

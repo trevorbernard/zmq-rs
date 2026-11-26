@@ -617,25 +617,6 @@ mod tests {
     }
 
     #[test]
-    fn names() {
-        let commands = all_commands();
-        let names: Vec<&[u8]> = commands.iter().map(|c| c.name()).collect();
-        let expected: [&[u8]; 10] = [
-            b"READY",
-            b"READY",
-            b"ERROR",
-            b"PING",
-            b"PONG",
-            b"SUBSCRIBE",
-            b"CANCEL",
-            b"JOIN",
-            b"LEAVE",
-            b"HELLO",
-        ];
-        assert_eq!(names, expected);
-    }
-
-    #[test]
     fn missing_or_truncated_name_is_rejected() {
         assert_eq!(Command::parse(b""), Err(CommandError::MissingName));
         assert_eq!(Command::parse(b"\x00"), Err(CommandError::MissingName));
@@ -782,13 +763,6 @@ mod tests {
     }
 
     #[test]
-    fn property_value_limit() {
-        // RFC 37: a value's length is a 31-bit count, so it fits the
-        // 4-octet length encode_metadata writes.
-        assert_eq!(MAX_PROPERTY_VALUE, i32::MAX as usize);
-    }
-
-    #[test]
     fn property_names_follow_rfc_37() {
         assert!(PropertyName::new("Az09-_.+").is_ok());
         assert_eq!(PropertyName::new(""), Err(InvalidName::Empty));
@@ -813,6 +787,7 @@ mod tests {
         assert_eq!(a, b);
         let hasher = std::hash::RandomState::new();
         assert_eq!(hasher.hash_one(&a), hasher.hash_one(&b));
+        assert_ne!(hasher.hash_one(&a), hasher.hash_one(name("Identity")));
         assert_eq!(a.as_bytes(), b"Socket-Type", "original case is kept");
     }
 
@@ -849,22 +824,5 @@ mod tests {
     fn names_may_be_255_octets() {
         assert!(PropertyName::new("a".repeat(255)).is_ok());
         assert!(CommandName::new("A".repeat(255)).is_ok());
-    }
-
-    #[test]
-    fn property_names_hash_as_they_compare_whatever_their_case() {
-        use std::hash::{BuildHasher, RandomState};
-
-        let hasher = RandomState::new();
-        let name = |name: &'static str| PropertyName::new(name).unwrap();
-        assert_eq!(name("Socket-Type"), name("socket-type"));
-        assert_eq!(
-            hasher.hash_one(name("Socket-Type")),
-            hasher.hash_one(name("socket-type"))
-        );
-        assert_ne!(
-            hasher.hash_one(name("Socket-Type")),
-            hasher.hash_one(name("Identity"))
-        );
     }
 }

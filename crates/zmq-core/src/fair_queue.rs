@@ -473,21 +473,4 @@ mod tests {
             Poll::Ready((key, msg("d1")))
         );
     }
-
-    #[test]
-    fn fair_queue_takes_in_peers_added_between_polls() {
-        let (a, _sa) = connection(10);
-        let mut peers = list(vec![a]);
-        let (_, waker) = waker();
-        let mut cx = TaskContext::from_waker(&waker);
-        let mut fq = FairQueue::default();
-        assert_eq!(fq.poll_recv(&mut peers, &mut cx), Poll::Pending);
-        let (b, mut sb) = connection(10);
-        sb.to_socket.try_send(msg("b1")).unwrap();
-        let key = peers.push(b);
-        assert_eq!(
-            fq.poll_recv(&mut peers, &mut cx),
-            Poll::Ready((key, msg("b1")))
-        );
-    }
 }

@@ -662,18 +662,12 @@ impl IpcListener {
 #[cfg(any(target_os = "linux", target_os = "android"))]
 #[derive(Debug)]
 pub struct IpcAbstractListener {
-    name: String,
     connections: Reader<Connection>,
     closed: mpsc::Receiver<()>,
 }
 
 #[cfg(any(target_os = "linux", target_os = "android"))]
 impl IpcAbstractListener {
-    /// The bound name, without the leading `@`.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// The next connection, if one is waiting.
     pub fn try_accept(&mut self) -> Result<Connection, TryRecvError> {
         self.connections.try_recv()
@@ -707,16 +701,10 @@ impl IpcAbstractListener {
 /// name.
 #[derive(Debug)]
 pub struct InprocListener {
-    name: String,
     connections: Reader<Connection>,
 }
 
 impl InprocListener {
-    /// The bound name.
-    pub fn name(&self) -> &str {
-        &self.name
-    }
-
     /// The next connection, if one is waiting.
     pub fn try_accept(&mut self) -> Result<Connection, TryRecvError> {
         self.connections.try_recv()
@@ -950,7 +938,6 @@ impl Context {
         let (connections, closed) =
             self.listen(StreamListener::Unix(listener), None, endpoint, config);
         Ok(IpcAbstractListener {
-            name: name.to_owned(),
             connections,
             closed,
         })
@@ -1015,10 +1002,7 @@ impl Context {
                 connections: writer,
             },
         );
-        Ok(InprocListener {
-            name: name.to_owned(),
-            connections,
-        })
+        Ok(InprocListener { connections })
     }
 
     /// Connects to the `inproc` `name` in this context. If nothing is bound
@@ -1507,23 +1491,6 @@ mod tests {
             server.rx.recv_timeout(five),
             Err(zmq_pipe::RecvTimeoutError::Closed)
         );
-    }
-
-    #[test]
-    fn listeners_know_their_names() {
-        let context = Context::new().unwrap();
-        let inproc = context
-            .bind_inproc("named", config(SocketType::Pull))
-            .unwrap();
-        assert_eq!(inproc.name(), "named");
-        #[cfg(any(target_os = "linux", target_os = "android"))]
-        {
-            let name = format!("zmq-core-named-{}", std::process::id());
-            let abstract_ipc = context
-                .bind_ipc_abstract(&name, config(SocketType::Pull))
-                .unwrap();
-            assert_eq!(abstract_ipc.name(), name);
-        }
     }
 
     #[test]
