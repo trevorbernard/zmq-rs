@@ -50,14 +50,14 @@ fn lingering_messages_survive_concurrent_drops(address: fn() -> String) {
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
-            let mut pull = context.socket::<Pull>();
+            let mut pull = context.socket::<Pull>().unwrap();
             let endpoint = pull.bind(address()).unwrap().to_string();
             let senders: Vec<_> = (0..SENDERS)
                 .map(|sender| {
                     let context = context.clone();
                     let endpoint = endpoint.clone();
                     thread::spawn(move || {
-                        let mut push = context.socket::<Push>();
+                        let mut push = context.socket::<Push>().unwrap();
                         push.connect(&endpoint).unwrap();
                         for index in 0..MESSAGES {
                             push.send(format!("{sender} {index}")).unwrap();
@@ -93,7 +93,7 @@ fn the_last_handle_ends_the_context_on_any_thread(address: fn() -> String) {
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
-            let mut router = context.socket::<Router>();
+            let mut router = context.socket::<Router>().unwrap();
             let endpoint = router.bind(address()).unwrap().to_string();
             let workers: Vec<_> = (0..WORKERS)
                 .map(|worker| {
@@ -102,7 +102,7 @@ fn the_last_handle_ends_the_context_on_any_thread(address: fn() -> String) {
                     thread::spawn(move || {
                         let options =
                             SocketOptions::new().linger(Linger::For(Duration::from_millis(50)));
-                        let mut dealer = context.socket_with::<Dealer>(options);
+                        let mut dealer = context.socket_with::<Dealer>(options).unwrap();
                         dealer.connect(&endpoint).unwrap();
                         let _ = dealer.try_send(format!("{worker}"));
                         thread::yield_now();
@@ -128,7 +128,7 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
     within(Duration::from_secs(60), move || {
         for _ in 0..ROUNDS {
             let context = Context::with_io_threads(4).unwrap();
-            let mut publisher = context.socket::<Pub>();
+            let mut publisher = context.socket::<Pub>().unwrap();
             let endpoint = publisher.bind(address()).unwrap().to_string();
             let stop = Arc::new(AtomicBool::new(false));
             let publishing = {
@@ -146,7 +146,7 @@ fn subscribers_come_and_go_while_a_publisher_sends(address: fn() -> String) {
                     let endpoint = endpoint.clone();
                     thread::spawn(move || {
                         for _ in 0..VISITS {
-                            let mut subscriber = context.socket::<Sub>();
+                            let mut subscriber = context.socket::<Sub>().unwrap();
                             subscriber.connect(&endpoint).unwrap();
                             subscriber.subscribe("");
                             assert_eq!(subscriber.recv_timeout(FIVE).unwrap(), Some("news".into()));

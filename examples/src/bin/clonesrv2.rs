@@ -17,13 +17,13 @@ type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare our context and sockets
     let context = Context::new()?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind("tcp://*:5557")?;
 
     // Start state manager and wait for synchronization signal
-    let mut updates = context.socket::<Pair>();
+    let mut updates = context.socket::<Pair>()?;
     updates.bind("inproc://state")?;
-    let mut pipe = context.socket::<Pair>();
+    let mut pipe = context.socket::<Pair>()?;
     pipe.connect("inproc://state")?;
     let manager = context.clone();
     thread::spawn(move || state_manager(&manager, pipe));
@@ -47,7 +47,7 @@ fn state_manager(context: &Context, mut pipe: Socket<Pair>) -> TaskResult {
     let mut kvmap = HashMap::new();
 
     pipe.send("READY")?;
-    let mut snapshot = context.socket::<Router>();
+    let mut snapshot = context.socket::<Router>()?;
     snapshot.bind("tcp://*:5556")?;
 
     // Current snapshot version number

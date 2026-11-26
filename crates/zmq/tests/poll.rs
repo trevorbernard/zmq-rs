@@ -10,9 +10,9 @@ const BRIEFLY: Duration = Duration::from_millis(100);
 
 /// A PULL bound at `name` and a PUSH connected to it.
 fn pipeline(context: &Context, name: &str) -> (zmq::Socket<Push>, zmq::Socket<Pull>) {
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("inproc://{name}")).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("inproc://{name}")).unwrap();
     (push, pull)
 }
@@ -85,13 +85,17 @@ fn a_poll_times_out_with_nothing_ready() {
 fn a_push_is_writable_only_with_room() {
     let one = Hwm::from(1);
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(one));
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().send_hwm(one))
+        .unwrap();
     assert_eq!(
         zmq::poll_timeout([push.writable()], BRIEFLY).unwrap(),
         None,
         "no peer"
     );
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().recv_hwm(one));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().recv_hwm(one))
+        .unwrap();
     pull.bind("inproc://room").unwrap();
     push.connect("inproc://room").unwrap();
     assert_eq!(zmq::poll([push.writable()]).unwrap(), [true]);
@@ -118,14 +122,14 @@ fn tiny() -> SocketOptions {
 #[test]
 fn a_pair_is_writable_only_with_a_peer_that_has_room() {
     let context = Context::new().unwrap();
-    let mut left = context.socket_with::<Pair>(tiny());
+    let mut left = context.socket_with::<Pair>(tiny()).unwrap();
     left.bind("inproc://pair-room").unwrap();
     assert_eq!(
         zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
         None,
         "no peer"
     );
-    let mut right = context.socket_with::<Pair>(tiny());
+    let mut right = context.socket_with::<Pair>(tiny()).unwrap();
     right.connect("inproc://pair-room").unwrap();
     assert_eq!(zmq::poll([left.writable()]).unwrap(), [true]);
     while left.try_send("fill").is_ok() {}
@@ -148,7 +152,7 @@ fn a_pair_is_writable_only_with_a_peer_that_has_room() {
         None,
         "the peer is gone"
     );
-    let mut next = context.socket_with::<Pair>(tiny());
+    let mut next = context.socket_with::<Pair>(tiny()).unwrap();
     next.connect("inproc://pair-room").unwrap();
     assert_eq!(
         zmq::poll_timeout([left.writable()], FIVE).unwrap(),
@@ -163,14 +167,14 @@ fn a_channel_is_writable_only_with_a_peer_that_has_room() {
     use zmq::Channel;
 
     let context = Context::new().unwrap();
-    let mut left = context.socket_with::<Channel>(tiny());
+    let mut left = context.socket_with::<Channel>(tiny()).unwrap();
     left.bind("inproc://channel-room").unwrap();
     assert_eq!(
         zmq::poll_timeout([left.writable()], BRIEFLY).unwrap(),
         None,
         "no peer"
     );
-    let mut right = context.socket_with::<Channel>(tiny());
+    let mut right = context.socket_with::<Channel>(tiny()).unwrap();
     right.connect("inproc://channel-room").unwrap();
     assert_eq!(zmq::poll([left.writable()]).unwrap(), [true]);
     while left.try_send("fill").is_ok() {}
@@ -190,13 +194,13 @@ fn a_channel_is_writable_only_with_a_peer_that_has_room() {
 #[test]
 fn a_broker_polls_both_sides() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>().unwrap();
     frontend.bind("inproc://frontend").unwrap();
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     backend.bind("inproc://backend").unwrap();
-    let mut client = context.socket::<Req>();
+    let mut client = context.socket::<Req>().unwrap();
     client.connect("inproc://frontend").unwrap();
-    let mut worker = context.socket::<Rep>();
+    let mut worker = context.socket::<Rep>().unwrap();
     worker.connect("inproc://backend").unwrap();
 
     let asking = thread::spawn(move || client.request("ping").unwrap());
@@ -233,9 +237,9 @@ fn a_broker_polls_both_sides() {
 #[test]
 fn a_readable_rep_lends_out_its_request() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.bind("inproc://rep").unwrap();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect("inproc://rep").unwrap();
     let asking = thread::spawn(move || req.request("question").unwrap());
     assert_eq!(zmq::poll([rep.readable()]).unwrap(), [true]);
@@ -251,13 +255,13 @@ fn draft_sockets_poll_too() {
     use zmq::{Client, Frame, Gather, Scatter, Server};
 
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.bind("inproc://server").unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect("inproc://server").unwrap();
-    let mut gather = context.socket::<Gather>();
+    let mut gather = context.socket::<Gather>().unwrap();
     gather.bind("inproc://gather").unwrap();
-    let mut scatter = context.socket::<Scatter>();
+    let mut scatter = context.socket::<Scatter>().unwrap();
     scatter.connect("inproc://gather").unwrap();
 
     assert_eq!(
@@ -284,7 +288,7 @@ fn draft_sockets_poll_too() {
 #[test]
 fn a_socket_polled_both_ways_says_which_is_ready() {
     let context = Context::new().unwrap();
-    let mut a = context.socket::<Dealer>();
+    let mut a = context.socket::<Dealer>().unwrap();
     a.bind("inproc://both-ways").unwrap();
     // No peer: nothing to receive, and nowhere to send.
     let (readable, writable) = a.readable_and_writable();
@@ -292,7 +296,7 @@ fn a_socket_polled_both_ways_says_which_is_ready() {
         zmq::poll_timeout([readable, writable], BRIEFLY).unwrap(),
         None
     );
-    let mut b = context.socket::<Dealer>();
+    let mut b = context.socket::<Dealer>().unwrap();
     b.connect("inproc://both-ways").unwrap();
     let (readable, writable) = a.readable_and_writable();
     assert_eq!(
@@ -314,4 +318,86 @@ fn a_socket_polled_both_ways_says_which_is_ready() {
     assert_eq!(a.try_recv().unwrap(), Some(Message::from("hello")));
     assert!(a.try_send("back").is_ok());
     assert_eq!(b.recv_timeout(FIVE).unwrap(), Some(Message::from("back")));
+}
+
+/// `count` PULLs bound at `name-0`, `name-1` and so on, as a set whose size
+/// is known only as the program runs.
+fn pulls(context: &Context, name: &str, count: usize) -> Vec<zmq::Socket<Pull>> {
+    (0..count)
+        .map(|index| {
+            let mut pull = context.socket::<Pull>().unwrap();
+            pull.bind(format!("inproc://{name}-{index}")).unwrap();
+            pull
+        })
+        .collect()
+}
+
+fn readable(pulls: &mut [zmq::Socket<Pull>]) -> Vec<zmq::PollItem<'_>> {
+    pulls.iter_mut().map(|pull| pull.readable()).collect()
+}
+
+#[test]
+fn a_vec_of_sockets_is_polled_as_an_array_is() {
+    let context = Context::new().unwrap();
+    let mut pulls = pulls(&context, "vec", 5);
+    for ready in [1, 3] {
+        let mut push = context.socket::<Push>().unwrap();
+        push.connect(format!("inproc://vec-{ready}")).unwrap();
+        push.send("job").unwrap();
+    }
+    // A message the poll took is not counted twice.
+    for _ in 0..2 {
+        assert_eq!(
+            zmq::poll(readable(&mut pulls)).unwrap(),
+            [false, true, false, true, false]
+        );
+    }
+    assert_eq!(pulls[1].try_recv().unwrap(), Some(Message::from("job")));
+    assert_eq!(pulls[3].try_recv().unwrap(), Some(Message::from("job")));
+    assert_eq!(
+        zmq::poll_timeout(readable(&mut pulls), BRIEFLY).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_vec_of_sockets_waits_for_a_message() {
+    let context = Context::new().unwrap();
+    let mut pulls = pulls(&context, "vec-later", 3);
+    let mut push = context.socket::<Push>().unwrap();
+    push.connect("inproc://vec-later-2").unwrap();
+    let sender = thread::spawn(move || {
+        thread::sleep(BRIEFLY);
+        push.send("late").unwrap();
+        push
+    });
+    assert_eq!(
+        zmq::poll(readable(&mut pulls)).unwrap(),
+        [false, false, true]
+    );
+    drop(sender.join());
+}
+
+#[test]
+fn a_vec_holds_a_socket_polled_both_ways_and_one_left_out() {
+    let context = Context::new().unwrap();
+    let (mut push, mut pull) = pipeline(&context, "vec-mixed");
+    let mut a = context.socket::<Dealer>().unwrap();
+    a.bind("inproc://vec-both-ways").unwrap();
+    let mut b = context.socket::<Dealer>().unwrap();
+    b.connect("inproc://vec-both-ways").unwrap();
+    push.send("job").unwrap();
+    let (a_readable, a_writable) = a.readable_and_writable();
+    let items = vec![a_readable, pull.readable().when(false), a_writable];
+    assert_eq!(
+        zmq::poll_timeout(items, FIVE).unwrap(),
+        Some(vec![false, false, true])
+    );
+}
+
+#[test]
+fn polling_an_empty_vec_with_a_timeout_waits_it_out() {
+    let start = std::time::Instant::now();
+    assert_eq!(zmq::poll_timeout(Vec::new(), BRIEFLY).unwrap(), None);
+    assert!(start.elapsed() >= BRIEFLY);
 }

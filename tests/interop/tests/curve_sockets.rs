@@ -37,11 +37,13 @@ fn our_curve_dealer_talks_to_a_libzmq_curve_router() {
     router.set_curve_server(server.secret().expose());
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(
-        SocketOptions::new()
-            .security(Security::curve_client(Keypair::generate(), server.public()))
-            .identity(zmq::Identity::new("ours").unwrap()),
-    );
+    let mut dealer = context
+        .socket_with::<Dealer>(
+            SocketOptions::new()
+                .security(Security::curve_client(Keypair::generate(), server.public()))
+                .identity(zmq::Identity::new("ours").unwrap()),
+        )
+        .unwrap();
     dealer.connect(format!("tcp://{addr}")).unwrap();
     dealer.send("hello libzmq").unwrap();
     assert_eq!(router.recv().unwrap(), [&b"ours"[..], b"hello libzmq"]);
@@ -60,17 +62,19 @@ fn a_libzmq_curve_dealer_is_authenticated_by_our_router() {
     let client_key = client.public();
     let (seen, keys) = mpsc::channel();
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(secured(Security::curve_server_authenticated(
-        server,
-        "",
-        move |request: &ZapRequest| {
-            let _ = seen.send(request.credentials.clone());
-            ZapReply::Ok {
-                user_id: Frame::from("libzmq"),
-                metadata: Metadata::new(),
-            }
-        },
-    )));
+    let mut router = context
+        .socket_with::<Router>(secured(Security::curve_server_authenticated(
+            server,
+            "",
+            move |request: &ZapRequest| {
+                let _ = seen.send(request.credentials.clone());
+                ZapReply::Ok {
+                    user_id: Frame::from("libzmq"),
+                    metadata: Metadata::new(),
+                }
+            },
+        )))
+        .unwrap();
     let bound = router.bind(free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_receive_timeout(FIVE);
@@ -96,7 +100,9 @@ fn a_libzmq_curve_sub_subscribes_through_the_box() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<Pub>(secured(Security::curve_server(server)));
+    let mut publisher = context
+        .socket_with::<Pub>(secured(Security::curve_server(server)))
+        .unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
     let client = Keypair::generate();
     let subscriber = Socket::new(Kind::Sub);
@@ -128,13 +134,15 @@ fn libzmq_answers_our_boxed_pings() {
     pull.set_curve_server(server.secret().expose());
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(
-        SocketOptions::new()
-            .security(Security::curve_client(Keypair::generate(), server.public()))
-            .heartbeat(Heartbeat::every(Duration::from_millis(20)))
-            // A dropped connection must fail the test, not quietly reconnect.
-            .reconnect(Reconnect::Never),
-    );
+    let mut push = context
+        .socket_with::<Push>(
+            SocketOptions::new()
+                .security(Security::curve_client(Keypair::generate(), server.public()))
+                .heartbeat(Heartbeat::every(Duration::from_millis(20)))
+                // A dropped connection must fail the test, not quietly reconnect.
+                .reconnect(Reconnect::Never),
+        )
+        .unwrap();
     push.connect(format!("tcp://{addr}")).unwrap();
     push.send("first").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"first"]);
@@ -152,13 +160,15 @@ fn libzmq_refuses_our_client_with_the_wrong_server_key() {
     pull.set_curve_server(Keypair::generate().secret().expose());
     let addr = pull.bind_loopback();
     let context = Context::new().unwrap();
-    let mut push = context.socket_with::<Push>(
-        secured(Security::curve_client(
-            Keypair::generate(),
-            Keypair::generate().public(),
-        ))
-        .linger(Linger::For(Duration::ZERO)),
-    );
+    let mut push = context
+        .socket_with::<Push>(
+            secured(Security::curve_client(
+                Keypair::generate(),
+                Keypair::generate().public(),
+            ))
+            .linger(Linger::For(Duration::ZERO)),
+        )
+        .unwrap();
     push.connect(format!("tcp://{addr}")).unwrap();
     push.send("never").unwrap();
     assert!(pull.recv().is_err());

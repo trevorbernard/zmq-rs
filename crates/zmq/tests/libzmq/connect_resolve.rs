@@ -6,7 +6,7 @@ use zmq::{Context, Error, Pub};
 
 fn connect(endpoint: &str) -> Result<(), Error> {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect(endpoint)
 }
 
@@ -37,7 +37,6 @@ fn invalid_service_fails() {
 
 #[test]
 fn invalid_proto_fails() {
-    // libzmq's EPROTONOSUPPORT.
     assert!(matches!(
         connect("invalid://localhost:1234"),
         Err(Error::UnsupportedTransport(_))

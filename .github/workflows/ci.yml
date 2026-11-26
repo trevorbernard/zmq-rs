@@ -53,6 +53,45 @@ jobs:
       - name: Loom
         run: nix develop -c just loom
 
+  # The tests alone, on the other platform the flake supports. Formatting,
+  # Clippy and Loom do not differ by platform.
+  macos:
+    name: macOS
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install Nix
+        # v35
+        uses: nixbuild/nix-quick-install-action@9f63be77f412a248c9d9a65a4c82cf066cdf8f0c
+
+      - name: Cache Nix store
+        # v7.0.2
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.nix', 'flake.lock', 'nix/**', 'tests/interop/legacy/**', 'rust-toolchain.toml') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-macos: 3G
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      # As `just test`, running past a failure: one run shows everything
+      # that differs here.
+      - name: Test
+        run: |
+          nix develop -c cargo nextest run --workspace --all-features --no-fail-fast
+          nix develop -c cargo test --workspace --all-features --doc
+
   nightly:
     name: Miri and ThreadSanitizer
     runs-on: ubuntu-24.04

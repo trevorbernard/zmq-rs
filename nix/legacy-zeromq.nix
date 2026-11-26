@@ -1,9 +1,11 @@
 # libzmq releases that speak the older wire protocols, as peers for the
-# downgrade interop tests: 2.2 speaks ZMTP 1.0 and 3.2 speaks ZMTP 2.0.
+# interop tests of them: 2.2 speaks ZMTP 1.0, 3.2 speaks ZMTP 2.0 and 4.1
+# speaks ZMTP 3.0.
 {
   lib,
   stdenv,
   fetchurl,
+  libsodium,
   libuuid,
 }: let
   # The interop tests' peer, `tests/interop/legacy/peer.c`, built against
@@ -41,6 +43,7 @@
 in rec {
   peer2 = peer zeromq2;
   peer3 = peer zeromq3;
+  peer4 = peer zeromq4;
   zeromq2 = zeromq {
     version = "2.2.0";
     repo = "zeromq2-x";
@@ -54,5 +57,12 @@ in rec {
     # Its tests call nanosleep without including time.h, as older C
     # libraries let them.
     postPatch = "sed -i '1i #include <time.h>' tests/test_connect_delay.cpp";
+  };
+  zeromq4 = zeromq {
+    version = "4.1.8";
+    repo = "zeromq4-1";
+    sha256 = "1rdycp90calzvjh9lpmvyfzm6aa2rsl7b06yi32ji135lrx4cdpb";
+    # For CURVE.
+    buildInputs = [libsodium];
   };
 }

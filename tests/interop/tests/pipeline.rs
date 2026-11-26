@@ -28,7 +28,7 @@ fn text(message: &Message) -> String {
 #[test]
 fn our_push_feeds_a_libzmq_pull() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let addr = push.bind(free_endpoint()).unwrap();
     let pull = Socket::new(Kind::Pull);
     pull.connect(addr);
@@ -45,7 +45,7 @@ fn our_pull_drains_a_libzmq_push() {
     let push = Socket::new(Kind::Push);
     let addr = push.bind_loopback();
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.connect(format!("tcp://{addr}")).unwrap();
     for i in 0..10 {
         push.send(&[format!("task {i}").as_bytes()]).unwrap();
@@ -63,7 +63,7 @@ fn our_pull_drains_a_libzmq_push() {
 fn push_round_robins_across_pull_peers() {
     let pulls: Vec<Socket> = (0..3).map(|_| Socket::new(Kind::Pull)).collect();
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     for pull in &pulls {
         push.connect(format!("tcp://{}", pull.bind_loopback()))
             .unwrap();
@@ -88,7 +88,7 @@ fn push_round_robins_across_pull_peers() {
 #[test]
 fn pull_fair_queues_across_push_peers() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let addr = pull.bind(free_endpoint()).unwrap();
     let pushes: Vec<Socket> = (0..3)
         .map(|peer| {
@@ -128,21 +128,21 @@ fn pull_fair_queues_across_push_peers() {
 #[test]
 fn try_operations_do_not_block() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     assert_eq!(
         push.try_send("nowhere"),
         Err(zmq::TrySendError::Full(Message::from("nowhere")))
     );
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     assert_eq!(pull.try_recv().unwrap(), None);
 }
 
 #[test]
 fn async_push_and_pull_between_our_sockets() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let addr = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&addr).unwrap();
     let received = within(Duration::from_secs(5), move || {
         block_on(async move {
@@ -163,7 +163,7 @@ fn async_push_and_pull_between_our_sockets() {
 #[test]
 fn bind_and_connect_report_bad_endpoints() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     assert!(matches!(
         push.bind("tcp://nonsense"),
         Err(zmq::Error::InvalidEndpoint(_))

@@ -17,7 +17,7 @@ fn one() -> SocketOptions {
 }
 
 fn client_thread(context: Context) -> Result<(), zmq::Error> {
-    let mut dealer = context.socket_with::<Dealer>(one());
+    let mut dealer = context.socket_with::<Dealer>(one()).unwrap();
     dealer.connect("tcp://127.0.0.1:6000")?;
 
     let mut total = 0; // Total bytes received
@@ -46,7 +46,7 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
 fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open("testdata")?;
 
-    let mut router = context.socket_with::<Router>(one());
+    let mut router = context.socket_with::<Router>(one()).unwrap();
     router.bind("tcp://*:6000")?;
     loop {
         let (identity, request) = router.recv()?;

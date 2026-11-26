@@ -1,16 +1,16 @@
 //! libzmq's `tests/test_radio_dish.cpp`: RADIO sends to the DISH peers
 //! that joined a message's group.
 //!
-//! Not ported, as zmq-rs has no UDP transport: `test_radio_bind_fails`,
-//! `test_dish_connect_fails`, `test_radio_dish_udp`,
+//! Not ported, as zmq-rs has no UDP transport: `test_radio_dish_udp`,
 //! `test_radio_dish_mcast` and `test_radio_dish_no_loop`, each over IPv4
-//! and IPv6.
+//! and IPv6; nor `test_radio_bind_fails_ipv6`, which differs from the
+//! IPv4 case only in setting `ZMQ_IPV6`, an option zmq-rs has yet to have.
 
 use std::net::TcpListener;
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Dish, Frame, Group, Radio, Socket};
+use zmq::{Context, Dish, Error, Frame, Group, Radio, Socket};
 use zmq_test_ports::{free_endpoint, free_port};
 
 use crate::support::{FIVE, settle, within};
@@ -39,7 +39,7 @@ fn ipv6_available() -> bool {
 #[test]
 fn leave_unjoined_fails() {
     let context = Context::new().unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(!dish.leave(&group("Movies")));
 }
 
@@ -47,16 +47,19 @@ fn leave_unjoined_fails() {
 fn join_too_long_fails() {
     // ZMQ_GROUP_MAX_LENGTH is 255: a group one octet longer cannot be
     // made, so it can never be joined.
-    assert!(Group::new("A".repeat(256)).is_err());
+    assert_eq!(
+        Group::new("A".repeat(256)).err(),
+        Some(zmq::InvalidGroup::TooLong)
+    );
 }
 
 #[test]
 fn long_group() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     let endpoint = radio.bind(free_endpoint()).unwrap().to_string();
 
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     let long = "0123456789ABCDEFGH";
     assert!(dish.join(&group(long)));
     dish.connect(&endpoint).unwrap();
@@ -69,20 +72,20 @@ fn long_group() {
 #[test]
 fn join_twice_fails() {
     let context = Context::new().unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(dish.join(&group("Movies")));
     assert!(!dish.join(&group("Movies")));
 }
 
 fn radio_dish_tcp_poll(loopback: &str) {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     let endpoint = radio
         .bind(format!("tcp://{loopback}:{}", free_port().port()))
         .unwrap()
         .to_string();
 
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(dish.join(&group("Movies")));
     dish.connect(&endpoint).unwrap();
     settle();
@@ -110,6 +113,28 @@ fn radio_dish_tcp_poll(loopback: &str) {
         Some([true])
     );
     recv_cmp(dish, "Movies", "Godfather");
+}
+
+#[test]
+fn radio_bind_fails() {
+    let context = Context::new().unwrap();
+    let mut radio = context.socket::<Radio>().unwrap();
+    assert!(matches!(
+        radio.bind("udp://*:5556"),
+        Err(Error::IncompatibleTransport(_))
+    ));
+}
+
+#[test]
+fn dish_connect_fails() {
+    let context = Context::new().unwrap();
+    for url in ["udp://127.0.0.1:5556", "udp://[::1]:5556"] {
+        let mut dish = context.socket::<Dish>().unwrap();
+        assert!(matches!(
+            dish.connect(url),
+            Err(Error::IncompatibleTransport(_))
+        ));
+    }
 }
 
 #[test]

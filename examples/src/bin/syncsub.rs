@@ -8,7 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // First, connect our subscriber socket
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.connect("tcp://localhost:5561")?;
     subscriber.subscribe("");
 
@@ -16,7 +16,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     sleep_ms(1000);
 
     // Second, synchronize with publisher
-    let mut syncclient = context.socket::<Req>();
+    let mut syncclient = context.socket::<Req>()?;
     syncclient.connect("tcp://localhost:5562")?;
     syncclient.request("")?;
 

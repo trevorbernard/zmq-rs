@@ -11,11 +11,11 @@ use zmq::{Context, Identity, Message, Req, Router, SocketOptions};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut sink = context.socket::<Router>();
+    let mut sink = context.socket::<Router>()?;
     sink.bind("inproc://example")?;
 
     // First allow 0MQ to set the identity
-    let mut anonymous = context.socket::<Req>();
+    let mut anonymous = context.socket::<Req>()?;
     anonymous.connect("inproc://example")?;
     let request =
         thread::spawn(move || anonymous.request("ROUTER uses a generated 5 byte identity"));
@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Then set the identity ourselves
     let mut identified =
-        context.socket_with::<Req>(SocketOptions::new().identity(Identity::new("PEER2")?));
+        context.socket_with::<Req>(SocketOptions::new().identity(Identity::new("PEER2")?))?;
     identified.connect("inproc://example")?;
     let request =
         thread::spawn(move || identified.request("ROUTER socket uses REQ's socket identity"));

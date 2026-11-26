@@ -10,10 +10,10 @@ use crate::support::{FIVE, within};
 #[test]
 fn ipc_wildcard() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Pair>();
+    let mut server = context.socket::<Pair>().unwrap();
     let bound = server.bind("ipc://*").unwrap();
     assert!(matches!(bound, Endpoint::Ipc(_)));
-    let mut client = context.socket::<Pair>();
+    let mut client = context.socket::<Pair>().unwrap();
     client.connect(&bound).unwrap();
     within(FIVE, move || {
         let mut message = Message::new("12345678ABCDEFGH12345678abcdefgh");

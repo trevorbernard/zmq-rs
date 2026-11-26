@@ -15,8 +15,8 @@ use crate::support::FIVE;
 #[test]
 fn app_meta_reqrep() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
-    let mut req = context.socket::<Req>();
+    let mut rep = context.socket::<Rep>().unwrap();
+    let mut req = context.socket::<Req>().unwrap();
 
     rep.add_metadata("X-hello", "world").unwrap();
     rep.add_metadata("X-connection", "backup").unwrap();
@@ -73,9 +73,9 @@ fn app_meta_reqrep() {
 #[test]
 fn a_name_added_twice_keeps_its_first_value() {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.add_metadata("X-hello", "first").unwrap();
     req.add_metadata("X-hello", "second").unwrap();
     req.connect(&endpoint).unwrap();

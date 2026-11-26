@@ -602,6 +602,14 @@ impl EventLoop {
         let config = session.config.clone();
         let engine = self.open(id, &address, &config);
         let Some(engine) = engine else {
+            // An `ipc` connection fails at once, on a socket that libzmq
+            // reports closing. A `tcp` attempt that gets no further than
+            // this never had one.
+            if !matches!(address, Address::Tcp(_) | Address::TcpHost { .. }) {
+                config
+                    .monitor
+                    .emit(&self.sessions[&id].endpoint, EventKind::Closed);
+            }
             self.retry_later(id);
             return false;
         };
@@ -939,10 +947,15 @@ impl Session {
     /// connection attempt that never connected reports nothing here.
     fn report_failure(&mut self, err: &EngineError) {
         let progress = std::mem::take(&mut self.progress);
+        let monitor = &self.config.monitor;
         if !progress.connected {
+            // The attempt's socket closes, which libzmq reports before any
+            // retry.
+            if matches!(self.origin, Origin::Connect(_)) {
+                monitor.emit(&self.endpoint, EventKind::Closed);
+            }
             return;
         }
-        let monitor = &self.config.monitor;
         if !progress.established {
             monitor.emit(
                 &self.endpoint,

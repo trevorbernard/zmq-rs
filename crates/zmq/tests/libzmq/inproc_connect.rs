@@ -10,9 +10,9 @@ use crate::support::{FIVE, settle, within};
 #[test]
 fn bind_before_connect() {
     let context = Context::new().unwrap();
-    let mut bound = context.socket::<Pair>();
+    let mut bound = context.socket::<Pair>().unwrap();
     bound.bind("inproc://bbc").unwrap();
-    let mut connected = context.socket::<Pair>();
+    let mut connected = context.socket::<Pair>().unwrap();
     connected.connect("inproc://bbc").unwrap();
     connected.send("foobar").unwrap();
     within(FIVE, move || {
@@ -23,10 +23,10 @@ fn bind_before_connect() {
 #[test]
 fn connect_before_bind() {
     let context = Context::new().unwrap();
-    let mut connected = context.socket::<Pair>();
+    let mut connected = context.socket::<Pair>().unwrap();
     connected.connect("inproc://cbb").unwrap();
     connected.send("foobar").unwrap();
-    let mut bound = context.socket::<Pair>();
+    let mut bound = context.socket::<Pair>().unwrap();
     bound.bind("inproc://cbb").unwrap();
     within(FIVE, move || {
         assert_eq!(bound.recv().unwrap(), Message::from("foobar"))
@@ -36,11 +36,11 @@ fn connect_before_bind() {
 #[test]
 fn connect_before_bind_pub_sub() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     publisher.connect("inproc://cbbps").unwrap();
     // Dropped: nobody has subscribed yet.
     publisher.send("before").unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("");
     subscriber.bind("inproc://cbbps").unwrap();
     settle();
@@ -55,7 +55,7 @@ fn connect_before_bind_ctx_term() {
     within(FIVE, || {
         let context = Context::new().unwrap();
         for i in 0..20 {
-            let mut router = context.socket::<Router>();
+            let mut router = context.socket::<Router>().unwrap();
             router.connect(format!("inproc://cbbrr{i}")).unwrap();
         }
     });
@@ -66,13 +66,13 @@ fn multiple_connects() {
     let context = Context::new().unwrap();
     let pushes: Vec<_> = (0..10)
         .map(|_| {
-            let mut push = context.socket::<Push>();
+            let mut push = context.socket::<Push>().unwrap();
             push.connect("inproc://multiple").unwrap();
             push.send("foobar").unwrap();
             push
         })
         .collect();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://multiple").unwrap();
     within(FIVE, move || {
         for _ in &pushes {
@@ -81,10 +81,8 @@ fn multiple_connects() {
     });
 }
 
-// libzmq's pushers here are PAIR sockets connecting to a PULL, which
-// libzmq lets through over inproc. zmq-rs checks socket types on inproc
-// as on TCP (docs/rfc-compliance.md, "Valid socket pairs"), so they are
-// PUSH sockets.
+// The pushers are PAIR sockets connecting to a PULL, as libzmq's are:
+// over inproc, which has no handshake, any two socket types are paired.
 #[test]
 fn multiple_threads() {
     let context = Context::new().unwrap();
@@ -92,13 +90,13 @@ fn multiple_threads() {
         .map(|_| {
             let context = context.clone();
             thread::spawn(move || {
-                let mut push = context.socket::<Push>();
-                push.connect("inproc://sink").unwrap();
-                push.send("foobar").unwrap();
+                let mut pair = context.socket::<Pair>().unwrap();
+                pair.connect("inproc://sink").unwrap();
+                pair.send("foobar").unwrap();
             })
         })
         .collect();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind("inproc://sink").unwrap();
     within(FIVE, move || {
         for _ in 0..30 {
@@ -119,7 +117,7 @@ fn simultaneous_connect_bind_threads() {
             let connecting = {
                 let (context, endpoint) = (context.clone(), endpoint.clone());
                 thread::spawn(move || {
-                    let mut connected = context.socket::<Pair>();
+                    let mut connected = context.socket::<Pair>().unwrap();
                     connected.connect(&endpoint).unwrap();
                     assert_eq!(connected.recv().unwrap(), Message::from("foobar"));
                 })
@@ -127,7 +125,7 @@ fn simultaneous_connect_bind_threads() {
             let binding = {
                 let context = context.clone();
                 thread::spawn(move || {
-                    let mut bound = context.socket::<Pair>();
+                    let mut bound = context.socket::<Pair>().unwrap();
                     bound.bind(&endpoint).unwrap();
                     bound.send("foobar").unwrap();
                 })
@@ -145,9 +143,9 @@ fn simultaneous_connect_bind_threads() {
 #[test]
 fn routing_id() {
     let context = Context::new().unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://routing_id").unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://routing_id").unwrap();
     let mut message = Message::new("A");
     message.push("B");
@@ -160,19 +158,19 @@ fn routing_id() {
 #[test]
 fn connect_only() {
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect("inproc://a").unwrap();
 }
 
 #[test]
 fn unbind() {
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pair>();
+    let mut first = context.socket::<Pair>().unwrap();
     first.bind("inproc://unbind").unwrap();
     first.unbind("inproc://unbind").unwrap();
-    let mut second = context.socket::<Pair>();
+    let mut second = context.socket::<Pair>().unwrap();
     second.bind("inproc://unbind").unwrap();
-    let mut connected = context.socket::<Pair>();
+    let mut connected = context.socket::<Pair>().unwrap();
     connected.connect("inproc://unbind").unwrap();
     connected.send("foobar").unwrap();
     within(FIVE, move || {
@@ -180,6 +178,11 @@ fn unbind() {
     });
 }
 
-// libzmq's test_shutdown_during_pend calls zmq_ctx_shutdown with an
-// inproc connect pending. zmq::Context has no shutdown; connect_only and
-// connect_before_bind_ctx_term cover dropping a pending connect.
+#[test]
+fn shutdown_during_pend() {
+    let context = Context::new().unwrap();
+    let mut connect_socket = context.socket::<Pair>().unwrap();
+    connect_socket.connect("inproc://cbb").unwrap();
+
+    context.shutdown(FIVE).unwrap();
+}

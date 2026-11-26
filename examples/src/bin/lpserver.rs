@@ -6,7 +6,7 @@ use zmq::{Context, Rep};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut server = context.socket::<Rep>();
+    let mut server = context.socket::<Rep>()?;
     server.bind("tcp://*:5555")?;
 
     let mut cycles = 0;

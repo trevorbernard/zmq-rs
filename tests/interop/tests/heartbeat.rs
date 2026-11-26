@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use zmq_core::{Connection, ConnectionConfig, Context, Heartbeat, Reconnect};
-use zmq_interop::libzmq::{Kind, Socket};
+use zmq_interop::libzmq::{self, Kind, Socket};
 use zmq_interop::{Peer, Security};
 use zmq_test_ports::free_port;
 use zmtp::{Command, Identity, Incoming, Message, Ping, PingContext, SocketType, Ttl};
@@ -68,7 +68,7 @@ fn pings_go_out_at_the_interval_with_our_ttl() {
     let heartbeat = Heartbeat {
         interval: Duration::from_millis(50),
         timeout: Duration::from_secs(2),
-        ttl: Duration::from_millis(500),
+        ttl: Ttl::from_deciseconds(5),
     };
     let _connection = context.connect(listener.local_addr().unwrap(), dealer(Some(heartbeat)));
     let mut peer = accept(&listener);
@@ -248,4 +248,146 @@ fn the_default_handshake_deadline_matches_libzmq() {
     let config = ConnectionConfig::new(SocketType::Dealer);
     assert_eq!(config.handshake_timeout, Some(Duration::from_secs(30)));
     assert_eq!(config.heartbeat, None);
+}
+
+/// A hand-written ROUTER that libzmq's DEALER, with these heartbeats in
+/// milliseconds, has connected to.
+fn libzmq_dealer_and_peer(interval: u64, timeout: u64) -> (Socket, libzmq::Monitor, Peer) {
+    let listener = TcpListener::bind(free_port()).unwrap();
+    let dealer = Socket::new(Kind::Dealer);
+    dealer.set_heartbeat(
+        Duration::from_millis(interval),
+        Duration::from_millis(timeout),
+        Duration::ZERO,
+    );
+    let monitor = dealer.monitor();
+    dealer.connect(listener.local_addr().unwrap());
+    let peer = accept(&listener);
+    (dealer, monitor, peer)
+}
+
+#[test]
+fn libzmq_with_a_timeout_of_zero_keeps_a_silent_peer() {
+    let (_dealer, monitor, _silent) = libzmq_dealer_and_peer(50, 50);
+    let events = monitor.during(Duration::from_millis(400));
+    assert!(
+        events
+            .iter()
+            .any(|(event, _)| *event == libzmq::EVENT_DISCONNECTED),
+        "with a timeout it gives up: {events:?}"
+    );
+
+    let (_dealer, monitor, _silent) = libzmq_dealer_and_peer(50, 0);
+    let events = monitor.during(Duration::from_millis(400));
+    assert!(
+        events
+            .iter()
+            .all(|(event, _)| *event != libzmq::EVENT_DISCONNECTED),
+        "{events:?}"
+    );
+}
+
+#[test]
+fn a_timeout_of_zero_keeps_a_silent_peer() {
+    let listener = TcpListener::bind(free_port()).unwrap();
+    let context = Context::new().unwrap();
+    let heartbeat = Heartbeat {
+        interval: Duration::from_millis(50),
+        timeout: Duration::ZERO,
+        ttl: Ttl::ZERO,
+    };
+    let mut connection = context.connect(listener.local_addr().unwrap(), dealer(Some(heartbeat)));
+    let mut silent = accept(&listener);
+    thread::sleep(Duration::from_millis(400));
+    connection
+        .tx
+        .send_blocking(Message::from("still here"))
+        .expect("no timeout closed the connection");
+    assert_eq!(silent.recv_message().unwrap(), Message::from("still here"));
+}
+
+#[test]
+fn libzmq_with_an_interval_of_zero_sends_no_ping() {
+    let (dealer, _monitor, mut peer) = libzmq_dealer_and_peer(0, 50);
+    thread::sleep(Duration::from_millis(300));
+    dealer.send(&[b"first"]).unwrap();
+    assert_eq!(
+        peer.recv().unwrap(),
+        Incoming::Message(Message::from("first"))
+    );
+}
+
+#[test]
+fn an_interval_of_zero_sends_no_ping() {
+    let listener = TcpListener::bind(free_port()).unwrap();
+    let context = Context::new().unwrap();
+    let heartbeat = Heartbeat {
+        interval: Duration::ZERO,
+        timeout: Duration::from_millis(50),
+        ttl: Ttl::ZERO,
+    };
+    let mut connection = context.connect(listener.local_addr().unwrap(), dealer(Some(heartbeat)));
+    let mut peer = accept(&listener);
+    thread::sleep(Duration::from_millis(300));
+    connection
+        .tx
+        .send_blocking(Message::from("first"))
+        .expect("no timeout closed the connection");
+    assert_eq!(
+        peer.recv().unwrap(),
+        Incoming::Message(Message::from("first"))
+    );
+}
+
+/// The TTL of the first PING `peer` is sent.
+fn first_ping_ttl(peer: &mut Peer) -> Ttl {
+    loop {
+        if let Some(Command::Ping(ping)) = command(peer.recv().unwrap()) {
+            return ping.ttl;
+        }
+    }
+}
+
+#[test]
+fn libzmq_truncates_a_ttl_to_deciseconds_and_refuses_one_too_long() {
+    for (millis, deciseconds) in [(99, 0), (199, 1), (6_553_599, u16::MAX)] {
+        let listener = TcpListener::bind(free_port()).unwrap();
+        let dealer = Socket::new(Kind::Dealer);
+        dealer.set_heartbeat(
+            Duration::from_millis(20),
+            Duration::ZERO,
+            Duration::from_millis(millis),
+        );
+        dealer.connect(listener.local_addr().unwrap());
+        assert_eq!(
+            first_ping_ttl(&mut accept(&listener)),
+            Ttl::from_deciseconds(deciseconds),
+            "{millis} ms"
+        );
+    }
+    let refused = Socket::new(Kind::Dealer)
+        .try_set_heartbeat_ttl(6_553_600)
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("Invalid argument"), "{refused}");
+}
+
+#[test]
+fn we_truncate_a_ttl_to_deciseconds_and_refuse_one_too_long() {
+    for (millis, deciseconds) in [(99, 0), (199, 1), (6_553_599, u16::MAX)] {
+        let listener = TcpListener::bind(free_port()).unwrap();
+        let context = Context::new().unwrap();
+        let heartbeat = Heartbeat {
+            interval: Duration::from_millis(20),
+            timeout: Duration::ZERO,
+            ttl: Ttl::try_from(Duration::from_millis(millis)).unwrap(),
+        };
+        let _connection = context.connect(listener.local_addr().unwrap(), dealer(Some(heartbeat)));
+        assert_eq!(
+            first_ping_ttl(&mut accept(&listener)),
+            Ttl::from_deciseconds(deciseconds),
+            "{millis} ms"
+        );
+    }
+    assert!(Ttl::try_from(Duration::from_millis(6_553_600)).is_err());
 }

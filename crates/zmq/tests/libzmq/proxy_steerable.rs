@@ -32,12 +32,12 @@ fn proxy_steerable() {
     within(Duration::from_secs(30), || {
         let context = Context::new().unwrap();
         let control_context = Context::new().unwrap();
-        let mut control = control_context.socket_with::<Pub>(no_linger());
+        let mut control = control_context.socket_with::<Pub>(no_linger()).unwrap();
         control.bind("inproc://control").unwrap();
 
-        let mut frontend = context.socket_with::<Router>(no_linger());
+        let mut frontend = context.socket_with::<Router>(no_linger()).unwrap();
         let endpoint = frontend.bind(free_endpoint()).unwrap().to_string();
-        let mut backend = context.socket_with::<Dealer>(no_linger());
+        let mut backend = context.socket_with::<Dealer>(no_linger()).unwrap();
         backend.bind("inproc://backend").unwrap();
 
         let workers: Vec<_> = (0..QT_WORKERS)

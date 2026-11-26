@@ -41,9 +41,13 @@ fn router_and_slow_dealer(
     context: &Context,
     name: &str,
 ) -> (zmq::Socket<Router>, zmq::Socket<Dealer>) {
-    let mut router = context.socket_with::<Router>(SocketOptions::new().send_hwm(one()));
+    let mut router = context
+        .socket_with::<Router>(SocketOptions::new().send_hwm(one()))
+        .unwrap();
     router.bind(format!("inproc://{name}")).unwrap();
-    let mut dealer = context.socket_with::<Dealer>(named("d").recv_hwm(one()));
+    let mut dealer = context
+        .socket_with::<Dealer>(named("d").recv_hwm(one()))
+        .unwrap();
     dealer.connect(format!("inproc://{name}")).unwrap();
     (router, dealer)
 }
@@ -51,7 +55,7 @@ fn router_and_slow_dealer(
 #[test]
 fn try_send_to_an_unknown_routing_id_hands_the_message_back() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     assert_eq!(
         router.try_send(&id("nobody"), "lost"),
         Err(SendError::UnknownPeer(Message::from("lost")))
@@ -61,7 +65,7 @@ fn try_send_to_an_unknown_routing_id_hands_the_message_back() {
 #[test]
 fn send_to_an_unknown_routing_id_fails_at_once() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let result = within(FIVE, move || router.send(&id("nobody"), "lost"));
     assert_eq!(result, Err(SendError::UnknownPeer(Message::from("lost"))));
 }
@@ -108,9 +112,9 @@ fn send_waits_while_the_peer_is_full() {
 #[test]
 fn send_async_reaches_a_known_peer() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://async").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(named("d"));
+    let mut dealer = context.socket_with::<Dealer>(named("d")).unwrap();
     dealer.connect("inproc://async").unwrap();
     let sent = std::pin::pin!(router.send_async(&id("d"), "hi"))
         .poll(&mut TaskContext::from_waker(Waker::noop()));
@@ -124,9 +128,9 @@ fn send_async_reaches_a_known_peer() {
 #[test]
 fn a_duplicate_identity_is_ignored_without_handover() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://dup").unwrap();
-    let mut first = context.socket_with::<Dealer>(named("same"));
+    let mut first = context.socket_with::<Dealer>(named("same")).unwrap();
     first.connect("inproc://dup").unwrap();
     first.send("first").unwrap();
     let (from, _, mut router) = within(FIVE, move || {
@@ -134,7 +138,7 @@ fn a_duplicate_identity_is_ignored_without_handover() {
         (from, message, router)
     });
     assert_eq!(from, id("same"));
-    let mut second = context.socket_with::<Dealer>(named("same"));
+    let mut second = context.socket_with::<Dealer>(named("same")).unwrap();
     second.connect("inproc://dup").unwrap();
     second.send("second").unwrap();
     thread::sleep(Duration::from_millis(50));
@@ -149,17 +153,17 @@ fn a_duplicate_identity_is_ignored_without_handover() {
 #[test]
 fn with_handover_a_duplicate_identity_takes_over() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_handover(true);
     router.bind("inproc://handover").unwrap();
-    let mut first = context.socket_with::<Dealer>(named("same"));
+    let mut first = context.socket_with::<Dealer>(named("same")).unwrap();
     first.connect("inproc://handover").unwrap();
     first.send("first").unwrap();
     let mut router = within(FIVE, move || {
         assert_eq!(router.recv().unwrap(), (id("same"), Message::from("first")));
         router
     });
-    let mut second = context.socket_with::<Dealer>(named("same"));
+    let mut second = context.socket_with::<Dealer>(named("same")).unwrap();
     second.connect("inproc://handover").unwrap();
     second.send("second").unwrap();
     let mut router = within(FIVE, move || {
@@ -188,10 +192,10 @@ fn with_handover_a_duplicate_identity_takes_over() {
 #[test]
 fn a_probing_router_greets_each_new_peer_with_an_empty_message() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_probe(true);
     router.bind("inproc://probe").unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://probe").unwrap();
     // The ROUTER sees the peer once it next looks at its peers.
     let _ = router.try_recv().unwrap();
@@ -204,9 +208,9 @@ fn a_probing_router_greets_each_new_peer_with_an_empty_message() {
 #[test]
 fn a_probing_dealer_greets_its_router_so_the_router_learns_its_id() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind("inproc://dealer-probe").unwrap();
-    let mut dealer = context.socket_with::<Dealer>(named("prober"));
+    let mut dealer = context.socket_with::<Dealer>(named("prober")).unwrap();
     dealer.set_probe(true);
     dealer.connect("inproc://dealer-probe").unwrap();
     assert_eq!(
@@ -218,9 +222,9 @@ fn a_probing_dealer_greets_its_router_so_the_router_learns_its_id() {
 #[test]
 fn a_router_probes_the_peers_it_connects_to() {
     let context = Context::new().unwrap();
-    let mut listener = context.socket_with::<Router>(named("listener"));
+    let mut listener = context.socket_with::<Router>(named("listener")).unwrap();
     listener.bind("inproc://router-to-router").unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_probe(true);
     router.connect("inproc://router-to-router").unwrap();
     let (from, message) = within(FIVE, move || listener.recv().unwrap());

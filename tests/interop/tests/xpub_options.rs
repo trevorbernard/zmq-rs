@@ -12,7 +12,7 @@ const FIVE: Duration = Duration::from_secs(5);
 #[test]
 fn our_xpub_welcomes_a_libzmq_sub() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.set_welcome(Some(Message::from("WELCOME")));
     let bound = xpub.bind(free_endpoint()).unwrap();
     let sub = Socket::new(Kind::Sub);
@@ -29,7 +29,7 @@ fn a_libzmq_xpub_welcomes_our_sub() {
     xpub.set_xpub_welcome(b"WELCOME");
     let addr = xpub.bind_loopback();
     let context = Context::new().unwrap();
-    let mut sub = context.socket::<Sub>();
+    let mut sub = context.socket::<Sub>().unwrap();
     sub.subscribe("WELCOME");
     sub.connect(format!("tcp://{addr}")).unwrap();
     // libzmq attaches the pipe, and sends the welcome, while it is called.
@@ -48,7 +48,7 @@ fn a_libzmq_xpub_welcomes_our_sub() {
 #[test]
 fn our_manual_xpub_decides_a_libzmq_subs_topics() {
     let context = Context::new().unwrap();
-    let mut xpub = context.socket::<ManualXPub>();
+    let mut xpub = context.socket::<ManualXPub>().unwrap();
     let bound = xpub.bind(free_endpoint()).unwrap();
     let sub = Socket::new(Kind::Sub);
     sub.subscribe(b"");

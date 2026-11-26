@@ -34,7 +34,7 @@ fn a_libzmq_client_talks_to_our_server() {
         return;
     }
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     let bound = server.bind(free_endpoint()).unwrap();
     let client = Socket::new(Kind::Client);
     client.set_receive_timeout(FIVE);
@@ -53,7 +53,7 @@ fn a_libzmq_client_talks_to_our_server() {
 fn our_client_drops_multipart_messages() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client
         .connect(format!("tcp://{}", listener.local_addr().unwrap()))
         .unwrap();
@@ -76,7 +76,7 @@ fn our_client_drops_multipart_messages() {
 #[test]
 fn our_server_drops_multipart_messages() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     let bound = server.bind(free_endpoint()).unwrap();
     let mut peer = Peer::connect(bound.tcp_addr().unwrap(), SocketType::Client, b"").unwrap();
     let multipart = Message::try_from(vec![Frame::from("not"), Frame::from("allowed")]).unwrap();
@@ -95,7 +95,7 @@ fn a_libzmq_server_replies_to_our_client() {
     server.set_receive_timeout(FIVE);
     let addr = server.bind_loopback();
     let context = Context::new().unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect(format!("tcp://{addr}")).unwrap();
     client.send("question").unwrap();
     let (id, body) = server.recv_routed().unwrap();

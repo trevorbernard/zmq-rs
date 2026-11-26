@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         SocketOptions::new()
             .send_hwm(4)
             .linger(Linger::For(Duration::ZERO)),
-    );
+    )?;
     mailbox.connect("tcp://localhost:9876")?;
 
     for count in 0..10 {

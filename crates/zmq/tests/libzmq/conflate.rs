@@ -9,10 +9,10 @@ use crate::support::{FIVE, settle};
 #[test]
 fn conflate() {
     let context = Context::new().unwrap();
-    let mut s_in = context.socket::<Pull>();
+    let mut s_in = context.socket::<Pull>().unwrap();
     s_in.set_conflate(true);
     let endpoint = s_in.bind(free_endpoint()).unwrap().to_string();
-    let mut s_out = context.socket::<Push>();
+    let mut s_out = context.socket::<Push>().unwrap();
     s_out.connect(&endpoint).unwrap();
 
     let message_count = 20;

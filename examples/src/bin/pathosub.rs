@@ -8,7 +8,7 @@ use zmq::{Context, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     let endpoint = env::args()
         .nth(1)
         .unwrap_or_else(|| "tcp://localhost:5556".to_owned());

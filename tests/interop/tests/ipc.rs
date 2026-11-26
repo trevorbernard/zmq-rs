@@ -41,7 +41,7 @@ fn our_push_reaches_a_libzmq_pull_over_ipc() {
     pull.set_receive_timeout(FIVE);
     pull.bind(&format!("ipc://{}", path.display()));
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("hello libzmq").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"hello libzmq"]);
@@ -51,7 +51,7 @@ fn our_push_reaches_a_libzmq_pull_over_ipc() {
 fn a_libzmq_push_reaches_our_pull_over_ipc() {
     let path = socket_path("from-libzmq");
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind(format!("ipc://{}", path.display())).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
@@ -65,7 +65,7 @@ fn a_libzmq_push_reaches_our_pull_over_ipc() {
 #[test]
 fn a_libzmq_push_finds_our_wildcard_path() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("ipc://*").unwrap();
     assert!(matches!(bound, Endpoint::Ipc(_)));
     let push = Socket::new(Kind::Push);
@@ -90,13 +90,13 @@ fn plain_over_ipc_reports_an_empty_zap_address() {
             }
         }));
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(server);
+    let mut pull = context.socket_with::<Pull>(server).unwrap();
     pull.bind(format!("ipc://{}", path.display())).unwrap();
     let client = SocketOptions::new().security(Security::PlainClient(PlainCredentials {
         username: Credential::new("user").unwrap(),
         password: Credential::new("secret").unwrap(),
     }));
-    let mut push = context.socket_with::<Push>(client);
+    let mut push = context.socket_with::<Push>(client).unwrap();
     push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("authenticated").unwrap();
     assert_eq!(
@@ -114,7 +114,7 @@ fn our_push_reaches_a_libzmq_pull_over_an_abstract_name() {
     pull.set_receive_timeout(FIVE);
     pull.bind(&endpoint);
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&endpoint).unwrap();
     push.send("hello abstract libzmq").unwrap();
     assert_eq!(pull.recv().unwrap(), [b"hello abstract libzmq"]);
@@ -125,7 +125,7 @@ fn our_push_reaches_a_libzmq_pull_over_an_abstract_name() {
 fn a_libzmq_push_reaches_our_pull_over_an_abstract_name() {
     let endpoint = format!("ipc://@zmq-interop-{}-from-libzmq", std::process::id());
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind(&endpoint).unwrap();
     assert!(matches!(bound, Endpoint::IpcAbstract(_)));
     let push = Socket::new(Kind::Push);
@@ -135,4 +135,41 @@ fn a_libzmq_push_reaches_our_pull_over_an_abstract_name() {
         within(FIVE, move || pull.recv().unwrap()),
         Message::from("hello abstract us")
     );
+}
+
+/// Whether `path` is gone within a second.
+fn removed(path: &std::path::Path) -> bool {
+    let started = std::time::Instant::now();
+    while path.exists() {
+        if started.elapsed() > Duration::from_secs(1) {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    true
+}
+
+/// libzmq removes the file of an `ipc://*` bind when its listener closes,
+/// and no other.
+#[test]
+fn libzmq_leaves_the_socket_file_of_a_path_it_was_given() {
+    let path = socket_path("left-by-libzmq");
+    let pull = Socket::new(Kind::Pull);
+    pull.bind(&format!("ipc://{}", path.display()));
+    assert!(path.exists());
+    // Its context goes with it, and so its listener.
+    drop(pull);
+    assert!(!removed(&path));
+    std::fs::remove_file(path).unwrap();
+}
+
+#[test]
+fn we_remove_the_socket_file_of_a_path_we_were_given() {
+    let path = socket_path("removed-by-us");
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>().unwrap();
+    pull.bind(format!("ipc://{}", path.display())).unwrap();
+    assert!(path.exists());
+    drop(pull);
+    assert!(removed(&path));
 }

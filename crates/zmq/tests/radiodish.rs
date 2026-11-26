@@ -30,9 +30,9 @@ fn group(name: &'static str) -> Group {
 #[test]
 fn a_dish_receives_only_the_groups_it_joined() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     radio.bind("inproc://radio").unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     dish.connect("inproc://radio").unwrap();
     assert!(dish.join(&group("news")));
     assert_eq!(
@@ -53,7 +53,7 @@ fn a_dish_receives_only_the_groups_it_joined() {
 #[test]
 fn joining_twice_or_leaving_unjoined_is_refused() {
     let context = Context::new().unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     assert!(dish.join(&group("a")));
     assert!(!dish.join(&group("a")), "already joined");
     assert!(dish.leave(&group("a")));
@@ -63,9 +63,9 @@ fn joining_twice_or_leaving_unjoined_is_refused() {
 #[test]
 fn leaving_stops_delivery_even_of_queued_messages() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     radio.bind("inproc://leaving").unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     dish.connect("inproc://leaving").unwrap();
     dish.join(&group("a"));
     assert_eq!(radio.send(&group("a"), "queued").unwrap(), 1);
@@ -77,11 +77,11 @@ fn leaving_stops_delivery_even_of_queued_messages() {
 #[test]
 fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     let bound = radio.bind(free_endpoint()).unwrap();
     let dishes: Vec<_> = (0..3)
         .map(|_| {
-            let mut dish = context.socket::<Dish>();
+            let mut dish = context.socket::<Dish>().unwrap();
             dish.join(&group("all"));
             dish.connect(&bound).unwrap();
             dish
@@ -110,9 +110,13 @@ fn a_radio_reaches_every_dish_in_the_group_over_tcp() {
 fn a_radio_drops_for_a_slow_dish_instead_of_blocking() {
     let context = Context::new().unwrap();
     let one = Hwm::from(1);
-    let mut radio = context.socket_with::<Radio>(SocketOptions::new().send_hwm(one));
+    let mut radio = context
+        .socket_with::<Radio>(SocketOptions::new().send_hwm(one))
+        .unwrap();
     radio.bind("inproc://slow-dish").unwrap();
-    let mut dish = context.socket_with::<Dish>(SocketOptions::new().recv_hwm(one));
+    let mut dish = context
+        .socket_with::<Dish>(SocketOptions::new().recv_hwm(one))
+        .unwrap();
     dish.join(&group("g"));
     dish.connect("inproc://slow-dish").unwrap();
     let sent: Vec<usize> = (0..4)
@@ -124,9 +128,9 @@ fn a_radio_drops_for_a_slow_dish_instead_of_blocking() {
 #[test]
 fn joins_are_never_dropped_however_many() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     radio.bind("inproc://many-groups").unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     for i in 0..3000 {
         dish.join(&Group::new(format!("group {i}")).unwrap());
     }
@@ -141,9 +145,9 @@ fn joins_are_never_dropped_however_many() {
 #[test]
 fn leaving_drops_a_message_a_poll_already_took() {
     let context = Context::new().unwrap();
-    let mut radio = context.socket::<Radio>();
+    let mut radio = context.socket::<Radio>().unwrap();
     radio.bind("inproc://radio-held").unwrap();
-    let mut dish = context.socket::<Dish>();
+    let mut dish = context.socket::<Dish>().unwrap();
     dish.connect("inproc://radio-held").unwrap();
     assert!(dish.join(&group("news")));
     assert_eq!(radio.send(&group("news"), "rain").unwrap(), 1);

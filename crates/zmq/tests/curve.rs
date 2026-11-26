@@ -33,12 +33,16 @@ fn push_and_pull_over_curve() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(secured(Security::curve_server(server)));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(server)))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
-        Keypair::generate(),
-        server_key,
-    )));
+    let mut push = context
+        .socket_with::<Push>(secured(Security::curve_client(
+            Keypair::generate(),
+            server_key,
+        )))
+        .unwrap();
     push.connect(&bound).unwrap();
     let big =
         Message::try_from(vec![Frame::from("header"), Frame::from(vec![9; 200_000])]).unwrap();
@@ -49,17 +53,20 @@ fn push_and_pull_over_curve() {
 }
 
 #[test]
-fn max_message_size_counts_every_frame_of_a_curve_message() {
+fn max_multipart_size_counts_every_frame_of_a_curve_message() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(secured(Security::curve_server(server)).max_message_size(1000));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(server)).max_multipart_size(1000))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
-        Keypair::generate(),
-        server_key,
-    )));
+    let mut push = context
+        .socket_with::<Push>(secured(Security::curve_client(
+            Keypair::generate(),
+            server_key,
+        )))
+        .unwrap();
     push.connect(&bound).unwrap();
     let within_limit =
         Message::try_from(vec![Frame::from(vec![1; 400]), Frame::from(vec![2; 400])]).unwrap();
@@ -95,21 +102,26 @@ fn the_authenticator_sees_the_clients_public_key() {
         }
     };
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(secured(Security::curve_server_authenticated(
-        server,
-        "domain",
-        authenticator,
-    )));
+    let mut router = context
+        .socket_with::<Router>(secured(Security::curve_server_authenticated(
+            server,
+            "domain",
+            authenticator,
+        )))
+        .unwrap();
     let bound = router.bind(free_endpoint()).unwrap();
 
-    let mut trusted =
-        context.socket_with::<Dealer>(secured(Security::curve_client(client, server_key)));
+    let mut trusted = context
+        .socket_with::<Dealer>(secured(Security::curve_client(client, server_key)))
+        .unwrap();
     trusted.connect(&bound).unwrap();
     trusted.send("let me in").unwrap();
-    let mut stranger = context.socket_with::<Dealer>(secured(Security::curve_client(
-        Keypair::generate(),
-        server_key,
-    )));
+    let mut stranger = context
+        .socket_with::<Dealer>(secured(Security::curve_client(
+            Keypair::generate(),
+            server_key,
+        )))
+        .unwrap();
     stranger.connect(&bound).unwrap();
     // A refused client has no pipe left, so `send` could block for good.
     let _ = stranger.try_send("me too");
@@ -135,16 +147,19 @@ fn the_authenticator_sees_the_clients_public_key() {
 #[test]
 fn a_client_with_the_wrong_server_key_gets_nowhere() {
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push = context.socket_with::<Push>(
-        secured(Security::curve_client(
-            Keypair::generate(),
-            Keypair::generate().public(),
-        ))
-        .linger(Linger::For(Duration::ZERO)),
-    );
+    let mut push = context
+        .socket_with::<Push>(
+            secured(Security::curve_client(
+                Keypair::generate(),
+                Keypair::generate().public(),
+            ))
+            .linger(Linger::For(Duration::ZERO)),
+        )
+        .unwrap();
     push.connect(&bound).unwrap();
     push.send("lost").unwrap();
     thread::sleep(Duration::from_millis(300));
@@ -154,11 +169,13 @@ fn a_client_with_the_wrong_server_key_gets_nowhere() {
 #[test]
 fn a_plaintext_client_cannot_talk_to_a_curve_server() {
     let context = Context::new().unwrap();
-    let mut pull =
-        context.socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(Keypair::generate())))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
-    let mut push =
-        context.socket_with::<Push>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
+    let mut push = context
+        .socket_with::<Push>(SocketOptions::new().linger(Linger::For(Duration::ZERO)))
+        .unwrap();
     push.connect(&bound).unwrap();
     // A refused client has no pipe left, so `send` could block for good.
     let _ = push.try_send("in the clear");
@@ -171,17 +188,21 @@ fn heartbeats_and_subscriptions_travel_boxed() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut publisher = context.socket_with::<Pub>(
-        SocketOptions::new()
-            .security(Security::curve_server(server))
-            .heartbeat(Heartbeat::every(Duration::from_millis(20))),
-    );
+    let mut publisher = context
+        .socket_with::<Pub>(
+            SocketOptions::new()
+                .security(Security::curve_server(server))
+                .heartbeat(Heartbeat::every(Duration::from_millis(20))),
+        )
+        .unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
-    let mut subscriber = context.socket_with::<Sub>(
-        SocketOptions::new()
-            .security(Security::curve_client(Keypair::generate(), server_key))
-            .heartbeat(Heartbeat::every(Duration::from_millis(20))),
-    );
+    let mut subscriber = context
+        .socket_with::<Sub>(
+            SocketOptions::new()
+                .security(Security::curve_client(Keypair::generate(), server_key))
+                .heartbeat(Heartbeat::every(Duration::from_millis(20))),
+        )
+        .unwrap();
     subscriber.subscribe("news");
     subscriber.connect(&bound).unwrap();
     let started = std::time::Instant::now();
@@ -211,12 +232,16 @@ fn curve_over_ipc() {
     let server = Keypair::generate();
     let server_key = server.public();
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(secured(Security::curve_server(server)));
+    let mut pull = context
+        .socket_with::<Pull>(secured(Security::curve_server(server)))
+        .unwrap();
     let bound = pull.bind("ipc://*").unwrap();
-    let mut push = context.socket_with::<Push>(secured(Security::curve_client(
-        Keypair::generate(),
-        server_key,
-    )));
+    let mut push = context
+        .socket_with::<Push>(secured(Security::curve_client(
+            Keypair::generate(),
+            server_key,
+        )))
+        .unwrap();
     push.connect(&bound).unwrap();
     push.send("over a unix socket, encrypted").unwrap();
     assert_eq!(

@@ -24,7 +24,7 @@ type TaskResult = Result<(), Box<dyn std::error::Error + Send + Sync>>;
 /// A client: a request-reply dialog over a standard synchronous REQ
 /// socket.
 fn client_task(context: Context, me: String) -> TaskResult {
-    let mut client = context.socket::<Req>();
+    let mut client = context.socket::<Req>().unwrap();
     client.connect(format!("ipc://{me}-localfe.ipc"))?;
 
     loop {
@@ -38,7 +38,7 @@ fn client_task(context: Context, me: String) -> TaskResult {
 /// A worker: plugs into the load balancer with a REQ socket, and answers
 /// each request with OK in place of its body.
 fn worker_task(context: Context, me: String) -> TaskResult {
-    let mut worker = context.socket::<Req>();
+    let mut worker = context.socket::<Req>().unwrap();
     worker.connect(format!("ipc://{me}-localbe.ipc"))?;
 
     // Tell broker we're ready for work
@@ -68,20 +68,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let named = || SocketOptions::new().identity(identity.clone());
 
     // Bind cloud frontend to endpoint
-    let mut cloudfe = context.socket_with::<Router>(named());
+    let mut cloudfe = context.socket_with::<Router>(named())?;
     cloudfe.bind(format!("ipc://{me}-cloud.ipc"))?;
 
     // Connect cloud backend to all peers
-    let mut cloudbe = context.socket_with::<Router>(named());
+    let mut cloudbe = context.socket_with::<Router>(named())?;
     for peer in peers {
         println!("I: connecting to cloud frontend at '{peer}'");
         cloudbe.connect(format!("ipc://{peer}-cloud.ipc"))?;
     }
 
     // Prepare local frontend and backend
-    let mut localfe = context.socket::<Router>();
+    let mut localfe = context.socket::<Router>()?;
     localfe.bind(format!("ipc://{me}-localfe.ipc"))?;
-    let mut localbe = context.socket::<Router>();
+    let mut localbe = context.socket::<Router>()?;
     localbe.bind(format!("ipc://{me}-localbe.ipc"))?;
 
     // Get user to tell us when we can start...

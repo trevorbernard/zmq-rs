@@ -14,7 +14,7 @@ const CHUNK_SIZE: usize = 250_000;
 const PIPELINE: usize = 10;
 
 fn client_thread(context: Context) -> Result<(), zmq::Error> {
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("tcp://127.0.0.1:6000")?;
 
     // Up to this many chunks in transit
@@ -53,8 +53,9 @@ fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Sen
     let mut file = File::open("testdata")?;
 
     let hwm = PIPELINE * 2;
-    let mut router =
-        context.socket_with::<Router>(SocketOptions::new().send_hwm(hwm).recv_hwm(hwm));
+    let mut router = context
+        .socket_with::<Router>(SocketOptions::new().send_hwm(hwm).recv_hwm(hwm))
+        .unwrap();
     router.bind("tcp://*:6000")?;
     loop {
         let (identity, request) = router.recv()?;

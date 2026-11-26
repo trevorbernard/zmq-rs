@@ -5,9 +5,9 @@ use zmq::{Context, Pull, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut receiver = context.socket::<Pull>();
+    let mut receiver = context.socket::<Pull>()?;
     receiver.connect("tcp://localhost:5557")?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.connect("tcp://localhost:5556")?;
     subscriber.subscribe("10001 ");
 

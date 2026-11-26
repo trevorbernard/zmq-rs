@@ -15,7 +15,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let connect_endpoint = "tcp://localhost:5555";
     let context = Context::new()?;
     let mut server = context
-        .socket_with::<Router>(SocketOptions::new().identity(Identity::new(connect_endpoint)?));
+        .socket_with::<Router>(SocketOptions::new().identity(Identity::new(connect_endpoint)?))?;
     server.bind(bind_endpoint)?;
     println!("I: service is ready at {bind_endpoint}");
 

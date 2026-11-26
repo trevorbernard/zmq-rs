@@ -22,11 +22,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
 
     // Bind state backend to endpoint
-    let mut statebe = context.socket::<Pub>();
+    let mut statebe = context.socket::<Pub>()?;
     statebe.bind(format!("ipc://{me}-state.ipc"))?;
 
     // Connect statefe to all peers
-    let mut statefe = context.socket::<Sub>();
+    let mut statefe = context.socket::<Sub>()?;
     statefe.subscribe("");
     for peer in peers {
         println!("I: connecting to state backend at '{peer}'");

@@ -11,7 +11,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     };
     let context = Context::new()?;
-    let mut server = context.socket::<Rep>();
+    let mut server = context.socket::<Rep>()?;
     server.bind(&endpoint)?;
 
     println!("I: service is ready at {endpoint}");

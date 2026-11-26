@@ -20,7 +20,8 @@ impl Flclient {
     fn new(context: &Context) -> Self {
         Self {
             socket: context
-                .socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO))),
+                .socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)))
+                .unwrap(),
             servers: 0,
             sequence: 0,
         }

@@ -14,10 +14,10 @@ fn named(identity: &'static str) -> SocketOptions {
 #[test]
 fn probe_router_router() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Router>();
+    let mut server = context.socket::<Router>().unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
 
-    let mut client = context.socket_with::<Router>(named("X"));
+    let mut client = context.socket_with::<Router>(named("X")).unwrap();
     client.set_probe(true);
     client.connect(&endpoint).unwrap();
 
@@ -41,10 +41,10 @@ fn probe_router_router() {
 #[test]
 fn probe_router_dealer() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Router>();
+    let mut server = context.socket::<Router>().unwrap();
     let endpoint = server.bind(free_endpoint()).unwrap().to_string();
 
-    let mut client = context.socket_with::<Dealer>(named("X"));
+    let mut client = context.socket_with::<Dealer>(named("X")).unwrap();
     client.set_probe(true);
     client.connect(&endpoint).unwrap();
 

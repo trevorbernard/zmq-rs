@@ -6,7 +6,7 @@
 use std::thread;
 use std::time::Duration;
 
-use zmq::{Context, Dealer, Linger, Message, Pull, Push, Socket, SocketOptions};
+use zmq::{Context, Dealer, Linger, Message, Pull, Push, Socket, SocketOptions, TrySendError};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::{FIVE, SETTLE, settle};
@@ -37,10 +37,10 @@ fn count_received(socket: &mut Socket<Pull>) -> usize {
 #[test]
 fn immediate_1() {
     let context = Context::new().unwrap();
-    let mut to = context.socket_with::<Pull>(options(false));
+    let mut to = context.socket_with::<Pull>(options(false)).unwrap();
     let endpoint = to.bind(free_endpoint()).unwrap().to_string();
 
-    let mut from = context.socket_with::<Push>(options(false));
+    let mut from = context.socket_with::<Push>(options(false)).unwrap();
     from.connect(free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
     settle();
@@ -56,10 +56,10 @@ fn immediate_1() {
 #[test]
 fn immediate_2() {
     let context = Context::new().unwrap();
-    let mut to = context.socket_with::<Pull>(options(false));
+    let mut to = context.socket_with::<Pull>(options(false)).unwrap();
     let endpoint = to.bind(free_endpoint()).unwrap().to_string();
 
-    let mut from = context.socket_with::<Push>(options(true));
+    let mut from = context.socket_with::<Push>(options(true)).unwrap();
     from.connect(free_endpoint()).unwrap();
     from.connect(&endpoint).unwrap();
 
@@ -73,8 +73,8 @@ fn immediate_2() {
 #[test]
 fn immediate_3() {
     let context = Context::new().unwrap();
-    let mut backend = context.socket_with::<Dealer>(options(false));
-    let mut frontend = context.socket_with::<Dealer>(options(true));
+    let mut backend = context.socket_with::<Dealer>(options(false)).unwrap();
+    let mut frontend = context.socket_with::<Dealer>(options(true)).unwrap();
     let endpoint = backend.bind(free_endpoint()).unwrap().to_string();
     frontend.connect(&endpoint).unwrap();
 
@@ -91,9 +91,12 @@ fn immediate_3() {
     // Give time to process the disconnect
     thread::sleep(SETTLE * 10);
 
-    assert!(frontend.try_send("Hello").is_err(), "no connection");
+    assert!(
+        matches!(frontend.try_send("Hello"), Err(TrySendError::Full(_))),
+        "no connection"
+    );
 
-    let mut backend = context.socket_with::<Dealer>(options(false));
+    let mut backend = context.socket_with::<Dealer>(options(false)).unwrap();
     backend.bind(&endpoint).unwrap();
     assert!(backend.send_timeout("Hello", FIVE).is_ok());
     assert_eq!(

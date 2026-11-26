@@ -41,7 +41,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
     let publisher = Socket::new(Kind::Pub);
     let addr = publisher.bind_loopback();
     let context = Context::new().unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("news");
     subscriber.connect(format!("tcp://{addr}")).unwrap();
 
@@ -75,7 +75,7 @@ fn our_sub_receives_its_topics_from_a_libzmq_pub() {
 #[test]
 fn a_libzmq_sub_receives_its_topics_from_our_pub() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.set_receive_timeout(FIVE);
@@ -92,7 +92,7 @@ fn a_libzmq_sub_receives_its_topics_from_our_pub() {
 #[test]
 fn a_libzmq_sub_unsubscribing_stops_our_pub() {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let bound = publisher.bind(free_endpoint()).unwrap();
     let subscriber = Socket::new(Kind::Sub);
     subscriber.subscribe(b"a");
@@ -110,7 +110,7 @@ fn a_libzmq_sub_unsubscribing_stops_our_pub() {
 fn our_sub_filters_what_a_careless_publisher_sends() {
     let listener = TcpListener::bind(free_port()).unwrap();
     let context = Context::new().unwrap();
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>().unwrap();
     subscriber.subscribe("news");
     subscriber
         .connect(format!("tcp://{}", listener.local_addr().unwrap()))
@@ -136,7 +136,7 @@ fn our_sub_filters_what_a_careless_publisher_sends() {
 fn a_zmtp_1_0_subscriber_gets_everything() {
     // ZMTP 1.0 SUBs filter for themselves and never send subscriptions.
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>().unwrap();
     let addr = publisher.bind(free_endpoint()).unwrap().tcp_addr().unwrap();
     let mut stream = TcpStream::connect(addr).unwrap();
     stream.set_read_timeout(Some(FIVE)).unwrap();

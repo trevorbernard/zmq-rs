@@ -35,9 +35,9 @@ impl CloneClient {
     /// servers.
     pub fn new() -> Result<Self, zmq::Error> {
         let context = Context::new().map_err(zmq::Error::Io)?;
-        let mut pipe = context.socket::<Pair>();
+        let mut pipe = context.socket::<Pair>().unwrap();
         pipe.bind("inproc://clone-agent")?;
-        let mut agent_pipe = context.socket::<Pair>();
+        let mut agent_pipe = context.socket::<Pair>().unwrap();
         agent_pipe.connect("inproc://clone-agent")?;
         thread::spawn(move || Agent::new(context, agent_pipe).run());
         Ok(Self { pipe })
@@ -101,9 +101,9 @@ struct Server {
 impl Server {
     fn new(context: &Context, address: &str, port: u16, subtree: &str) -> Result<Self, zmq::Error> {
         log(&format!("I: adding server {address}:{port}..."));
-        let mut snapshot = context.socket::<Dealer>();
+        let mut snapshot = context.socket::<Dealer>().unwrap();
         snapshot.connect(format!("{address}:{port}"))?;
-        let mut subscriber = context.socket::<Sub>();
+        let mut subscriber = context.socket::<Sub>().unwrap();
         subscriber.connect(format!("{address}:{}", port + 1))?;
         subscriber.subscribe(subtree);
         subscriber.subscribe("HUGZ");
@@ -149,7 +149,7 @@ struct Agent {
 
 impl Agent {
     fn new(context: Context, pipe: Socket<Pair>) -> Self {
-        let publisher = context.socket::<Pub>();
+        let publisher = context.socket::<Pub>().unwrap();
         Self {
             context,
             pipe,

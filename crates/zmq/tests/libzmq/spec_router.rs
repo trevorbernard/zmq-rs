@@ -19,13 +19,13 @@ fn named(id: &str) -> SocketOptions {
 /// strategy.
 fn fair_queue_in(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut receiver = context.socket::<Router>();
+    let mut receiver = context.socket::<Router>().unwrap();
     let connect_address = receiver.bind(bind_address).unwrap().to_string();
     let names = ["A", "B", "C", "D", "E"];
     let mut senders: Vec<_> = names
         .iter()
         .map(|name| {
-            let mut sender = context.socket_with::<Dealer>(named(name));
+            let mut sender = context.socket_with::<Dealer>(named(name)).unwrap();
             sender.connect(&connect_address).unwrap();
             sender
         })
@@ -80,9 +80,9 @@ fn destroy_queue_on_disconnect(bind_address: &str) {
     let context = Context::new().unwrap();
     // libzmq sets ZMQ_ROUTER_MANDATORY; a zmq-rs ROUTER always refuses to
     // send to an unknown peer.
-    let mut a = context.socket::<Router>();
+    let mut a = context.socket::<Router>().unwrap();
     let connect_address = a.bind(bind_address).unwrap().to_string();
-    let mut b = context.socket_with::<Dealer>(named("B"));
+    let mut b = context.socket_with::<Dealer>(named("B")).unwrap();
     b.connect(&connect_address).unwrap();
     settle();
 

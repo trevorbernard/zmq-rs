@@ -155,9 +155,9 @@ fn ours_message(frames: usize, size: usize) -> Message {
 fn multipart(ours: bool, frames: usize, count: usize) -> f64 {
     if ours {
         let (send_cx, recv_cx) = (Context::new().unwrap(), Context::new().unwrap());
-        let mut pull = recv_cx.socket::<Pull>();
+        let mut pull = recv_cx.socket::<Pull>().unwrap();
         let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
-        let mut push = send_cx.socket::<Push>();
+        let mut push = send_cx.socket::<Push>().unwrap();
         push.connect(&bound).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {
@@ -215,13 +215,13 @@ fn fanout(ours: bool, subs: usize, count: usize) -> f64 {
     let mut threads = Vec::new();
     let elapsed = if ours {
         let pub_cx = Context::new().unwrap();
-        let mut publisher = pub_cx.socket_with::<Pub>(unlimited());
+        let mut publisher = pub_cx.socket_with::<Pub>(unlimited()).unwrap();
         let bound = publisher.bind("tcp://127.0.0.1:*").unwrap().to_string();
         for _ in 0..subs {
             let (bound, warmed, finished) = (bound.clone(), warmed.clone(), finished.clone());
             threads.push(thread::spawn(move || {
                 let cx = Context::new().unwrap();
-                let mut sub = cx.socket_with::<Sub>(unlimited());
+                let mut sub = cx.socket_with::<Sub>(unlimited()).unwrap();
                 sub.subscribe("");
                 sub.connect(&bound).unwrap();
                 let mut seen_warm = false;
@@ -302,11 +302,11 @@ fn fanin(ours: bool, pushers: usize, count: usize) -> f64 {
     if ours {
         let mut threads = Vec::new();
         let cx = Context::new().unwrap();
-        let mut pull = cx.socket::<Pull>();
+        let mut pull = cx.socket::<Pull>().unwrap();
         let bound = pull.bind("tcp://127.0.0.1:*").unwrap().to_string();
         let send_cx = Context::new().unwrap();
         for _ in 0..pushers {
-            let mut push = send_cx.socket::<Push>();
+            let mut push = send_cx.socket::<Push>().unwrap();
             push.connect(&bound).unwrap();
             threads.push(thread::spawn(move || {
                 for _ in 0..each {
@@ -363,11 +363,11 @@ fn router(ours: bool, dealers: usize, count: usize) -> f64 {
     if ours {
         let mut threads = Vec::new();
         let cx = Context::new().unwrap();
-        let mut router = cx.socket::<Router>();
+        let mut router = cx.socket::<Router>().unwrap();
         let bound = router.bind("tcp://127.0.0.1:*").unwrap().to_string();
         let send_cx = Context::new().unwrap();
         for _ in 0..dealers {
-            let mut dealer = send_cx.socket::<Dealer>();
+            let mut dealer = send_cx.socket::<Dealer>().unwrap();
             dealer.connect(&bound).unwrap();
             threads.push(thread::spawn(move || {
                 for _ in 0..each {
@@ -426,11 +426,14 @@ fn curve(ours: bool, size: usize, count: usize) -> f64 {
         let (send_cx, recv_cx) = (Context::new().unwrap(), Context::new().unwrap());
         let server_key = server.public();
         let mut pull = recv_cx
-            .socket_with::<Pull>(SocketOptions::new().security(Security::curve_server(server)));
+            .socket_with::<Pull>(SocketOptions::new().security(Security::curve_server(server)))
+            .unwrap();
         let bound = pull.bind("tcp://127.0.0.1:*").unwrap();
-        let mut push = send_cx.socket_with::<Push>(
-            SocketOptions::new().security(Security::curve_client(client, server_key)),
-        );
+        let mut push = send_cx
+            .socket_with::<Push>(
+                SocketOptions::new().security(Security::curve_client(client, server_key)),
+            )
+            .unwrap();
         push.connect(&bound).unwrap();
         let sender = thread::spawn(move || {
             for _ in 0..count {

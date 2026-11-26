@@ -16,10 +16,10 @@ fn rebind_ipc() {
     let path = env::temp_dir().join(format!("zmq-rs-rebind-{}.ipc", process::id()));
     let endpoint = format!("ipc://{}", path.display());
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Push>();
-    let mut second = context.socket::<Push>();
+    let mut first = context.socket::<Push>().unwrap();
+    let mut second = context.socket::<Push>().unwrap();
     first.bind(&endpoint).unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.connect(&endpoint).unwrap();
 
     first.send("42").unwrap();

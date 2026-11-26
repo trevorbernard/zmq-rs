@@ -38,10 +38,10 @@ fn expect_message(subscriber: &mut Socket<Sub>, topic: &'static str) {
 
 fn xpub_with_subs<const N: usize>(endpoint: &str) -> (Socket<XPub>, [Socket<Sub>; N]) {
     let context = Context::new().unwrap();
-    let mut publisher = context.socket::<XPub>();
+    let mut publisher = context.socket::<XPub>().unwrap();
     publisher.bind(endpoint).unwrap();
     let subscribers = std::array::from_fn(|_| {
-        let mut subscriber = context.socket::<Sub>();
+        let mut subscriber = context.socket::<Sub>().unwrap();
         subscriber.connect(endpoint).unwrap();
         subscriber
     });

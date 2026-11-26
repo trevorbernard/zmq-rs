@@ -28,7 +28,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
     theirs.set_receive_timeout(FIVE);
     let addr = theirs.bind_loopback();
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     ours.connect(format!("tcp://{addr}")).unwrap();
     ours.send("ping").unwrap();
     assert_eq!(theirs.recv().unwrap(), [b"ping"]);
@@ -41,7 +41,7 @@ fn our_pair_talks_to_a_libzmq_pair() {
 #[test]
 fn a_libzmq_pair_talks_to_ours() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let theirs = Socket::new(Kind::Pair);
     theirs.set_receive_timeout(FIVE);
@@ -56,7 +56,7 @@ fn a_libzmq_pair_talks_to_ours() {
 #[test]
 fn a_second_libzmq_pair_waits_its_turn() {
     let context = Context::new().unwrap();
-    let mut ours = context.socket::<Pair>();
+    let mut ours = context.socket::<Pair>().unwrap();
     let bound = ours.bind(free_endpoint()).unwrap();
     let first = Socket::new(Kind::Pair);
     first.connect(bound.clone());
@@ -91,4 +91,69 @@ fn a_second_libzmq_pair_waits_its_turn() {
     assert!(heard == "knock" || heard == "lost");
     ours.send("welcome").unwrap();
     assert_eq!(second.recv().unwrap(), [b"welcome"]);
+}
+
+/// A hand-written PAIR that connects to `addr`, sends three messages and
+/// leaves.
+fn send_three_and_leave(addr: std::net::SocketAddr) {
+    let mut peer = zmq_interop::Peer::connect(addr, zmtp::SocketType::Pair, b"").unwrap();
+    for body in ["one", "two", "three"] {
+        peer.send(&zmtp::Message::from(body)).unwrap();
+    }
+}
+
+/// A second hand-written PAIR, which connects once the first has left and
+/// sends one message.
+fn then_a_second(addr: std::net::SocketAddr) -> zmq_interop::Peer {
+    let mut peer = zmq_interop::Peer::connect(addr, zmtp::SocketType::Pair, b"").unwrap();
+    peer.send(&zmtp::Message::from("four")).unwrap();
+    peer
+}
+
+/// What `pair` receives until nothing comes for a while.
+fn libzmq_receives(pair: &Socket) -> Vec<String> {
+    pair.set_receive_timeout(Duration::from_millis(300));
+    std::iter::from_fn(|| pair.recv().ok())
+        .map(|message| String::from_utf8_lossy(&message[0]).into_owned())
+        .collect()
+}
+
+#[test]
+fn libzmq_delivers_what_a_departed_peer_sent() {
+    let pair = Socket::new(Kind::Pair);
+    let monitor = pair.monitor();
+    let addr = pair.bind_loopback();
+    send_three_and_leave(addr);
+    monitor.values_of(zmq_interop::libzmq::EVENT_DISCONNECTED, 1);
+    assert_eq!(libzmq_receives(&pair), ["one", "two", "three"]);
+}
+
+#[test]
+fn we_deliver_what_a_departed_peer_sent() {
+    let context = Context::new().unwrap();
+    let mut pair = context.socket::<Pair>().unwrap();
+    let mut monitor = pair.monitor();
+    let addr = pair.bind("tcp://127.0.0.1:*").unwrap().tcp_addr().unwrap();
+    send_three_and_leave(addr);
+    while monitor.recv_timeout(FIVE).unwrap().expect("an event").kind
+        != zmq::EventKind::Disconnected
+    {}
+    for body in ["one", "two", "three"] {
+        assert_eq!(pair.recv_timeout(FIVE).unwrap(), Some(Message::from(body)));
+    }
+}
+
+/// Until the application has read what the first peer sent, libzmq's PAIR
+/// still holds that peer's pipe, and turns a second peer away: its message
+/// is lost. Ours lets the second in (`docs/libzmq-compatibility.md`).
+#[test]
+fn libzmq_turns_a_second_peer_away_while_the_firsts_messages_wait() {
+    let pair = Socket::new(Kind::Pair);
+    let monitor = pair.monitor();
+    let addr = pair.bind_loopback();
+    send_three_and_leave(addr);
+    monitor.values_of(zmq_interop::libzmq::EVENT_DISCONNECTED, 1);
+    let _second = then_a_second(addr);
+    thread::sleep(Duration::from_millis(200));
+    assert_eq!(libzmq_receives(&pair), ["one", "two", "three"]);
 }

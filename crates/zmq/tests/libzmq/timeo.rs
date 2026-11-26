@@ -11,7 +11,7 @@ use crate::support::{FIVE, within};
 #[test]
 fn timeo() {
     let context = Context::new().unwrap();
-    let mut frontend = context.socket::<Dealer>();
+    let mut frontend = context.socket::<Dealer>().unwrap();
     frontend.bind("inproc://timeout_test").unwrap();
 
     // A receive on a socket with no peers returns at once.
@@ -26,7 +26,7 @@ fn timeo() {
     assert!(elapsed > timeout - jitter, "returned after {elapsed:?}");
 
     // Messages still flow as usual.
-    let mut backend = context.socket::<Dealer>();
+    let mut backend = context.socket::<Dealer>().unwrap();
     backend.connect("inproc://timeout_test").unwrap();
     assert!(backend.send_timeout("Hello", timeout).is_ok());
     let received = within(FIVE, move || frontend.recv().unwrap());

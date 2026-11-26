@@ -20,7 +20,7 @@ fn bound_to_device() -> SocketOptions {
 #[test]
 fn pair_tcp_bind_to_device() {
     let context = Context::new().unwrap();
-    let mut sb = context.socket_with::<Pair>(bound_to_device());
+    let mut sb = context.socket_with::<Pair>(bound_to_device()).unwrap();
     let my_endpoint = match sb.bind(free_endpoint()) {
         Ok(endpoint) => endpoint.to_string(),
         Err(Error::Io(err)) if err.kind() == io::ErrorKind::PermissionDenied => {
@@ -30,7 +30,7 @@ fn pair_tcp_bind_to_device() {
         Err(err) => panic!("{err}"),
     };
 
-    let mut sc = context.socket_with::<Pair>(bound_to_device());
+    let mut sc = context.socket_with::<Pair>(bound_to_device()).unwrap();
     sc.connect(&my_endpoint).unwrap();
 
     bounce_pair(&mut sb, &mut sc);

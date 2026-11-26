@@ -12,7 +12,7 @@ use zmq::{Context, Dealer, Hwm, Router, SocketOptions};
 const CHUNK_SIZE: u64 = 250_000;
 
 fn client_thread(context: Context) -> Result<(), zmq::Error> {
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("tcp://127.0.0.1:6000")?;
 
     dealer.send("fetch")?;
@@ -37,11 +37,13 @@ fn client_thread(context: Context) -> Result<(), zmq::Error> {
 fn server_thread(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let mut file = File::open("testdata")?;
 
-    let mut router = context.socket_with::<Router>(
-        SocketOptions::new()
-            .send_hwm(Hwm::Unlimited)
-            .recv_hwm(Hwm::Unlimited),
-    );
+    let mut router = context
+        .socket_with::<Router>(
+            SocketOptions::new()
+                .send_hwm(Hwm::Unlimited)
+                .recv_hwm(Hwm::Unlimited),
+        )
+        .unwrap();
     router.bind("tcp://*:6000")?;
     loop {
         // First frame in each message is the sender identity, which the

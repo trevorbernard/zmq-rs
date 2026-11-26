@@ -15,11 +15,11 @@ fn inproc(name: &str) -> String {
 /// strategy.
 fn fair_queue_in(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let connect_address = rep.bind(bind_address).unwrap().to_string();
     let mut reqs: Vec<_> = (0..5)
         .map(|_| {
-            let mut req = context.socket::<Req>();
+            let mut req = context.socket::<Req>().unwrap();
             req.connect(&connect_address).unwrap();
             Some(req)
         })
@@ -76,9 +76,9 @@ fn fair_queue_in_tcp() {
 /// SHALL deliver this message back to the originating peer.
 fn envelope(bind_address: &str) {
     let context = Context::new().unwrap();
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     let connect_address = rep.bind(bind_address).unwrap().to_string();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect(&connect_address).unwrap();
 
     // minimal envelope

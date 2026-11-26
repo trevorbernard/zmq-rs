@@ -7,8 +7,9 @@ use zmq_test_ports::free_endpoint;
 use crate::support::{FIVE, SETTLE};
 
 fn dealer_called_x(context: &Context, endpoint: &str) -> Socket<Dealer> {
-    let mut dealer =
-        context.socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("X").unwrap()));
+    let mut dealer = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(Identity::new("X").unwrap()))
+        .unwrap();
     dealer.connect(endpoint).unwrap();
     dealer
 }
@@ -25,7 +26,7 @@ fn hello_from_x(dealer: &mut Socket<Dealer>, router: &mut Socket<Router>) {
 #[test]
 fn with_handover() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_handover(true);
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
@@ -48,7 +49,7 @@ fn with_handover() {
 #[test]
 fn without_handover() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let endpoint = router.bind(free_endpoint()).unwrap().to_string();
 
     let mut dealer_one = dealer_called_x(&context, &endpoint);

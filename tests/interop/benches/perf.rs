@@ -513,7 +513,7 @@ fn bind<T: zmq::SocketType>(
     transport: Transport,
 ) -> (End<T>, Endpoint) {
     if ours {
-        let mut socket = context.socket::<T>();
+        let mut socket = context.socket::<T>().unwrap();
         let target = match transport {
             Transport::Tcp => "tcp://127.0.0.1:*".to_owned(),
             _ => endpoint(transport).to_string(),
@@ -542,7 +542,7 @@ fn connect<T: zmq::SocketType>(
     endpoint: &Endpoint,
 ) -> End<T> {
     if ours {
-        let mut socket = context.socket::<T>();
+        let mut socket = context.socket::<T>().unwrap();
         socket.connect(endpoint).expect("connect");
         End::Ours(socket)
     } else {

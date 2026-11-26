@@ -9,10 +9,10 @@ use crate::support::FIVE;
 #[test]
 fn test() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     let address = server.bind(free_endpoint()).unwrap().to_string();
 
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.set_hello_message("HELLO");
     client.set_hiccup_message("HICCUP");
     client.connect(&address).unwrap();

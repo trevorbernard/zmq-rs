@@ -19,7 +19,7 @@ fn with_identity() -> SocketOptions {
 
 /// A client: a REQ that sends one request and prints the reply.
 fn client_task(context: Context) -> TaskResult {
-    let mut client = context.socket_with::<Req>(with_identity());
+    let mut client = context.socket_with::<Req>(with_identity()).unwrap();
     client.connect("ipc://frontend.ipc")?;
 
     let reply = client.request("HELLO")?;
@@ -31,7 +31,7 @@ fn client_task(context: Context) -> TaskResult {
 /// handed with OK. Each request comes as the client's routing id, an empty
 /// frame, and the request.
 fn worker_task(context: Context) -> TaskResult {
-    let mut worker = context.socket_with::<Req>(with_identity());
+    let mut worker = context.socket_with::<Req>(with_identity()).unwrap();
     worker.connect("ipc://backend.ipc")?;
 
     // Tell broker we're ready for work
@@ -47,9 +47,9 @@ fn worker_task(context: Context) -> TaskResult {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>()?;
     frontend.bind("ipc://frontend.ipc")?;
-    let mut backend = context.socket::<Router>();
+    let mut backend = context.socket::<Router>()?;
     backend.bind("ipc://backend.ipc")?;
 
     let clients: Vec<_> = (0..NBR_CLIENTS)

@@ -13,9 +13,9 @@ use zmq::{Context, Dealer, Sub};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare our context and subscriber
     let context = Context::new()?;
-    let mut snapshot = context.socket::<Dealer>();
+    let mut snapshot = context.socket::<Dealer>()?;
     snapshot.connect("tcp://localhost:5556")?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.subscribe("");
     subscriber.connect("tcp://localhost:5557")?;
 

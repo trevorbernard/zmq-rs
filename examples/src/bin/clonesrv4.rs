@@ -14,11 +14,11 @@ use zmq::{Context, Pub, Pull, Router};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare our context and sockets
     let context = Context::new()?;
-    let mut snapshot = context.socket::<Router>();
+    let mut snapshot = context.socket::<Router>()?;
     snapshot.bind("tcp://*:5556")?;
-    let mut publisher = context.socket::<Pub>();
+    let mut publisher = context.socket::<Pub>()?;
     publisher.bind("tcp://*:5557")?;
-    let mut collector = context.socket::<Pull>();
+    let mut collector = context.socket::<Pull>()?;
     collector.bind("tcp://*:5558")?;
 
     let mut sequence = 0;

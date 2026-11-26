@@ -27,11 +27,11 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 #[test]
 fn a_server_answers_each_client_by_its_id() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     let bound = server.bind(free_endpoint()).unwrap();
     let mut clients: Vec<_> = (0..3)
         .map(|n| {
-            let mut client = context.socket::<Client>();
+            let mut client = context.socket::<Client>().unwrap();
             client.connect(&bound).unwrap();
             client.send(format!("hello from {n}")).unwrap();
             client
@@ -49,7 +49,7 @@ fn a_server_answers_each_client_by_its_id() {
         server.send(id, format!("re: {text}")).unwrap();
     }
     for (n, client) in clients.iter_mut().enumerate() {
-        let mut client = std::mem::replace(client, context.socket::<Client>());
+        let mut client = std::mem::replace(client, context.socket::<Client>().unwrap());
         let reply = within(FIVE, move || client.recv().unwrap());
         assert_eq!(reply, Frame::from(format!("re: hello from {n}")));
     }
@@ -58,9 +58,9 @@ fn a_server_answers_each_client_by_its_id() {
 #[test]
 fn sending_to_an_unknown_or_departed_client_fails() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.bind("inproc://departed").unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect("inproc://departed").unwrap();
     client.send("hi").unwrap();
     let (id, _) = server.try_recv().unwrap().unwrap();
@@ -80,9 +80,13 @@ fn sending_to_an_unknown_or_departed_client_fails() {
 fn a_full_client_makes_try_send_hand_the_frame_back() {
     let context = Context::new().unwrap();
     let one = Hwm::from(1);
-    let mut server = context.socket_with::<Server>(SocketOptions::new().send_hwm(one));
+    let mut server = context
+        .socket_with::<Server>(SocketOptions::new().send_hwm(one))
+        .unwrap();
     server.bind("inproc://full").unwrap();
-    let mut client = context.socket_with::<Client>(SocketOptions::new().recv_hwm(one));
+    let mut client = context
+        .socket_with::<Client>(SocketOptions::new().recv_hwm(one))
+        .unwrap();
     client.connect("inproc://full").unwrap();
     client.send("hi").unwrap();
     let (id, _) = server.try_recv().unwrap().unwrap();
@@ -114,9 +118,9 @@ fn a_full_client_makes_try_send_hand_the_frame_back() {
 #[test]
 fn a_disconnected_client_is_forgotten() {
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.bind("inproc://disconnect").unwrap();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     client.connect("inproc://disconnect").unwrap();
     client.send("hi").unwrap();
     let (id, _) = server.try_recv().unwrap().unwrap();
@@ -137,12 +141,12 @@ fn a_client_load_balances_across_servers() {
     let context = Context::new().unwrap();
     let mut servers: Vec<_> = (0..2)
         .map(|n| {
-            let mut server = context.socket::<Server>();
+            let mut server = context.socket::<Server>().unwrap();
             server.bind(format!("inproc://balanced-{n}")).unwrap();
             server
         })
         .collect();
-    let mut client = context.socket::<Client>();
+    let mut client = context.socket::<Client>().unwrap();
     for n in 0..2 {
         client.connect(format!("inproc://balanced-{n}")).unwrap();
     }
@@ -157,12 +161,17 @@ fn a_client_load_balances_across_servers() {
 }
 
 #[test]
-fn only_clients_and_servers_pair() {
+fn inproc_pairs_a_server_with_any_socket_type() {
+    // As in libzmq, where only a handshake checks socket types.
     let context = Context::new().unwrap();
-    let mut server = context.socket::<Server>();
+    let mut server = context.socket::<Server>().unwrap();
     server.bind("inproc://strangers").unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect("inproc://strangers").unwrap();
-    assert!(dealer.try_send("not a client").is_err());
-    assert!(server.try_recv().unwrap().is_none());
+    dealer.try_send("not a client").unwrap();
+    let (_, frame) = server
+        .recv_timeout(Duration::from_secs(5))
+        .unwrap()
+        .expect("the dealer's message");
+    assert_eq!(frame, "not a client");
 }

@@ -32,15 +32,18 @@ fn expect(monitor: &mut Monitor, wanted: impl Fn(&EventKind) -> bool) {
 #[test]
 fn we_authenticate_a_libzmq_null_peer() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
-        Security::null_authenticated("lan", |request: &ZapRequest| {
-            assert_eq!(request.credentials, ZapCredentials::Null);
-            ZapReply::Ok {
-                user_id: Frame::from("libzmq"),
-                metadata: Metadata::new(),
-            }
-        }),
-    ));
+    let mut pull = context
+        .socket_with::<Pull>(SocketOptions::new().security(Security::null_authenticated(
+            "lan",
+            |request: &ZapRequest| {
+                assert_eq!(request.credentials, ZapCredentials::Null);
+                ZapReply::Ok {
+                    user_id: Frame::from("libzmq"),
+                    metadata: Metadata::new(),
+                }
+            },
+        )))
+        .unwrap();
     let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
     push.connect(bound);
@@ -59,9 +62,13 @@ fn we_authenticate_a_libzmq_null_peer() {
 #[test]
 fn we_refuse_a_libzmq_null_peer() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket_with::<Pull>(SocketOptions::new().security(
-        Security::null_authenticated("lan", |_: &ZapRequest| ZapReply::AuthenticationFailure),
-    ));
+    let mut pull = context
+        .socket_with::<Pull>(
+            SocketOptions::new().security(Security::null_authenticated("lan", |_: &ZapRequest| {
+                ZapReply::AuthenticationFailure
+            })),
+        )
+        .unwrap();
     let mut monitor = pull.monitor();
     let bound = pull.bind(free_endpoint()).unwrap();
     let push = Socket::new(Kind::Push);
@@ -84,7 +91,7 @@ fn libzmq_authenticates_our_null_peer_through_its_zap_handler() {
         let addr = pull.bind_loopback();
 
         let context = Context::new().unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         let mut monitor = push.monitor();
         push.connect(format!("tcp://{addr}")).unwrap();
         push.send("hello").unwrap();

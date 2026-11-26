@@ -12,9 +12,9 @@ use zmq::{Context, Frame, Message, Sub, XPub, XPubEvent};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut frontend = context.socket::<Sub>();
+    let mut frontend = context.socket::<Sub>()?;
     frontend.connect("tcp://localhost:5557")?;
-    let mut backend = context.socket::<XPub>();
+    let mut backend = context.socket::<XPub>()?;
     backend.bind("tcp://*:5558")?;
 
     // Subscribe to every single topic from publisher

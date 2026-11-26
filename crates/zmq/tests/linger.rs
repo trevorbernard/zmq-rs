@@ -26,7 +26,7 @@ fn within<T: Send + 'static>(limit: Duration, f: impl FnOnce() -> T + Send + 'st
 fn dropping_the_context_delivers_what_was_queued() {
     const COUNT: usize = 100_000;
     let receiving = Context::new().unwrap();
-    let mut pull = receiving.socket::<Pull>();
+    let mut pull = receiving.socket::<Pull>().unwrap();
     let endpoint = pull.bind(free_endpoint()).unwrap().to_string();
 
     let receiver = thread::spawn(move || {
@@ -39,7 +39,9 @@ fn dropping_the_context_delivers_what_was_queued() {
     within(FIVE * 6, move || {
         let context = Context::new().unwrap();
         // So nearly everything is still queued when the context goes.
-        let mut push = context.socket_with::<Push>(SocketOptions::new().send_hwm(Hwm::Unlimited));
+        let mut push = context
+            .socket_with::<Push>(SocketOptions::new().send_hwm(Hwm::Unlimited))
+            .unwrap();
         push.connect(&endpoint).unwrap();
         // Too much for the kernel's socket buffers to take at once.
         for _ in 0..COUNT {
@@ -59,10 +61,10 @@ fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
     // tried many times.
     for _ in 0..1000 {
         let context = Context::new().unwrap();
-        let mut rep = context.socket::<Rep>();
+        let mut rep = context.socket::<Rep>().unwrap();
         let endpoint = rep.bind(free_endpoint()).unwrap().to_string();
         let replier = thread::spawn(move || rep.recv().unwrap().reply("answer"));
-        let mut req = context.socket::<Req>();
+        let mut req = context.socket::<Req>().unwrap();
         req.connect(&endpoint).unwrap();
         let answer = within(FIVE, move || req.request("question"));
         assert_eq!(answer, Ok("answer".into()));
@@ -74,9 +76,9 @@ fn a_reply_sent_just_before_its_socket_drops_is_delivered() {
 fn an_unconnected_socket_with_nothing_queued_does_not_hold_up_the_drop() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         push.connect(free_endpoint()).unwrap();
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         pull.connect(free_endpoint()).unwrap();
     });
 }
@@ -85,10 +87,10 @@ fn an_unconnected_socket_with_nothing_queued_does_not_hold_up_the_drop() {
 fn subscriptions_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut sub = context.socket::<Sub>();
+        let mut sub = context.socket::<Sub>().unwrap();
         sub.subscribe("a");
         sub.connect(free_endpoint()).unwrap();
-        let mut xsub = context.socket::<XSub>();
+        let mut xsub = context.socket::<XSub>().unwrap();
         xsub.subscribe("a");
         xsub.send("upstream").unwrap();
         xsub.connect(free_endpoint()).unwrap();
@@ -100,7 +102,7 @@ fn subscriptions_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
 fn joins_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut dish = context.socket::<zmq::Dish>();
+        let mut dish = context.socket::<zmq::Dish>().unwrap();
         dish.join(&zmq::Group::new("group").unwrap());
         dish.connect(free_endpoint()).unwrap();
     });
@@ -109,12 +111,14 @@ fn joins_to_a_peer_that_never_comes_do_not_hold_up_the_drop() {
 #[test]
 fn a_subscriber_asked_to_linger_does() {
     let context = Context::new().unwrap();
-    let mut xsub = context.socket_with::<XSub>(SocketOptions::new().linger(Linger::Forever));
+    let mut xsub = context
+        .socket_with::<XSub>(SocketOptions::new().linger(Linger::Forever))
+        .unwrap();
     let endpoint = free_endpoint();
     xsub.connect(&endpoint).unwrap();
     xsub.send("upstream").unwrap();
     drop(xsub);
-    let mut xpub = context.socket::<XPub>();
+    let mut xpub = context.socket::<XPub>().unwrap();
     xpub.bind(&endpoint).unwrap();
     assert_eq!(
         within(FIVE, move || xpub.recv().unwrap()),
@@ -126,9 +130,11 @@ fn a_subscriber_asked_to_linger_does() {
 fn a_bounded_linger_gives_up_on_an_unreachable_peer() {
     within(FIVE, || {
         let context = Context::new().unwrap();
-        let mut push = context.socket_with::<Push>(
-            SocketOptions::new().linger(Linger::For(Duration::from_millis(100))),
-        );
+        let mut push = context
+            .socket_with::<Push>(
+                SocketOptions::new().linger(Linger::For(Duration::from_millis(100))),
+            )
+            .unwrap();
         push.connect(free_endpoint()).unwrap();
         push.send("never delivered").unwrap();
     });

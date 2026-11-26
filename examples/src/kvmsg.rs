@@ -169,9 +169,9 @@ mod tests {
     #[test]
     fn round_trips_through_a_socket() {
         let context = Context::new().unwrap();
-        let mut output = context.socket::<Dealer>();
+        let mut output = context.socket::<Dealer>().unwrap();
         output.bind("inproc://kvmsg_selftest").unwrap();
-        let mut input = context.socket::<Dealer>();
+        let mut input = context.socket::<Dealer>().unwrap();
         input.connect("inproc://kvmsg_selftest").unwrap();
 
         // Test send and receive of simple message

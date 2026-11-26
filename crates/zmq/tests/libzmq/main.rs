@@ -76,6 +76,7 @@ mod xpub_nodrop;
 mod xpub_topic;
 mod xpub_verbose;
 mod xpub_welcome_msg;
+mod zmq_poll_fd;
 
 #[cfg(feature = "draft")]
 mod app_meta;

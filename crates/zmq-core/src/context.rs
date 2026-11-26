@@ -16,7 +16,7 @@ use atomic_waker::AtomicWaker;
 use zmq_pipe::{Hwm, Reader, TryRecvError, Writer, pipe, pipe_conflated};
 use zmtp::{
     Established, Frame, Identity, InvalidName, Message, MessageMetadata, Metadata, PropertyName,
-    SocketType, Version,
+    SocketType, Ttl, Version,
 };
 
 #[cfg(unix)]
@@ -25,6 +25,8 @@ use std::path::{Path, PathBuf};
 use crate::io_thread::{
     ConnectPipes, ConnectRequest, IoCommand, IoThread, ListenRequest, SessionPipes,
 };
+#[cfg(unix)]
+use crate::transport::set_backlog;
 use crate::transport::{Address, IpcCleanup, StreamListener, TcpTuning, listen_tcp};
 use crate::{EventKind, MonitorSink, Reconnect, ReconnectStop, Security, SocksProxy};
 
@@ -175,8 +177,12 @@ pub struct ConnectionConfig {
     /// Keep only the latest message towards the peer, ignoring `send_hwm`
     /// (`ZMQ_CONFLATE`).
     pub conflate_outbound: bool,
-    /// The largest message accepted from the peer, counting all its frames.
+    /// The largest frame accepted from the peer, as libzmq's
+    /// `ZMQ_MAXMSGSIZE`.
     pub max_message_size: Option<u64>,
+    /// The largest message accepted from the peer, counting all its frames.
+    /// libzmq has no such limit.
+    pub max_multipart_size: Option<u64>,
     /// Whether messages from the peer carry the connection's properties.
     pub message_properties: MessageProperties,
     /// How a connecting session retries. Accepted connections never do.
@@ -199,6 +205,9 @@ pub struct ConnectionConfig {
     /// What TCP sockets are given before they connect or listen, nothing
     /// by default.
     pub tcp: TcpTuning,
+    /// How many connections a listener holds for the socket to accept
+    /// (`ZMQ_BACKLOG`): 100 by default, as libzmq's.
+    pub backlog: u32,
     /// The SOCKS5 proxy TCP connections are made through
     /// (`ZMQ_SOCKS_PROXY`), none by default.
     pub socks_proxy: Option<SocksProxy>,
@@ -279,14 +288,17 @@ pub struct TcpKeepalive {
 /// and `ZMQ_HEARTBEAT_TTL`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Heartbeat {
-    /// How often to send a PING once the handshake is done.
+    /// How often to send a PING once the handshake is done. Zero sends
+    /// none, as libzmq's 0.
     pub interval: Duration,
     /// How long to wait for any traffic after a PING before giving up on the
-    /// connection.
+    /// connection. Zero never gives up, as libzmq's 0.
     pub timeout: Duration,
     /// How long the peer should wait for traffic from us before giving up,
-    /// announced in each PING. Zero announces none.
-    pub ttl: Duration,
+    /// announced in each PING, in tenths of a second: `Ttl::try_from` a
+    /// `Duration` takes its whole ones and refuses more than a PING can
+    /// carry, as libzmq does. Zero announces none.
+    pub ttl: Ttl,
 }
 
 impl Heartbeat {
@@ -296,7 +308,7 @@ impl Heartbeat {
         Self {
             interval,
             timeout: interval,
-            ttl: Duration::ZERO,
+            ttl: Ttl::ZERO,
         }
     }
 }
@@ -732,8 +744,9 @@ pub(crate) fn message_pipe(hwm: Hwm, conflate: bool) -> (Writer<Message>, Reader
 }
 
 /// Introduces the two ends of an `inproc` connection to each other, as a
-/// handshake would, and returns the server's end. Incompatible socket types
-/// are never paired: dropping the server's end closes the connection.
+/// handshake would, and returns the server's end. Any two socket types are
+/// paired, as in libzmq, which checks them only in the handshake that
+/// `inproc` does not have.
 ///
 /// The server's hello goes to the client here, and its disconnect message
 /// waits for the client to leave, as libzmq sets both when it connects the
@@ -743,12 +756,7 @@ fn pair(
     client_end: &InprocEnd,
     mut server: Connection,
     client: &PeerSlot,
-) -> Option<Connection> {
-    if !server_end.socket_type.accepts(client_end.socket_type)
-        || !client_end.socket_type.accepts(server_end.socket_type)
-    {
-        return None;
-    }
+) -> Connection {
     server.peer.set(introduce(client_end));
     client.set(introduce(server_end));
     if !server_end.hello_message.is_empty() {
@@ -759,7 +767,7 @@ fn pair(
     if !server_end.disconnect_message.is_empty() {
         server.rx.farewell = Some(Message::new(server_end.disconnect_message.clone()));
     }
-    Some(server)
+    server
 }
 
 /// What a handshake with the peer at `end` would establish.
@@ -799,6 +807,7 @@ impl ConnectionConfig {
             conflate_inbound: false,
             conflate_outbound: false,
             max_message_size: None,
+            max_multipart_size: None,
             message_properties: MessageProperties::default(),
             reconnect: Reconnect::default(),
             immediate: false,
@@ -807,6 +816,7 @@ impl ConnectionConfig {
             heartbeat: None,
             tcp_keepalive: None,
             tcp: TcpTuning::default(),
+            backlog: 100,
             socks_proxy: None,
             reconnect_stop: ReconnectStop::default(),
             metadata: Metadata::new(),
@@ -823,12 +833,13 @@ impl ConnectionConfig {
 impl Context {
     /// A context with one I/O thread, like libzmq's default.
     pub fn new() -> io::Result<Self> {
-        Self::with_io_threads(NonZeroUsize::MIN)
+        Self::with_io_threads(1)
     }
 
-    /// A context with `threads` I/O threads.
-    pub fn with_io_threads(threads: NonZeroUsize) -> io::Result<Self> {
-        let io_threads = (0..threads.get())
+    /// A context with `threads` I/O threads. With none, as libzmq allows,
+    /// it serves `inproc` alone: see [`has_io_threads`](Self::has_io_threads).
+    pub fn with_io_threads(threads: usize) -> io::Result<Self> {
+        let io_threads = (0..threads)
             .map(IoThread::spawn)
             .collect::<io::Result<Vec<_>>>()?;
         Ok(Self {
@@ -845,7 +856,7 @@ impl Context {
     /// reported here, and accepts peers on an I/O thread. Accepted
     /// connections use `config`.
     pub fn bind(&self, addr: SocketAddr, config: ConnectionConfig) -> io::Result<Listener> {
-        let bound = listen_tcp(addr, &config.tcp).and_then(|listener| {
+        let bound = listen_tcp(addr, &config.tcp, config.backlog).and_then(|listener| {
             let local_addr = listener.local_addr()?;
             Ok((listener, local_addr))
         });
@@ -867,7 +878,11 @@ impl Context {
     #[cfg(unix)]
     pub fn bind_ipc(&self, path: &Path, config: ConnectionConfig) -> io::Result<IpcListener> {
         let endpoint = format!("ipc://{}", path.display());
-        let (listener, cleanup) = reported(crate::transport::bind_ipc(path), &config, &endpoint)?;
+        let bound = crate::transport::bind_ipc(path).and_then(|(listener, cleanup)| {
+            set_backlog(&listener, config.backlog)?;
+            Ok((listener, cleanup))
+        });
+        let (listener, cleanup) = reported(bound, &config, &endpoint)?;
         let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
             Some(cleanup),
@@ -885,8 +900,11 @@ impl Context {
     /// directory, for `ipc://*`. Both are removed when the listener closes.
     #[cfg(unix)]
     pub fn bind_ipc_anywhere(&self, config: ConnectionConfig) -> io::Result<IpcListener> {
-        let (listener, cleanup, path) =
-            reported(crate::transport::bind_ipc_anywhere(), &config, "ipc://*")?;
+        let bound = crate::transport::bind_ipc_anywhere().and_then(|(listener, cleanup, path)| {
+            set_backlog(&listener, config.backlog)?;
+            Ok((listener, cleanup, path))
+        });
+        let (listener, cleanup, path) = reported(bound, &config, "ipc://*")?;
         let endpoint = format!("ipc://{}", path.display());
         let (connections, closed) = self.listen(
             StreamListener::Unix(listener),
@@ -912,11 +930,11 @@ impl Context {
         config: ConnectionConfig,
     ) -> io::Result<IpcAbstractListener> {
         let endpoint = format!("ipc://@{name}");
-        let listener = reported(
-            crate::transport::bind_ipc_abstract(name),
-            &config,
-            &endpoint,
-        )?;
+        let bound = crate::transport::bind_ipc_abstract(name).and_then(|listener| {
+            set_backlog(&listener, config.backlog)?;
+            Ok(listener)
+        });
+        let listener = reported(bound, &config, &endpoint)?;
         let (connections, closed) =
             self.listen(StreamListener::Unix(listener), None, endpoint, config);
         Ok(IpcAbstractListener {
@@ -975,9 +993,7 @@ impl Context {
             // for a connect to a bound name.
             server.rx.set_hwm(end.recv_hwm);
             server.tx.set_hwm(end.send_hwm);
-            if let Some(server) = pair(&end, &pending.end, server, &pending.client) {
-                let _ = writer.try_send(server);
-            }
+            let _ = writer.try_send(pair(&end, &pending.end, server, &pending.client));
         }
         registry.bound.insert(
             name.to_owned(),
@@ -1036,9 +1052,10 @@ impl Context {
         };
         match binding {
             Some(binding) => {
-                if let Some(server) = pair(&binding.end, &end, server, &client.peer) {
-                    let _ = binding.connections.try_send(server);
-                }
+                let _ =
+                    binding
+                        .connections
+                        .try_send(pair(&binding.end, &end, server, &client.peer));
             }
             None => {
                 let pending = registry.pending.entry(name.to_owned()).or_default();
@@ -1150,9 +1167,20 @@ impl Context {
         self.inner.io_threads.iter().any(IoThread::forked)
     }
 
+    /// Whether the context can bind and connect over `tcp` and `ipc`,
+    /// which only `inproc` does without an I/O thread. Callers check
+    /// before binding or connecting: libzmq's `EMTHREAD`.
+    pub fn has_io_threads(&self) -> bool {
+        !self.inner.io_threads.is_empty()
+    }
+
     /// The next I/O thread, round robin.
     fn io_thread(&self) -> &IoThread {
         let threads = &self.inner.io_threads;
+        assert!(
+            !threads.is_empty(),
+            "a context without I/O threads serves inproc alone"
+        );
         &threads[self.inner.next.fetch_add(1, Ordering::Relaxed) % threads.len()]
     }
 }
@@ -1192,7 +1220,8 @@ impl Drop for Inner {
 impl ConnectionConfig {
     /// Adds an application property, as libzmq's `ZMQ_METADATA` does: its
     /// name must start with `X-` and its value must not be empty. A name
-    /// already added keeps its first value, as in libzmq.
+    /// already added keeps its first value, and the properties are
+    /// announced sorted by name, as in libzmq.
     pub fn add_metadata(
         &mut self,
         name: impl AsRef<[u8]>,
@@ -1210,9 +1239,22 @@ impl ConnectionConfig {
         if self.metadata.get(name.as_bytes()).is_some() {
             return Ok(());
         }
-        self.metadata
-            .insert(name, Frame::copy_from_slice(value))
-            .map_err(|_| InvalidMetadata::ValueTooLong)
+        // Announced sorted by name, as libzmq, which keeps them in a map.
+        let mut properties: Vec<_> = self
+            .metadata
+            .iter()
+            .map(|(name, value)| (name.clone(), value.clone()))
+            .collect();
+        properties.push((name, Frame::copy_from_slice(value)));
+        properties.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        let mut sorted = Metadata::new();
+        for (name, value) in properties {
+            sorted
+                .insert(name, value)
+                .map_err(|_| InvalidMetadata::ValueTooLong)?;
+        }
+        self.metadata = sorted;
+        Ok(())
     }
 }
 
@@ -1318,15 +1360,16 @@ mod tests {
     }
 
     #[test]
-    fn a_pending_connect_of_the_wrong_type_is_closed_by_the_bind() {
+    fn a_pending_connect_of_any_type_is_paired_by_the_bind() {
+        // As libzmq pairs them: only a handshake checks socket types.
         let context = Context::new().unwrap();
         let client = context.connect_inproc("late", config(SocketType::Push));
         let mut listener = context
             .bind_inproc("late", config(SocketType::Push))
             .unwrap();
-        assert!(listener.try_accept().is_err());
-        assert!(client.tx.is_closed());
-        assert_eq!(client.peer(), None);
+        let _server = listener.try_accept().expect("paired");
+        assert!(!client.tx.is_closed());
+        assert!(client.peer().is_some());
     }
 
     #[test]

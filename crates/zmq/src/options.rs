@@ -32,7 +32,7 @@ use crate::endpoint::{Target, connect_target};
 ///     .identity(Identity::new("worker-1")?)
 ///     .linger(Linger::For(Duration::ZERO));
 /// let context = Context::new()?;
-/// let worker = context.socket_with::<Dealer>(options);
+/// let worker = context.socket_with::<Dealer>(options)?;
 /// # drop(worker);
 /// # Ok::<(), Box<dyn std::error::Error>>(())
 /// ```
@@ -46,10 +46,12 @@ pub struct SocketOptions {
     pub(crate) reconnect: Reconnect,
     pub(crate) immediate: bool,
     pub(crate) max_message_size: Option<u64>,
+    pub(crate) max_multipart_size: Option<u64>,
     pub(crate) message_properties: MessageProperties,
     pub(crate) security: Security,
     pub(crate) heartbeat: Option<Heartbeat>,
     pub(crate) tcp_keepalive: Option<TcpKeepalive>,
+    pub(crate) backlog: u32,
     pub(crate) type_of_service: u8,
     pub(crate) bind_to_device: Option<String>,
     pub(crate) socks_proxy: Option<SocksProxy>,
@@ -69,10 +71,12 @@ impl Default for SocketOptions {
             reconnect: Reconnect::default(),
             immediate: false,
             max_message_size: None,
+            max_multipart_size: None,
             message_properties: MessageProperties::default(),
             security: Security::default(),
             heartbeat: None,
             tcp_keepalive: None,
+            backlog: 100,
             type_of_service: 0,
             bind_to_device: None,
             socks_proxy: None,
@@ -134,19 +138,33 @@ impl SocketOptions {
     /// handshake completes, and stops being one whenever it breaks,
     /// discarding what was queued on it (`ZMQ_IMMEDIATE`, default off). Off,
     /// messages queue on it from [`connect`](crate::Socket::connect) on and
-    /// across reconnections. `inproc` and PEER's `connect_peer` ignore it.
+    /// across reconnections. `inproc` ignores it, and PEER's `connect_peer`
+    /// fails while it is set.
     #[must_use]
     pub fn immediate(mut self, immediate: bool) -> Self {
         self.immediate = immediate;
         self
     }
 
-    /// The largest message accepted from peers, in octets, counting all its
-    /// frames (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is
-    /// disconnected. No limit by default.
+    /// The largest frame accepted from peers, in octets
+    /// (`ZMQ_MAXMSGSIZE`). A peer that sends a larger one is disconnected.
+    /// As in libzmq, a message of several frames may be larger: see
+    /// [`max_multipart_size`](Self::max_multipart_size). No limit by
+    /// default.
     #[must_use]
     pub fn max_message_size(mut self, octets: u64) -> Self {
         self.max_message_size = Some(octets);
+        self
+    }
+
+    /// The largest message accepted from peers, in octets, counting all its
+    /// frames, an empty one as one octet. A peer that sends a larger one
+    /// is disconnected. libzmq has no such limit: without it, as there, a
+    /// peer can send a message of frames without end, all of which are
+    /// held until the last. No limit by default.
+    #[must_use]
+    pub fn max_multipart_size(mut self, octets: u64) -> Self {
+        self.max_multipart_size = Some(octets);
         self
     }
 
@@ -182,6 +200,15 @@ impl SocketOptions {
     #[must_use]
     pub fn tcp_keepalive(mut self, keepalive: TcpKeepalive) -> Self {
         self.tcp_keepalive = Some(keepalive);
+        self
+    }
+
+    /// How many connections a `tcp` or `ipc` listener holds until the I/O
+    /// thread accepts them (`ZMQ_BACKLOG`): 100 by default, as libzmq's.
+    /// The system may hold fewer.
+    #[must_use]
+    pub fn backlog(mut self, backlog: u32) -> Self {
+        self.backlog = backlog;
         self
     }
 

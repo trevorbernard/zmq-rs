@@ -21,8 +21,9 @@ pub struct MdClient {
 
 impl MdClient {
     pub fn new(context: &Context, broker: &str, verbose: bool) -> Result<Self, zmq::Error> {
-        let mut client =
-            context.socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)));
+        let mut client = context
+            .socket_with::<Dealer>(SocketOptions::new().linger(Linger::For(Duration::ZERO)))
+            .unwrap();
         client.connect(broker)?;
         if verbose {
             log(&format!("I: connecting to broker at {broker}..."));

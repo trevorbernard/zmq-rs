@@ -41,7 +41,7 @@ fn our_dealer_talks_to_a_libzmq_router() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(identity("d1"));
+    let mut dealer = context.socket_with::<Dealer>(identity("d1")).unwrap();
     dealer.connect(format!("tcp://{addr}")).unwrap();
 
     dealer.send("hello").unwrap();
@@ -54,7 +54,7 @@ fn our_dealer_talks_to_a_libzmq_router() {
 #[test]
 fn our_router_talks_to_a_libzmq_dealer() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_routing_id(b"lib");
@@ -76,7 +76,7 @@ fn our_router_talks_to_a_libzmq_dealer() {
 fn router_keeps_the_envelope_for_the_application() {
     // A REQ peer prefixes an empty delimiter; ROUTER hands it over intact.
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
     let req = Socket::new(Kind::Req);
     req.set_routing_id(b"client");
@@ -95,7 +95,7 @@ fn router_keeps_the_envelope_for_the_application() {
 #[test]
 fn router_generates_routing_ids_for_anonymous_peers() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
     let dealers: Vec<Socket> = (0..2)
         .map(|i| {
@@ -129,7 +129,7 @@ fn router_generates_routing_ids_for_anonymous_peers() {
 #[test]
 fn router_drops_what_it_cannot_route_without_blocking() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.bind(free_endpoint()).unwrap();
     assert_eq!(
         router.send(&id("nobody"), "lost"),
@@ -140,7 +140,7 @@ fn router_drops_what_it_cannot_route_without_blocking() {
 #[test]
 fn router_ignores_a_peer_reusing_an_identity() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
     let first = Socket::new(Kind::Dealer);
     first.set_routing_id(b"same");
@@ -171,7 +171,7 @@ fn router_ignores_a_peer_reusing_an_identity() {
 fn dealer_load_balances_and_fair_queues() {
     let routers: Vec<Socket> = (0..2).map(|_| Socket::new(Kind::Router)).collect();
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(identity("lb"));
+    let mut dealer = context.socket_with::<Dealer>(identity("lb")).unwrap();
     for router in &routers {
         dealer
             .connect(format!("tcp://{}", router.bind_loopback()))
@@ -204,9 +204,9 @@ fn dealer_load_balances_and_fair_queues() {
 #[test]
 fn our_router_and_dealer_talk_to_each_other() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
-    let mut dealer = context.socket_with::<Dealer>(identity("ours"));
+    let mut dealer = context.socket_with::<Dealer>(identity("ours")).unwrap();
     dealer.connect(&addr).unwrap();
     dealer.send("ping").unwrap();
     let (from, ping, mut router) = within(Duration::from_secs(5), move || {
@@ -227,7 +227,7 @@ fn a_connecting_router_routes_once_the_peer_is_known() {
     dealer.set_routing_id(b"srv");
     let addr = dealer.bind_loopback();
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.connect(format!("tcp://{addr}")).unwrap();
     dealer.send(&[b"hello router"]).unwrap();
     let (from, hello, mut router) = within(Duration::from_secs(5), move || {
@@ -259,12 +259,15 @@ fn plain_secured_dealer_and_router() {
         }
     };
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(
-        SocketOptions::new().security(Security::plain_server("", authenticator)),
-    );
+    let mut router = context
+        .socket_with::<Router>(
+            SocketOptions::new().security(Security::plain_server("", authenticator)),
+        )
+        .unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
-    let mut dealer =
-        context.socket_with::<Dealer>(identity("secure").security(Security::PlainClient(expected)));
+    let mut dealer = context
+        .socket_with::<Dealer>(identity("secure").security(Security::PlainClient(expected)))
+        .unwrap();
     dealer.connect(&addr).unwrap();
     dealer.send("over plain").unwrap();
     let (from, received) = within(Duration::from_secs(5), move || router.recv().unwrap());
@@ -277,7 +280,7 @@ fn plain_secured_dealer_and_router() {
 #[test]
 fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     router.set_handover(true);
     let addr = router.bind(free_endpoint()).unwrap();
     let first = Socket::new(Kind::Dealer);
@@ -308,7 +311,7 @@ fn router_with_handover_lets_a_libzmq_dealer_take_an_identity_over() {
 #[test]
 fn a_probing_libzmq_dealer_is_known_to_our_router_at_once() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let addr = router.bind(free_endpoint()).unwrap();
     let dealer = Socket::new(Kind::Dealer);
     dealer.set_routing_id(b"prober");
@@ -323,7 +326,7 @@ fn our_probing_dealer_is_known_to_a_libzmq_router_at_once() {
     let router = Socket::new(Kind::Router);
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let mut dealer = context.socket_with::<Dealer>(identity("prober"));
+    let mut dealer = context.socket_with::<Dealer>(identity("prober")).unwrap();
     dealer.set_probe(true);
     dealer.connect(format!("tcp://{addr}")).unwrap();
     assert_eq!(router.recv().unwrap(), [b"prober".to_vec(), Vec::new()]);
@@ -334,7 +337,7 @@ fn our_probing_router_greets_a_libzmq_router_it_connects_to() {
     let listener = Socket::new(Kind::Router);
     let addr = listener.bind_loopback();
     let context = Context::new().unwrap();
-    let mut router = context.socket_with::<Router>(identity("caller"));
+    let mut router = context.socket_with::<Router>(identity("caller")).unwrap();
     router.set_probe(true);
     router.connect(format!("tcp://{addr}")).unwrap();
     assert_eq!(listener.recv().unwrap(), [b"caller".to_vec(), Vec::new()]);
@@ -346,7 +349,7 @@ fn a_probing_libzmq_router_greets_our_dealer() {
     router.set_probe_router();
     let addr = router.bind_loopback();
     let context = Context::new().unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     dealer.connect(format!("tcp://{addr}")).unwrap();
     let (done, received) = mpsc::channel();
     thread::spawn(move || done.send(dealer.recv().unwrap()));
@@ -360,4 +363,32 @@ fn a_probing_libzmq_router_greets_our_dealer() {
         })
         .expect("probed within 5 s");
     assert_eq!(received, Message::new(Frame::new()));
+}
+
+#[test]
+fn libzmq_announces_an_identity_starting_with_a_zero_octet() {
+    let context = Context::new().unwrap();
+    let mut router = context.socket::<Router>().unwrap();
+    let addr = router.bind(free_endpoint()).unwrap();
+    let dealer = Socket::new(Kind::Dealer);
+    dealer.set_routing_id(b"\0lib");
+    dealer.connect(addr);
+    dealer.send(&[b"hello"]).unwrap();
+    let (from, message) = within(Duration::from_secs(5), move || router.recv().unwrap());
+    assert_eq!(from.as_bytes(), b"\0lib");
+    assert_eq!(message, Message::from("hello"));
+}
+
+#[test]
+fn we_announce_an_identity_starting_with_a_zero_octet() {
+    let router = Socket::new(Kind::Router);
+    let addr = router.bind_loopback();
+    let context = Context::new().unwrap();
+    let identity = Identity::new(&b"\0ours"[..]).expect("as libzmq takes it");
+    let mut dealer = context
+        .socket_with::<Dealer>(SocketOptions::new().identity(identity))
+        .unwrap();
+    dealer.connect(format!("tcp://{addr}")).unwrap();
+    dealer.send("hello").unwrap();
+    assert_eq!(router.recv().unwrap(), [&b"\0ours"[..], b"hello"]);
 }

@@ -114,10 +114,10 @@ impl Fsm {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut statepub = context.socket::<Pub>();
-    let mut statesub = context.socket::<Sub>();
+    let mut statepub = context.socket::<Pub>()?;
+    let mut statesub = context.socket::<Sub>()?;
     statesub.subscribe("");
-    let mut frontend = context.socket::<Router>();
+    let mut frontend = context.socket::<Router>()?;
 
     let state = match env::args().nth(1).as_deref() {
         Some("-p") => {

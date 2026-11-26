@@ -8,11 +8,11 @@ use zmq::{Context, Pull, Push, Sub};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut receiver = context.socket::<Pull>();
+    let mut receiver = context.socket::<Pull>()?;
     receiver.connect("tcp://localhost:5557")?;
-    let mut sender = context.socket::<Push>();
+    let mut sender = context.socket::<Push>()?;
     sender.connect("tcp://localhost:5558")?;
-    let mut controller = context.socket::<Sub>();
+    let mut controller = context.socket::<Sub>()?;
     controller.connect("tcp://localhost:5559")?;
     controller.subscribe("");
 

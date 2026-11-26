@@ -23,6 +23,9 @@ libc = "0.2"
 loom = "0.7"
 mio = { version = "1", features = ["net", "os-ext", "os-poll"] }
 proptest = { version = "1", default-features = false, features = ["std"] }
+# `event` for eventfd and `poll`; `pipe` and `fs` for the wake pipe where
+# there is no eventfd.
+rustix = { version = "1", default-features = false, features = ["std", "event", "fs", "pipe"] }
 # `all` for the TCP keepalive probe count.
 socket2 = { version = "0.6", features = ["all"] }
 zeroize = "1"

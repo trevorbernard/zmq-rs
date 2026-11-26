@@ -367,6 +367,11 @@ impl Peers {
     }
 
     /// The configuration new connections use.
+    /// Whether the context has an I/O thread for `tcp` and `ipc`.
+    pub fn has_io_threads(&self) -> bool {
+        self.context.has_io_threads()
+    }
+
     pub fn config_mut(&mut self) -> &mut ConnectionConfig {
         &mut self.config
     }
@@ -514,6 +519,15 @@ impl Peers {
         if !self.context.forked() {
             wait_closed(closing);
         }
+    }
+
+    /// Undoes the bind of an `inproc` name as libzmq's `zmq_unbind` does:
+    /// the name is free to bind again, and the connections made to it
+    /// stay.
+    pub fn unbind_inproc(&mut self, endpoint: EndpointId) {
+        // Those not yet taken from the listener are connections too.
+        self.accept(&mut noop_context());
+        self.listeners.retain(|(made_by, _)| *made_by != endpoint);
     }
 
     /// A new monitor of this socket's events, from now on.

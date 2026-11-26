@@ -9,7 +9,7 @@ use zmq::{Context, Sub};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Collecting updates from weather server...");
     let context = Context::new()?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.connect("tcp://localhost:5556")?;
 
     let filter = env::args().nth(1).unwrap_or_else(|| "10001 ".to_owned());

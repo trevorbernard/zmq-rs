@@ -10,17 +10,17 @@ use crate::support::{FIVE, Requesting, msg};
 fn roundtrip() {
     // Create a req/rep device.
     let context = Context::new().unwrap();
-    let mut dealer = context.socket::<Dealer>();
+    let mut dealer = context.socket::<Dealer>().unwrap();
     let endpoint1 = dealer.bind(free_endpoint()).unwrap().to_string();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     let endpoint2 = router.bind(free_endpoint()).unwrap().to_string();
 
     // Create a worker.
-    let mut rep = context.socket::<Rep>();
+    let mut rep = context.socket::<Rep>().unwrap();
     rep.connect(&endpoint1).unwrap();
 
     // Create a client.
-    let mut req = context.socket::<Req>();
+    let mut req = context.socket::<Req>().unwrap();
     req.connect(&endpoint2).unwrap();
 
     // Send a request.

@@ -50,11 +50,11 @@ fn socket_path(name: &str) -> PathBuf {
 fn push_and_pull_over_ipc() {
     let path = socket_path("pipeline");
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert_eq!(bound, Endpoint::Ipc(path.clone()));
     assert_eq!(bound.to_string(), format!("ipc://{}", path.display()));
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
     push.send("over a unix socket").unwrap();
     assert_eq!(
@@ -67,7 +67,7 @@ fn push_and_pull_over_ipc() {
 fn the_socket_file_goes_when_the_socket_does() {
     let path = socket_path("tidy");
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert!(path.exists());
     drop(pull);
@@ -81,13 +81,13 @@ fn the_socket_file_goes_when_the_socket_does() {
 #[test]
 fn a_wildcard_binds_a_fresh_path() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     let bound = pull.bind("ipc://*").unwrap();
     let Endpoint::Ipc(path) = bound.clone() else {
         panic!("not an ipc endpoint: {bound}");
     };
     assert!(path.exists(), "{path:?}");
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(&bound).unwrap();
     push.send("found it").unwrap();
     let pull = within(FIVE, move || {
@@ -110,9 +110,9 @@ fn a_wildcard_binds_a_fresh_path() {
 fn a_path_in_use_cannot_be_bound() {
     let path = socket_path("in-use");
     let context = Context::new().unwrap();
-    let mut first = context.socket::<Pull>();
+    let mut first = context.socket::<Pull>().unwrap();
     first.bind(format!("ipc://{}", path.display())).unwrap();
-    let mut second = context.socket::<Pull>();
+    let mut second = context.socket::<Pull>().unwrap();
     assert!(matches!(
         second.bind(format!("ipc://{}", path.display())),
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
@@ -126,9 +126,9 @@ fn a_stale_socket_file_is_replaced() {
     drop(UnixListener::bind(&path).unwrap());
     assert!(path.exists());
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("ipc://{}", path.display())).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("fresh").unwrap();
     assert_eq!(
@@ -142,7 +142,7 @@ fn an_ordinary_file_is_never_replaced() {
     let path = socket_path("precious");
     std::fs::write(&path, "keep me").unwrap();
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     assert!(matches!(
         pull.bind(format!("ipc://{}", path.display())),
         Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
@@ -154,11 +154,11 @@ fn an_ordinary_file_is_never_replaced() {
 fn connecting_before_binding_retries_until_it_works() {
     let path = socket_path("later");
     let context = Context::new().unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     push.connect(format!("ipc://{}", path.display())).unwrap();
     push.send("queued").unwrap();
     thread::sleep(Duration::from_millis(50));
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("ipc://{}", path.display())).unwrap();
     assert_eq!(
         within(FIVE, move || pull.recv().unwrap()),
@@ -169,7 +169,7 @@ fn connecting_before_binding_retries_until_it_works() {
 #[test]
 fn an_empty_path_is_invalid() {
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     assert!(matches!(
         pull.bind("ipc://"),
         Err(Error::InvalidEndpoint(_))
@@ -181,9 +181,9 @@ fn a_connection_comes_back_when_the_binder_does() {
     let path = socket_path("restart");
     let endpoint = format!("ipc://{}", path.display());
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(&endpoint).unwrap();
-    let mut push = context.socket::<Push>();
+    let mut push = context.socket::<Push>().unwrap();
     let mut events = push.monitor();
     push.connect(&endpoint).unwrap();
     push.send("before").unwrap();
@@ -192,7 +192,7 @@ fn a_connection_comes_back_when_the_binder_does() {
         pull
     });
     drop(pull);
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(&endpoint).unwrap();
     // What is sent before the push reconnects goes to the closing
     // connection and is lost, as in libzmq.
@@ -208,7 +208,7 @@ fn a_connection_comes_back_when_the_binder_does() {
 fn a_replaced_socket_file_is_left_alone() {
     let path = socket_path("replaced");
     let context = Context::new().unwrap();
-    let mut pull = context.socket::<Pull>();
+    let mut pull = context.socket::<Pull>().unwrap();
     pull.bind(format!("ipc://{}", path.display())).unwrap();
     // Someone else takes the path over while we are still bound.
     std::fs::remove_file(&path).unwrap();
@@ -232,11 +232,11 @@ mod abstract_names {
     fn push_and_pull_over_an_abstract_name() {
         let name = unique("pipeline");
         let context = Context::new().unwrap();
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         let bound = pull.bind(format!("ipc://@{name}")).unwrap();
         assert_eq!(bound, Endpoint::IpcAbstract(name.clone()));
         assert_eq!(bound.to_string(), format!("ipc://@{name}"));
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         push.connect(&bound).unwrap();
         push.send("no file at all").unwrap();
         assert_eq!(
@@ -251,9 +251,9 @@ mod abstract_names {
     fn a_live_name_cannot_be_bound_until_its_socket_goes() {
         let endpoint = format!("ipc://@{}", unique("in-use"));
         let context = Context::new().unwrap();
-        let mut first = context.socket::<Pull>();
+        let mut first = context.socket::<Pull>().unwrap();
         first.bind(&endpoint).unwrap();
-        let mut second = context.socket::<Pull>();
+        let mut second = context.socket::<Pull>().unwrap();
         assert!(matches!(
             second.bind(&endpoint),
             Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::AddrInUse
@@ -269,7 +269,7 @@ mod abstract_names {
     #[test]
     fn an_empty_name_is_invalid() {
         let context = Context::new().unwrap();
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         assert!(matches!(
             pull.bind("ipc://@"),
             Err(Error::InvalidEndpoint(_))
@@ -279,13 +279,14 @@ mod abstract_names {
     #[test]
     fn a_name_too_long_for_sun_path_fails() {
         let context = Context::new().unwrap();
-        let mut pull = context.socket::<Pull>();
-        let longest = "x".repeat(107);
+        let mut pull = context.socket::<Pull>().unwrap();
+        // One octet short of what `sun_path` holds, as in libzmq.
+        let longest = "x".repeat(106);
         assert!(pull.bind(format!("ipc://@{longest}")).is_ok());
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         assert!(matches!(
             pull.bind(format!("ipc://@{longest}y")),
-            Err(Error::Io(err)) if err.kind() == std::io::ErrorKind::InvalidInput
+            Err(Error::NameTooLong(_))
         ));
     }
 
@@ -293,11 +294,11 @@ mod abstract_names {
     fn connecting_before_binding_retries_until_it_works() {
         let endpoint = format!("ipc://@{}", unique("later"));
         let context = Context::new().unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         push.connect(&endpoint).unwrap();
         push.send("queued").unwrap();
         thread::sleep(Duration::from_millis(50));
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         pull.bind(&endpoint).unwrap();
         assert_eq!(
             within(FIVE, move || pull.recv().unwrap()),
@@ -309,9 +310,9 @@ mod abstract_names {
     fn a_connection_comes_back_when_the_binder_does() {
         let endpoint = format!("ipc://@{}", unique("restart"));
         let context = Context::new().unwrap();
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         pull.bind(&endpoint).unwrap();
-        let mut push = context.socket::<Push>();
+        let mut push = context.socket::<Push>().unwrap();
         let mut events = push.monitor();
         push.connect(&endpoint).unwrap();
         push.send("before").unwrap();
@@ -321,7 +322,7 @@ mod abstract_names {
         });
         drop(pull);
         // Free once the drop returns.
-        let mut pull = context.socket::<Pull>();
+        let mut pull = context.socket::<Pull>().unwrap();
         pull.bind(&endpoint).unwrap();
         // What is sent before the push reconnects goes to the closing
         // connection and is lost, as in libzmq.
@@ -338,15 +339,17 @@ mod abstract_names {
 fn sending_to_a_peer_that_left_does_not_lose_what_it_sent() {
     let one = zmq::Hwm::from(1);
     let context = Context::new().unwrap();
-    let mut sender = context.socket::<zmq::Pair>();
+    let mut sender = context.socket::<zmq::Pair>().unwrap();
     let bound = sender.bind("ipc://*").unwrap().to_string();
     let other = Context::new().unwrap();
-    let mut receiver = other.socket_with::<zmq::Pair>(
-        zmq::SocketOptions::new()
-            .send_hwm(one)
-            .recv_hwm(one)
-            .linger(zmq::Linger::For(Duration::ZERO)),
-    );
+    let mut receiver = other
+        .socket_with::<zmq::Pair>(
+            zmq::SocketOptions::new()
+                .send_hwm(one)
+                .recv_hwm(one)
+                .linger(zmq::Linger::For(Duration::ZERO)),
+        )
+        .unwrap();
     receiver.connect(&bound).unwrap();
     sender.send("0").unwrap();
     assert_eq!(

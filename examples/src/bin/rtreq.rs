@@ -10,7 +10,9 @@ use zmq::{Context, Message, Req, Router, SocketOptions};
 const NBR_WORKERS: usize = 10;
 
 fn worker_task(context: Context) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let mut worker = context.socket_with::<Req>(SocketOptions::new().identity(random_identity()));
+    let mut worker = context
+        .socket_with::<Req>(SocketOptions::new().identity(random_identity()))
+        .unwrap();
     worker.connect("tcp://localhost:5671")?;
 
     let mut total = 0;
@@ -30,7 +32,7 @@ fn worker_task(context: Context) -> Result<(), Box<dyn std::error::Error + Send 
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let context = Context::new()?;
-    let mut broker = context.socket::<Router>();
+    let mut broker = context.socket::<Router>()?;
     broker.bind("tcp://*:5671")?;
 
     let workers: Vec<_> = (0..NBR_WORKERS)

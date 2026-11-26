@@ -7,7 +7,7 @@ use zmq_test_ports::free_endpoint;
 #[test]
 fn last_endpoint() {
     let context = Context::new().unwrap();
-    let mut router = context.socket::<Router>();
+    let mut router = context.socket::<Router>().unwrap();
     for endpoint in [free_endpoint(), free_endpoint()] {
         let reported = router.bind(&endpoint).unwrap();
         assert_eq!(reported.to_string(), endpoint);

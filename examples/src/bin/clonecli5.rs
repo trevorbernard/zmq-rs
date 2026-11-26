@@ -16,12 +16,12 @@ const SUBTREE: &str = "/client/";
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Prepare our context and subscriber
     let context = Context::new()?;
-    let mut snapshot = context.socket::<Dealer>();
+    let mut snapshot = context.socket::<Dealer>()?;
     snapshot.connect("tcp://localhost:5556")?;
-    let mut subscriber = context.socket::<Sub>();
+    let mut subscriber = context.socket::<Sub>()?;
     subscriber.subscribe(SUBTREE);
     subscriber.connect("tcp://localhost:5557")?;
-    let mut publisher = context.socket::<Push>();
+    let mut publisher = context.socket::<Push>()?;
     publisher.connect("tcp://localhost:5558")?;
 
     let mut kvmap = HashMap::new();
