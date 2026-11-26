@@ -28,7 +28,6 @@ ported ones lack cases, for the same reasons: `poller`, `monitor`,
 |---|---|
 | UDP | `dgram` |
 | Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
-| Timers | `timers` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 | A proxy with one socket as both ends, or a REP end | `proxy_single_socket` |
 | A limit on a context's sockets | `many_sockets`, `system` |
@@ -51,6 +50,7 @@ and `terminated.rs`, not by ports.
 | VMCI | `pair_vmci`, `reqrep_vmci` |
 | GSSAPI | `security_gssapi` |
 | TCP and IPC accept filters, which libzmq deprecated for ZAP | `tcp_accept_filter`, `filter_ipc` |
+| Timers | `timers` |
 
 **libzmq's C API rather than behavior:** `msg_ffn`, `msg_flags`,
 `msg_init`, `getsockopt_memset`, `socket_null`, `iov`, `atomics`.

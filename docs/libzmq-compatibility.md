@@ -37,6 +37,7 @@ Not planned unless someone asks for them.
 | PGM and NORM | `pgm://`, `epgm://`, `norm://`, `ZMQ_RATE`, `ZMQ_RECOVERY_IVL`, `ZMQ_MULTICAST_MAXTPDU`, the `ZMQ_NORM_*` options; optional in libzmq's own build |
 | Windows | the platform, with `ipc` on it and `ZMQ_LOOPBACK_FASTPATH` |
 | VSOCK | `vsock://`, added to libzmq after the Reference |
+| Timers | `zmq_timers_*`, a draft timer queue that touches no socket; `poll_timeout` with deadlines the application keeps does the same |
 
 ## Divergences to close
 
@@ -232,7 +233,7 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_poll` over sockets | `zmq::poll`, `poll_timeout`, over a set fixed at compile time | Same; Gap: REQ and `Monitor` cannot be polled |
 | `zmq_poll` over file descriptors, `zmq_ppoll` | | Gap |
 | `zmq_poller_*` (d), with `zmq_poller_fd` and `_add_fd` | | Gap |
-| `zmq_timers_*` (d) | | Gap |
+| `zmq_timers_*` (d) | | Exclusion |
 | `zmq_proxy`, `zmq_device` | `Proxy` | Same; Gap: a REP end, or one socket as both ends |
 | `zmq_proxy_steerable` | `ProxyControl` | Exception (API shape) |
 | `zmq_socket_monitor`, `zmq_socket_monitor_versioned` (d) | `Socket::monitor` | Exception (API shape); see [Monitor events](#monitor-events) |
