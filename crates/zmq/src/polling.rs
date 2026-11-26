@@ -1,21 +1,31 @@
 //! Waiting on several sockets at once, as libzmq's `zmq_poll` and
-//! `zmq_poller_wait_all`.
+//! `zmq_poller_wait_all`, and on file descriptors with them.
 
 use std::cell::RefCell;
 use std::fmt;
+use std::io;
+use std::os::fd::BorrowedFd;
 use std::rc::Rc;
-use std::task::{Context, Poll};
+use std::sync::Arc;
+use std::task::{Context, Poll, Waker};
 use std::time::{Duration, Instant};
+
+use rustix::event::{PollFd, PollFlags, Timespec};
+use rustix::io::Errno;
 
 use crate::socket::noop;
 use crate::socket::sealed::{Sealed, Terminates};
+use crate::wake_fd::WakeFd;
 use crate::{Terminated, wait};
 
-/// A socket to [`poll`], and what to wait for. Made by
+/// A socket or a file descriptor to [`poll`], and what to wait for. A
+/// socket's is made by
 /// [`Socket::readable`](crate::Socket::readable),
 /// [`Socket::writable`](crate::Socket::writable) and
-/// [`Socket::readable_and_writable`](crate::Socket::readable_and_writable);
-/// it borrows the socket only until the poll returns.
+/// [`Socket::readable_and_writable`](crate::Socket::readable_and_writable),
+/// a descriptor's by [`fd_readable`](Self::fd_readable) and
+/// [`fd_writable`](Self::fd_writable);
+/// it borrows the socket or the descriptor only until the poll returns.
 pub struct PollItem<'a> {
     target: Target<'a>,
 }
@@ -26,6 +36,9 @@ enum Target<'a> {
     /// One of the two items of a socket polled both ways, which share it.
     SharedReadable(Shared<'a>),
     SharedWritable(Shared<'a>),
+    /// A file descriptor, the events asked of it, and what wakes the
+    /// thread that waits on it.
+    Fd(BorrowedFd<'a>, PollFlags, Arc<WakeFd>),
     /// Left out by [`PollItem::when`]: never ready.
     Skipped,
 }
@@ -84,6 +97,76 @@ impl<'a> PollItem<'a> {
         }
     }
 
+    /// A file descriptor of the application's own, to [`poll`] with its
+    /// sockets until a read from it would not wait, as an item of
+    /// libzmq's `zmq_poll` with `fd` set and `ZMQ_POLLIN`. It is also
+    /// reported once it has failed or its peer has hung up, as libzmq
+    /// reports `ZMQ_POLLERR` unasked, so that the read meets the error.
+    ///
+    /// ```
+    /// # use std::io::Write;
+    /// # use std::os::fd::AsFd;
+    /// # use std::os::unix::net::UnixStream;
+    /// # use zmq::{Context, PollItem, Pull};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// # let context = Context::new()?;
+    /// let mut jobs = context.socket::<Pull>()?;
+    /// jobs.bind("inproc://jobs")?;
+    /// let (mut ours, theirs) = UnixStream::pair()?;
+    /// ours.write_all(b"stop")?;
+    ///
+    /// let [job, stop] = zmq::poll([
+    ///     jobs.readable(),
+    ///     PollItem::fd_readable(theirs.as_fd())?,
+    /// ])?;
+    /// assert!(stop && !job);
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// If the descriptor that wakes the calling thread from its wait
+    /// cannot be made, as when the process has no descriptors left. Each
+    /// thread makes one, with its first item.
+    pub fn fd_readable(fd: BorrowedFd<'a>) -> io::Result<Self> {
+        Self::fd(fd, PollFlags::IN)
+    }
+
+    /// A file descriptor of the application's own, to [`poll`] with its
+    /// sockets until a write to it would not wait, as
+    /// [`fd_readable`](Self::fd_readable) is for a read: libzmq's
+    /// `ZMQ_POLLOUT`.
+    ///
+    /// # Errors
+    ///
+    /// As [`fd_readable`](Self::fd_readable).
+    pub fn fd_writable(fd: BorrowedFd<'a>) -> io::Result<Self> {
+        Self::fd(fd, PollFlags::OUT)
+    }
+
+    fn fd(fd: BorrowedFd<'a>, events: PollFlags) -> io::Result<Self> {
+        Ok(Self {
+            target: Target::Fd(fd, events, WakeFd::for_thread()?),
+        })
+    }
+
+    /// The descriptor that wakes the thread, if this is a file descriptor.
+    fn wake_fd(&self) -> Option<Arc<WakeFd>> {
+        match &self.target {
+            Target::Fd(_, _, wake) => Some(wake.clone()),
+            _ => None,
+        }
+    }
+
+    /// The file descriptor and the events asked of it, if this is one.
+    fn descriptor(&self) -> Option<(BorrowedFd<'a>, PollFlags)> {
+        match self.target {
+            Target::Fd(fd, events, _) => Some((fd, events)),
+            _ => None,
+        }
+    }
+
     pub(crate) fn readable(socket: &'a mut dyn PollReadable) -> Self {
         Self {
             target: Target::Readable(socket),
@@ -115,7 +198,8 @@ impl<'a> PollItem<'a> {
             Target::Writable(socket) => socket.poll_writable(cx),
             Target::SharedReadable(socket) => socket.borrow_mut().poll_readable(cx),
             Target::SharedWritable(socket) => socket.borrow_mut().poll_writable(cx),
-            Target::Skipped => Poll::Pending,
+            // Its readiness is `poll(2)`'s to say, in `wait_in_poll`.
+            Target::Fd(..) | Target::Skipped => Poll::Pending,
         }
     }
 }
@@ -130,7 +214,7 @@ impl PollItem<'_> {
             Target::SharedReadable(socket) | Target::SharedWritable(socket) => {
                 Terminates::poll_terminated(&**socket.borrow(), cx)
             }
-            Target::Skipped => false,
+            Target::Fd(..) | Target::Skipped => false,
         }
     }
 }
@@ -140,16 +224,18 @@ impl fmt::Debug for PollItem<'_> {
         let interest = match self.target {
             Target::Readable(_) | Target::SharedReadable(_) => "readable",
             Target::Writable(_) | Target::SharedWritable(_) => "writable",
+            Target::Fd(_, events, _) if events.contains(PollFlags::IN) => "fd readable",
+            Target::Fd(..) => "fd writable",
             Target::Skipped => "skipped",
         };
         f.debug_tuple("PollItem").field(&interest).finish()
     }
 }
 
-/// The sockets given to [`poll`] and [`poll_timeout`]: an array of
-/// [`PollItem`]s when how many there are is known as the program is
-/// written, a `Vec` of them when it is not. Cannot be implemented outside
-/// this crate.
+/// The sockets and file descriptors given to [`poll`] and
+/// [`poll_timeout`]: an array of [`PollItem`]s when how many there are is
+/// known as the program is written, a `Vec` of them when it is not. Cannot
+/// be implemented outside this crate.
 pub trait PollItems: Sealed {
     /// Which of the items are ready, in their order: `[bool; N]` for an
     /// array, `Vec<bool>` for a `Vec`.
@@ -160,19 +246,9 @@ pub trait PollItems: Sealed {
     #[track_caller]
     fn assert_some(&self);
 
-    /// No item ready.
+    /// Waits until an item is ready, or for `None` until `deadline`.
     #[doc(hidden)]
-    fn none_ready(&self) -> Self::Ready;
-
-    /// Polls every item into `ready`, registering `cx` with each that is
-    /// not; whether any is ready.
-    #[doc(hidden)]
-    fn poll_each(&mut self, ready: &mut Self::Ready, cx: &mut Context<'_>) -> bool;
-
-    /// Whether an item's context is shut down; if none is, a shutdown
-    /// wakes `cx`.
-    #[doc(hidden)]
-    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool;
+    fn wait(self, deadline: Option<Instant>) -> Result<Option<Self::Ready>, Terminated>;
 }
 
 impl<const N: usize> Sealed for [PollItem<'_>; N] {}
@@ -184,16 +260,9 @@ impl<const N: usize> PollItems for [PollItem<'_>; N] {
         const { assert!(N > 0, "polling no sockets would wait forever") };
     }
 
-    fn none_ready(&self) -> [bool; N] {
-        [false; N]
-    }
-
-    fn poll_each(&mut self, ready: &mut [bool; N], cx: &mut Context<'_>) -> bool {
-        poll_each(self, ready, cx)
-    }
-
-    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool {
-        any_terminated(self, cx)
+    fn wait(mut self, deadline: Option<Instant>) -> Result<Option<[bool; N]>, Terminated> {
+        let mut ready = [false; N];
+        Ok(wait_until(&mut self, &mut ready, deadline)?.then_some(ready))
     }
 }
 
@@ -206,16 +275,117 @@ impl PollItems for Vec<PollItem<'_>> {
         assert!(!self.is_empty(), "polling no sockets would wait forever");
     }
 
-    fn none_ready(&self) -> Vec<bool> {
-        vec![false; self.len()]
+    fn wait(mut self, deadline: Option<Instant>) -> Result<Option<Vec<bool>>, Terminated> {
+        let mut ready = vec![false; self.len()];
+        Ok(wait_until(&mut self, &mut ready, deadline)?.then_some(ready))
     }
+}
 
-    fn poll_each(&mut self, ready: &mut Vec<bool>, cx: &mut Context<'_>) -> bool {
-        poll_each(self, ready, cx)
+/// Whether an item was ready by `deadline`; `ready` says which.
+fn wait_until(
+    items: &mut [PollItem<'_>],
+    ready: &mut [bool],
+    deadline: Option<Instant>,
+) -> Result<bool, Terminated> {
+    match items.iter().find_map(PollItem::wake_fd) {
+        Some(wake) => wait_in_poll(items, ready, deadline, &wake),
+        None => wait_parked(items, ready, deadline),
     }
+}
 
-    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool {
-        any_terminated(self, cx)
+/// Waits on sockets alone, parking the thread.
+fn wait_parked(
+    items: &mut [PollItem<'_>],
+    ready: &mut [bool],
+    deadline: Option<Instant>,
+) -> Result<bool, Terminated> {
+    wait::block_on_until(deadline, |cx| {
+        if any_terminated(items, &mut noop()) {
+            return Poll::Ready(Err(Terminated));
+        }
+        if poll_each(items, ready, cx) {
+            Poll::Ready(Ok(()))
+        } else if any_terminated(items, cx) {
+            Poll::Ready(Err(Terminated))
+        } else {
+            Poll::Pending
+        }
+    })
+    .transpose()
+    .map(|polled| polled.is_some())
+}
+
+/// Waits on sockets and file descriptors, in `poll(2)` on the descriptors
+/// and on `wake`, which the sockets make readable.
+fn wait_in_poll(
+    items: &mut [PollItem<'_>],
+    ready: &mut [bool],
+    deadline: Option<Instant>,
+    wake: &Arc<WakeFd>,
+) -> Result<bool, Terminated> {
+    let waker = Waker::from(wake.clone());
+    let mut cx = Context::from_waker(&waker);
+    let mut fds: Vec<_> = items
+        .iter()
+        .filter_map(PollItem::descriptor)
+        .map(|(fd, events)| PollFd::from_borrowed_fd(fd, events))
+        .chain([PollFd::new(&**wake, PollFlags::IN)])
+        .collect();
+    loop {
+        if any_terminated(items, &mut noop()) {
+            return Err(Terminated);
+        }
+        // Before the sockets are polled: a wake that follows leaves it
+        // readable, and ends the wait below.
+        wake.drain();
+        let mut any = poll_each(items, ready, &mut cx);
+        if !any && any_terminated(items, &mut cx) {
+            return Err(Terminated);
+        }
+        // With a socket ready the descriptors are still looked at, without
+        // waiting, so that a busy socket never hides one.
+        let timeout = if any {
+            Some(Duration::ZERO)
+        } else {
+            deadline.map(|deadline| deadline.saturating_duration_since(Instant::now()))
+        };
+        if !poll_fds(&mut fds, timeout) {
+            continue;
+        }
+        let mut polled = fds.iter();
+        for (item, ready) in items.iter().zip(ready.iter_mut()) {
+            if let Some((_, events)) = item.descriptor() {
+                let fd = polled.next().expect("one for each descriptor");
+                // An error or a hangup counts, asked for or not, so that
+                // the caller's next read or write meets it.
+                *ready = fd.revents().intersects(events | FAILED);
+                any |= *ready;
+            }
+        }
+        if any {
+            return Ok(true);
+        }
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return Ok(false);
+        }
+    }
+}
+
+/// What `poll(2)` reports of a descriptor whatever was asked of it.
+const FAILED: PollFlags = PollFlags::ERR.union(PollFlags::HUP).union(PollFlags::NVAL);
+
+/// `poll(2)`, for at most `timeout`; `false` if a signal interrupted it.
+fn poll_fds(fds: &mut [PollFd<'_>], timeout: Option<Duration>) -> bool {
+    // No system takes a wait of any length, and the caller waits again
+    // until its deadline.
+    const LONGEST: Duration = Duration::from_secs(3600);
+
+    let timeout =
+        timeout.map(|timeout| Timespec::try_from(timeout.min(LONGEST)).expect("an hour at most"));
+    match rustix::event::poll(fds, timeout.as_ref()) {
+        Ok(_) => true,
+        Err(Errno::INTR) => false,
+        Err(error) => panic!("poll(2) failed: {error}"),
     }
 }
 
@@ -304,7 +474,7 @@ fn any_terminated(items: &[PollItem<'_>], cx: &mut Context<'_>) -> bool {
 #[track_caller]
 pub fn poll<I: PollItems>(items: I) -> Result<I::Ready, Terminated> {
     items.assert_some();
-    wait_until(items, None).map(|ready| ready.expect("no deadline"))
+    items.wait(None).map(|ready| ready.expect("no deadline"))
 }
 
 /// Waits at most `timeout` for at least one of `items` to be ready, as
@@ -314,26 +484,5 @@ pub fn poll_timeout<I: PollItems>(
     items: I,
     timeout: Duration,
 ) -> Result<Option<I::Ready>, Terminated> {
-    wait_until(items, wait::deadline(timeout))
-}
-
-fn wait_until<I: PollItems>(
-    mut items: I,
-    deadline: Option<Instant>,
-) -> Result<Option<I::Ready>, Terminated> {
-    let mut ready = items.none_ready();
-    wait::block_on_until(deadline, |cx| {
-        if items.poll_terminated(&mut noop()) {
-            return Poll::Ready(Err(Terminated));
-        }
-        if items.poll_each(&mut ready, cx) {
-            Poll::Ready(Ok(()))
-        } else if items.poll_terminated(cx) {
-            Poll::Ready(Err(Terminated))
-        } else {
-            Poll::Pending
-        }
-    })
-    .transpose()
-    .map(|polled| polled.map(|()| ready))
+    items.wait(wait::deadline(timeout))
 }

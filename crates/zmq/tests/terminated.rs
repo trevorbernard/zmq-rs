@@ -331,3 +331,21 @@ fn a_blocked_poll_of_a_vec_fails_once_the_context_is_shut_down() {
     });
     assert_eq!(result, Err(Terminated));
 }
+
+#[test]
+fn a_blocked_poll_of_a_descriptor_fails_once_the_context_is_shut_down() {
+    use std::os::fd::AsFd;
+    use std::os::unix::net::UnixStream;
+
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>().unwrap();
+    pull.bind("inproc://poll-fd").unwrap();
+    let result = woken(&context, move || {
+        let (_ours, theirs) = UnixStream::pair().unwrap();
+        zmq::poll([
+            pull.readable(),
+            zmq::PollItem::fd_readable(theirs.as_fd()).unwrap(),
+        ])
+    });
+    assert_eq!(result, Err(Terminated));
+}

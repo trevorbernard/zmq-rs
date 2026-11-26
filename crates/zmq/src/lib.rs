@@ -133,6 +133,7 @@ mod polling;
 mod proxy;
 mod socket;
 mod wait;
+mod wake_fd;
 
 use std::io;
 use std::time::Duration;

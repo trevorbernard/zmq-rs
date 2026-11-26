@@ -146,8 +146,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 `zmq::poll` waits until any of its sockets is ready and says which, as
 `zmq_poll`. The sockets go in an array, or in a `Vec` when how many there
 are is known only as the program runs. Each is borrowed only for the call,
-and one reported readable returns a message from its next `try_recv`. Only
-socket types that
+and one reported readable returns a message from its next `try_recv`. A
+file descriptor of the application's own waits with them, as
+`PollItem::fd_readable` or `fd_writable`. Only socket types that
 receive have `readable`, and only those whose sends can wait have
 `writable`.
 
@@ -271,8 +272,8 @@ stay and which are to go, is in
 
 Not planned unless someone asks: STREAM sockets, WebSockets, TIPC, VMCI,
 GSSAPI, the TCP and IPC accept filters, PGM and NORM, and Windows. Not
-yet: UDP, a socket's file descriptor for another event loop, polling
-plain file descriptors, and libzmq's ZAP handler socket, among others.
+yet: UDP, a socket's file descriptor for another event loop, and
+libzmq's ZAP handler socket, among others.
 The full list is in
 [docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 

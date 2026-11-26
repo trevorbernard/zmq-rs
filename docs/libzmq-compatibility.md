@@ -85,6 +85,7 @@ Divergences that stand.
 | `zmq_proxy_steerable` takes a control socket | `ProxyControl` handle, with the same four commands |
 | `zmq_socket_monitor` gives an `inproc` endpoint | `Monitor` handle |
 | `zmq_poller_*` registers sockets with a poller, and waiting on none without a timeout fails with `EFAULT` | `zmq::poll` over a `Vec` of items made for each wait; an empty `Vec` panics, and an empty array does not compile |
+| A file descriptor that has failed or hung up has `ZMQ_POLLERR` in its `revents` | Reported ready, so that the next read or write meets the error |
 | An option is accepted and ignored on a socket type that has no use for it | No such setter |
 | Draft sockets refuse `ZMQ_SNDMORE` at run time | They send and receive a `Frame`, so multipart does not compile |
 | `EFSM`, `ENOTSUP`, `ENOTSOCK` | Do not compile |
@@ -232,8 +233,9 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_msg_get (ZMQ_SRCFD)` | | Gap |
 | `zmq_msg_routing_id`, `zmq_msg_group` and their setters (d) | `ClientId`, `PeerId`, `Group` | Same |
 | `zmq_poll` over sockets | `zmq::poll`, `poll_timeout`, over an array or a `Vec` of items | Same; Gap: REQ and `Monitor` cannot be polled |
-| `zmq_poll` over file descriptors, `zmq_ppoll` | | Gap |
-| `zmq_poller_*` (d), with `zmq_poller_fd` and `_add_fd` | `zmq::poll`, `poll_timeout` over a `Vec` | Exception (API shape); Gap: `zmq_poller_fd`, `_add_fd` |
+| `zmq_poll` over file descriptors | `PollItem::fd_readable`, `fd_writable`, with sockets in one `poll` | Same; Verified for a readable one (`crates/zmq/tests/libzmq/zmq_poll_fd.rs`); Exception (API shape) for `ZMQ_POLLERR`; Gap: `ZMQ_POLLPRI` |
+| `zmq_ppoll` | | Gap |
+| `zmq_poller_*` (d), with `zmq_poller_fd` and `_add_fd` | `zmq::poll`, `poll_timeout` over a `Vec`, file descriptors among its items | Exception (API shape); Gap: `zmq_poller_fd` |
 | `zmq_timers_*` (d) | | Exclusion |
 | `zmq_proxy`, `zmq_device` | `Proxy` | Same; Gap: a REP end, or one socket as both ends |
 | `zmq_proxy_steerable` | `ProxyControl` | Exception (API shape) |
@@ -279,7 +281,7 @@ known to fall short of the bar:
   - a SOCKS proxy that asks for a user name and password
   - an option on any socket type but the one named in its row
 - **libzmq's tests, as ported** (`crates/zmq/tests/libzmq/`), read
-  against the Reference's on 2026-11-22. Of 80, 42 have every case and
+  against the Reference's on 2026-11-22. Of 81, 43 have every case and
   assert what libzmq's assert. The others, by what keeps them from it:
   - **Cases left out**, for a Gap, an Exclusion or the API's shape:
     `poller` (7 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),

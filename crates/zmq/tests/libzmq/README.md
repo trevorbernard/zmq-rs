@@ -18,7 +18,7 @@ A test marked `#[ignore = "zmq-rs bug: ..."]` found a bug not yet fixed.
 
 ## Not ported
 
-Of 139 tests, 80 are ported and these 59 are left out. Some of the
+Of 139 tests, 81 are ported and these 58 are left out. Some of the
 ported ones lack cases, for the same reasons: `poller`, `monitor`,
 `security_zap` and `radio_dish`.
 
@@ -27,7 +27,7 @@ ported ones lack cases, for the same reasons: `poller`, `monitor`,
 | Feature | Tests |
 |---|---|
 | UDP | `dgram` |
-| Polling file descriptors | `zmq_poll_fd`, `zmq_ppoll_fd`, `zmq_ppoll_signals` |
+| `zmq_ppoll` | `zmq_ppoll_fd`, `zmq_ppoll_signals` |
 | `USE_FD`, `SRCFD` | `use_fd`, `srcfd` |
 | A proxy with one socket as both ends, or a REP end | `proxy_single_socket` |
 | A limit on a context's sockets | `many_sockets`, `system` |

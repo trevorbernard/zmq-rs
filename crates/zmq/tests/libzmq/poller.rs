@@ -6,8 +6,9 @@
 //!   `zmq::poll` takes its items for one call, so there is no poller to
 //!   register with, and adding a socket twice does not compile, as both
 //!   items would borrow it mutably;
-//! - `test_poll_fd`, `test_call_poller_fd` and the `*_fd_*` cases: zmq-rs
-//!   does not poll plain file descriptors;
+//! - `test_poll_fd`, which polls a socket's `ZMQ_FD`, and
+//!   `test_call_poller_fd`, a poller's own: zmq-rs has neither. A plain
+//!   file descriptor is polled in `zmq_poll_fd.rs`;
 //! - `test_call_poller_wait_all_empty_with_timeout_fails`: the same call
 //!   here as `..._wait_empty_without_timeout_fails`, since `zmq::poll`
 //!   stands for both `zmq_poller_wait` and `zmq_poller_wait_all`.
