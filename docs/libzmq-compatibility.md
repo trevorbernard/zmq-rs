@@ -86,6 +86,7 @@ Divergences that stand.
 | `zmq_socket_monitor` gives an `inproc` endpoint | `Monitor` handle |
 | `zmq_poller_*` registers sockets with a poller, and waiting on none without a timeout fails with `EFAULT` | `zmq::poll` over a `Vec` of items made for each wait; an empty `Vec` panics, and an empty array does not compile |
 | A file descriptor that has failed or hung up has `ZMQ_POLLERR` in its `revents` | Reported ready, so that the next read or write meets the error |
+| `ZMQ_FD` is a number read with `zmq_getsockopt`, good until the socket is closed | `Socket::fd` gives a `SocketFd`, open for as long as it is held |
 | An option is accepted and ignored on a socket type that has no use for it | No such setter |
 | Draft sockets refuse `ZMQ_SNDMORE` at run time | They send and receive a `Frame`, so multipart does not compile |
 | `EFSM`, `ENOTSUP`, `ENOTSOCK` | Do not compile |
@@ -104,6 +105,7 @@ Divergences that stand.
 | Closes on a socket-type mismatch | Sends ERROR, then closes | RFC 37; Unverified that libzmq treats the two alike |
 | Application metadata names are any octets | RFC 37's characters, compared without case | Never valid on the wire |
 | A ZMTP 1.0 subscriber is reported only when it leaves, as a cancel | Reported as `Subscribe("")` on arrival too | libzmq's cancel has no subscription to match |
+| A socket's `ZMQ_FD` descriptor also turns readable for commands that change none of its events | Readable when an event may have changed, at a shutdown, and when first made | `ZMQ_FD` documents a descriptor readable with no event to show as something to ignore; what it does promise holds for both (`tests/interop/tests/socket_fd.rs`) |
 | `ZMQ_TOPICS_COUNT` on a publisher is stale until the socket is next used | Current | Not observable as a difference |
 | The least loaded I/O thread takes a new connection | The next in turn | Not observable |
 | Greeting revision 2 is read as ZMTP 3.1 | As ZMTP 2.0 | No peer sends it |
@@ -149,8 +151,8 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `ZMQ_SUBSCRIBE`, `ZMQ_UNSUBSCRIBE` | `subscribe`, `unsubscribe` | Same |
 | `ZMQ_SNDBUF`, `ZMQ_RCVBUF` | | Gap |
 | `ZMQ_RCVMORE` | | Exception (API shape) |
-| `ZMQ_FD` | | Gap |
-| `ZMQ_EVENTS` | `readable`, `writable` in `zmq::poll`; no way to read the flags | Gap |
+| `ZMQ_FD` | `Socket::fd`, made when first asked for | Same; Verified (`poll_fd` in `crates/zmq/tests/libzmq/poller.rs`); Exception (API shape); Gap: REQ, PUB, RADIO and `Monitor` have none |
+| `ZMQ_EVENTS` | `Socket::events` | Same; `ZMQ_POLLIN` follows libzmq's step for step (`tests/interop/tests/socket_fd.rs`); Gap: REQ, PUB and RADIO have none |
 | `ZMQ_TYPE` | The type parameter | N/A |
 | `ZMQ_LINGER` | `SocketOptions::linger`, `set_linger` | Same |
 | `ZMQ_RECONNECT_IVL` | `Reconnect::Fixed`, `Reconnect::Never` | Same; Verified for 0 (`tests/interop/tests/reconnect.rs`) |
@@ -284,7 +286,7 @@ known to fall short of the bar:
   against the Reference's on 2026-11-22. Of 81, 43 have every case and
   assert what libzmq's assert. The others, by what keeps them from it:
   - **Cases left out**, for a Gap, an Exclusion or the API's shape:
-    `poller` (7 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
+    `poller` (8 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
     `radio_dish` (9 of 16), `router_notify`, `connect_rid`,
     `unbind_wildcard`, `router_mandatory`, `security_curve`, `pair_tcp`,
     `client_server`, `channel`, `scatter_gather`, `spec_dealer`,

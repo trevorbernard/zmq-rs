@@ -15,6 +15,7 @@ use zmq_core::{
 use zmtp::{Frame, Message, Subscription};
 
 use crate::endpoint::Target;
+use crate::events::Signal;
 use crate::polling::{PollItem, PollReadable, PollWritable};
 use crate::{Endpoint, Error, RoutingId, SocketOptions, ToEndpoint, endpoint, wait};
 
@@ -204,6 +205,30 @@ impl<T: SocketType> Socket<T> {
     }
 }
 
+impl<T: SocketType> Socket<T> {
+    /// Polls `poll` for a call that does not wait. With a file descriptor,
+    /// what a pending poll waits for makes the descriptor readable, as a
+    /// shutdown does.
+    fn poll_once<R>(
+        &mut self,
+        mut poll: impl FnMut(&mut Self, &mut TaskContext<'_>) -> Poll<R>,
+    ) -> Poll<Result<R, Terminated>> {
+        self.alive()?;
+        let Some(signal) = self.signal.clone() else {
+            return poll(self, &mut noop()).map(Ok);
+        };
+        let mut cx = TaskContext::from_waker(&signal.waker);
+        if let Poll::Ready(output) = poll(self, &mut cx) {
+            return Poll::Ready(Ok(output));
+        }
+        // The socket has been found not ready, so the descriptor is
+        // emptied: only what follows is news. A wake since the poll is
+        // emptied with it, hence the second poll.
+        signal.drain();
+        self.poll_alive(&mut cx, poll)
+    }
+}
+
 impl<T: Receives> Socket<T> {
     /// What a poll for readability received, or else the next.
     pub(crate) fn poll_recv(&mut self, cx: &mut TaskContext<'_>) -> Poll<T::Received> {
@@ -214,8 +239,7 @@ impl<T: Receives> Socket<T> {
     }
 
     pub(crate) fn try_recv_next(&mut self) -> Result<Option<T::Received>, Terminated> {
-        self.alive()?;
-        Ok(ready(self.poll_recv(&mut noop())))
+        ready(self.poll_once(|socket, cx| socket.poll_recv(cx))).transpose()
     }
 
     pub(crate) fn recv_next(&mut self) -> Result<T::Received, Terminated> {
@@ -250,12 +274,9 @@ impl<T: WaitsForRoom> Socket<T> {
         &mut self,
         message: Message,
     ) -> Result<(), TrySendError<Message>> {
-        if self.peers.is_terminated() {
-            return Err(TrySendError::Terminated(message));
-        }
         let mut slot = Some(message);
-        let _ = self.poll_send(&mut slot, &mut noop());
-        slot.map_or(Ok(()), |message| Err(TrySendError::Full(message)))
+        let sent = ready(self.poll_once(|socket, cx| socket.poll_send(&mut slot, cx)));
+        unsent(sent, &mut slot)
     }
 
     pub(crate) fn send_message(&mut self, message: Message) -> Result<(), Terminated> {
@@ -723,6 +744,8 @@ pub struct Socket<T: SocketType> {
     /// What a poll for readability received, which the next receive
     /// returns.
     pub(crate) pending: Option<T::Received>,
+    /// Its file descriptor, once [`fd`](Self::fd) has made one.
+    pub(crate) signal: Option<Signal>,
     _type: PhantomData<T>,
 }
 
@@ -767,6 +790,7 @@ impl<T: SocketType> Socket<T> {
             bound: Vec::new(),
             connected: Vec::new(),
             pending: None,
+            signal: None,
             _type: PhantomData,
         }
     }

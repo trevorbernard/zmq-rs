@@ -128,6 +128,7 @@ struct ReadmeDoctests;
 #[cfg(feature = "draft")]
 mod draft;
 mod endpoint;
+mod events;
 mod options;
 mod polling;
 mod proxy;
@@ -141,6 +142,7 @@ use std::time::Duration;
 #[cfg(feature = "draft")]
 pub use draft::{Channel, Client, ClientId, Dish, Gather, Peer, PeerId, Radio, Scatter, Server};
 pub use endpoint::{Endpoint, Error, ToEndpoint};
+pub use events::{Events, ReportsEvents, SocketFd};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions, SocksProxy};
 pub use polling::{PollItem, PollItems, poll, poll_timeout};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};

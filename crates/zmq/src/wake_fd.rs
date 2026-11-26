@@ -47,14 +47,14 @@ impl WakeFd {
 
 #[cfg(target_os = "linux")]
 impl WakeFd {
-    fn new() -> io::Result<Self> {
+    pub(crate) fn new() -> io::Result<Self> {
         use rustix::event::{EventfdFlags, eventfd};
 
         let read = eventfd(0, EventfdFlags::CLOEXEC | EventfdFlags::NONBLOCK)?;
         Ok(Self { read })
     }
 
-    fn signal(&self) {
+    pub(crate) fn signal(&self) {
         // Only ever fails for a counter that is full, and so readable.
         let _ = rustix::io::write(&self.read, &1u64.to_ne_bytes());
     }
@@ -62,7 +62,7 @@ impl WakeFd {
 
 #[cfg(not(target_os = "linux"))]
 impl WakeFd {
-    fn new() -> io::Result<Self> {
+    pub(crate) fn new() -> io::Result<Self> {
         use rustix::fs::{OFlags, fcntl_setfl};
         use rustix::io::{FdFlags, fcntl_setfd};
 
@@ -75,7 +75,7 @@ impl WakeFd {
         Ok(Self { read, write })
     }
 
-    fn signal(&self) {
+    pub(crate) fn signal(&self) {
         // Only ever fails for a pipe that is full, and so readable.
         let _ = rustix::io::write(&self.write, &[1]);
     }

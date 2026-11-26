@@ -5,6 +5,7 @@
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::io;
 use std::net::SocketAddr;
+use std::os::fd::BorrowedFd;
 use std::ptr::NonNull;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -17,6 +18,7 @@ const ZMQ_SUBSCRIBE: c_int = 6;
 const ZMQ_SNDHWM: c_int = 23;
 const ZMQ_RCVHWM: c_int = 24;
 const ZMQ_UNSUBSCRIBE: c_int = 7;
+const ZMQ_FD: c_int = 14;
 const ZMQ_EVENTS: c_int = 15;
 const ZMQ_LINGER: c_int = 17;
 const ZMQ_RECONNECT_IVL: c_int = 18;
@@ -481,6 +483,27 @@ impl Socket {
         // SAFETY: `c_endpoint` is a valid C string for the call.
         check(unsafe { zmq_unbind(self.raw.as_ptr(), c_endpoint.as_ptr()) })
             .unwrap_or_else(|err| panic!("zmq_unbind({endpoint}): {err}"));
+    }
+
+    /// `ZMQ_FD`: the descriptor that turns readable when the socket's
+    /// events may have changed, for as long as the socket is open.
+    pub fn fd(&self) -> BorrowedFd<'_> {
+        let mut value: c_int = -1;
+        let mut len = size_of::<c_int>();
+        // SAFETY: `value` and `len` are valid for the call, and `len` is
+        // the size of `value`.
+        check(unsafe {
+            zmq_getsockopt(
+                self.raw.as_ptr(),
+                ZMQ_FD,
+                (&raw mut value).cast(),
+                &raw mut len,
+            )
+        })
+        .unwrap_or_else(|err| panic!("zmq_getsockopt(ZMQ_FD): {err}"));
+        // SAFETY: libzmq keeps the descriptor open until the socket is
+        // closed, which the borrow of `self` outlasts.
+        unsafe { BorrowedFd::borrow_raw(value) }
     }
 
     /// `ZMQ_EVENTS`, reading which has the socket process what its I/O

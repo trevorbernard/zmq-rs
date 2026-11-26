@@ -178,6 +178,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
+An event loop of another kind, one that waits on file descriptors, takes a
+socket's from `Socket::fd` and looks at `Socket::events` when it turns
+readable, as with libzmq's `ZMQ_FD` and `ZMQ_EVENTS`.
+
 ### Security: CURVE with an authenticator
 
 Clients must know the server's public key. The server asks an authenticator
@@ -272,8 +276,7 @@ stay and which are to go, is in
 
 Not planned unless someone asks: STREAM sockets, WebSockets, TIPC, VMCI,
 GSSAPI, the TCP and IPC accept filters, PGM and NORM, and Windows. Not
-yet: UDP, a socket's file descriptor for another event loop, and
-libzmq's ZAP handler socket, among others.
+yet: UDP and libzmq's ZAP handler socket, among others.
 The full list is in
 [docs/libzmq-compatibility.md](docs/libzmq-compatibility.md).
 

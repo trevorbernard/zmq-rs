@@ -6,16 +6,16 @@
 //!   `zmq::poll` takes its items for one call, so there is no poller to
 //!   register with, and adding a socket twice does not compile, as both
 //!   items would borrow it mutably;
-//! - `test_poll_fd`, which polls a socket's `ZMQ_FD`, and
-//!   `test_call_poller_fd`, a poller's own: zmq-rs has neither. A plain
-//!   file descriptor is polled in `zmq_poll_fd.rs`;
+//! - `test_call_poller_fd`, a poller's own descriptor, which zmq-rs has
+//!   not. A plain file descriptor is polled in `zmq_poll_fd.rs` too;
 //! - `test_call_poller_wait_all_empty_with_timeout_fails`: the same call
 //!   here as `..._wait_empty_without_timeout_fails`, since `zmq::poll`
 //!   stands for both `zmq_poller_wait` and `zmq_poller_wait_all`.
 
+use std::os::fd::AsFd;
 use std::time::Duration;
 
-use zmq::{Context, Message, Pull, Push};
+use zmq::{Context, Message, PollItem, Pull, Push};
 use zmq_test_ports::free_endpoint;
 
 use crate::support::FIVE;
@@ -105,6 +105,23 @@ fn call_poller_wait_all_inf_disabled_fails() {
     assert_eq!(
         zmq::poll_timeout([sink.readable().when(false)], Duration::ZERO).unwrap(),
         None
+    );
+}
+
+#[test]
+fn poll_fd() {
+    let context = Context::new().unwrap();
+    let (_vent, mut bowl) = pipeline(&context);
+
+    // Check we can poll an FD
+    let fd = bowl.fd().unwrap();
+    assert_eq!(
+        zmq::poll_timeout(
+            [PollItem::fd_readable(fd.as_fd()).unwrap()],
+            Duration::from_millis(500)
+        )
+        .unwrap(),
+        Some([true])
     );
 }
 

@@ -229,6 +229,18 @@ In the `zmq` crate, `Socket<T>` only has the methods its type allows:
 `Socket<Push>` has `send`, `Socket<Pull>` has `recv`, and calling the other
 is a compile error.
 
+A socket has no file descriptor, as libzmq's has in its mailbox's
+signaler, until `Socket::fd` asks for one (`events.rs`). It is then an
+eventfd, or a pipe where there is none (`wake_fd.rs`), written by a waker
+that stands in the same slots as a blocked thread's or a task's.
+`Socket::events` and the `try_` methods register it whenever they find the
+socket not ready, having emptied the descriptor first, which makes it edge
+triggered as `ZMQ_FD` is. A pipe wakes only a reader that waits, so the
+descriptor is written when a socket turns readable and not for each
+message, and a socket never asked for one pays nothing. `zmq::poll` parks
+the thread unless an item is a file descriptor; then it waits in `poll(2)`,
+on a wake descriptor of the thread's beside the items'.
+
 ## Security
 
 `ConnectionConfig::security` (and `SocketOptions::security`) selects NULL,
