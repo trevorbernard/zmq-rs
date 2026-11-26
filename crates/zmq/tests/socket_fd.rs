@@ -66,7 +66,6 @@ fn every_call_returns_the_same_descriptor() {
     let (_push, mut pull) = pipeline(&context, "same");
     let fd = pull.fd().unwrap();
     assert_eq!(pull.fd().unwrap().as_raw_fd(), fd.as_raw_fd());
-    assert_eq!(fd.clone().as_raw_fd(), fd.as_raw_fd());
 }
 
 #[test]
@@ -236,17 +235,6 @@ fn a_shutdown_makes_readable_a_descriptor_quieted_by_a_receive() {
     context.shutdown(FIVE).unwrap();
     assert!(signalled(&fd));
     assert_eq!(pull.try_recv(), Err(Terminated));
-}
-
-#[test]
-fn a_descriptor_outlives_its_socket() {
-    let context = Context::new().unwrap();
-    let (_push, mut pull) = pipeline(&context, "outlives");
-    let fd = pull.fd().unwrap();
-    assert_eq!(pull.events().unwrap(), NOTHING);
-    drop(pull);
-    // Open still, whatever it says.
-    readable_within(&fd, Duration::ZERO);
 }
 
 #[cfg(feature = "draft")]

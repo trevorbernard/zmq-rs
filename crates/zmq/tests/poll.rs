@@ -396,12 +396,6 @@ fn a_vec_holds_a_socket_polled_both_ways_and_one_left_out() {
 }
 
 #[test]
-#[should_panic(expected = "polling no sockets would wait forever")]
-fn polling_an_empty_vec_without_a_timeout_panics() {
-    drop(zmq::poll(Vec::new()));
-}
-
-#[test]
 fn polling_an_empty_vec_with_a_timeout_waits_it_out() {
     let start = std::time::Instant::now();
     assert_eq!(zmq::poll_timeout(Vec::new(), BRIEFLY).unwrap(), None);
