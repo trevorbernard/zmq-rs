@@ -1,4 +1,5 @@
-//! Waiting on several sockets at once, as libzmq's `zmq_poll`.
+//! Waiting on several sockets at once, as libzmq's `zmq_poll` and
+//! `zmq_poller_wait_all`.
 
 use std::cell::RefCell;
 use std::fmt;
@@ -7,7 +8,7 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use crate::socket::noop;
-use crate::socket::sealed::Terminates;
+use crate::socket::sealed::{Sealed, Terminates};
 use crate::{Terminated, wait};
 
 /// A socket to [`poll`], and what to wait for. Made by
@@ -145,6 +146,93 @@ impl fmt::Debug for PollItem<'_> {
     }
 }
 
+/// The sockets given to [`poll`] and [`poll_timeout`]: an array of
+/// [`PollItem`]s when how many there are is known as the program is
+/// written, a `Vec` of them when it is not. Cannot be implemented outside
+/// this crate.
+pub trait PollItems: Sealed {
+    /// Which of the items are ready, in their order: `[bool; N]` for an
+    /// array, `Vec<bool>` for a `Vec`.
+    type Ready;
+
+    /// Refuses a set that [`poll`] would wait on forever.
+    #[doc(hidden)]
+    #[track_caller]
+    fn assert_some(&self);
+
+    /// No item ready.
+    #[doc(hidden)]
+    fn none_ready(&self) -> Self::Ready;
+
+    /// Polls every item into `ready`, registering `cx` with each that is
+    /// not; whether any is ready.
+    #[doc(hidden)]
+    fn poll_each(&mut self, ready: &mut Self::Ready, cx: &mut Context<'_>) -> bool;
+
+    /// Whether an item's context is shut down; if none is, a shutdown
+    /// wakes `cx`.
+    #[doc(hidden)]
+    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool;
+}
+
+impl<const N: usize> Sealed for [PollItem<'_>; N] {}
+
+impl<const N: usize> PollItems for [PollItem<'_>; N] {
+    type Ready = [bool; N];
+
+    fn assert_some(&self) {
+        const { assert!(N > 0, "polling no sockets would wait forever") };
+    }
+
+    fn none_ready(&self) -> [bool; N] {
+        [false; N]
+    }
+
+    fn poll_each(&mut self, ready: &mut [bool; N], cx: &mut Context<'_>) -> bool {
+        poll_each(self, ready, cx)
+    }
+
+    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool {
+        any_terminated(self, cx)
+    }
+}
+
+impl Sealed for Vec<PollItem<'_>> {}
+
+impl PollItems for Vec<PollItem<'_>> {
+    type Ready = Vec<bool>;
+
+    fn assert_some(&self) {
+        assert!(!self.is_empty(), "polling no sockets would wait forever");
+    }
+
+    fn none_ready(&self) -> Vec<bool> {
+        vec![false; self.len()]
+    }
+
+    fn poll_each(&mut self, ready: &mut Vec<bool>, cx: &mut Context<'_>) -> bool {
+        poll_each(self, ready, cx)
+    }
+
+    fn poll_terminated(&self, cx: &mut Context<'_>) -> bool {
+        any_terminated(self, cx)
+    }
+}
+
+/// Each item is polled, ready or not, so that each registers `cx`.
+fn poll_each(items: &mut [PollItem<'_>], ready: &mut [bool], cx: &mut Context<'_>) -> bool {
+    let mut any = false;
+    for (item, ready) in items.iter_mut().zip(ready) {
+        *ready = item.poll(cx).is_ready();
+        any |= *ready;
+    }
+    any
+}
+
+fn any_terminated(items: &[PollItem<'_>], cx: &mut Context<'_>) -> bool {
+    items.iter().any(|item| item.poll_terminated(cx))
+}
+
 /// Waits until at least one of `items` is ready, as libzmq's `zmq_poll`
 /// without a timeout, and returns which are, in order. Every item is
 /// looked at each time, so a busy socket never hides another.
@@ -178,42 +266,74 @@ impl fmt::Debug for PollItem<'_> {
 /// # }
 /// ```
 ///
+/// Sockets whose number is known only as the program runs go in a `Vec`,
+/// as libzmq's `zmq_poller_wait_all`. The items borrow the sockets only
+/// for the call, so the `Vec` is made anew for each:
+///
+/// ```
+/// # use zmq::{Context, Pull, Push};
+/// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// # let context = Context::new()?;
+/// # let workers = 3;
+/// let mut results = Vec::new();
+/// for worker in 0..workers {
+///     let mut pull = context.socket::<Pull>()?;
+///     pull.bind(format!("inproc://worker-{worker}"))?;
+///     results.push(pull);
+/// }
+/// # let mut last = context.socket::<Push>()?;
+/// # last.connect("inproc://worker-2")?;
+/// # last.send("done")?;
+/// let ready = zmq::poll(results.iter_mut().map(|pull| pull.readable()).collect::<Vec<_>>())?;
+/// for (pull, _) in results.iter_mut().zip(ready).filter(|(_, ready)| *ready) {
+///     let _result = pull.try_recv()?.expect("readable");
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
 /// Polling no sockets would wait forever, so it does not compile:
 ///
 /// ```compile_fail
 /// zmq::poll([]);
 /// ```
-pub fn poll<const N: usize>(items: [PollItem<'_>; N]) -> Result<[bool; N], Terminated> {
-    const { assert!(N > 0, "polling no sockets would wait forever") };
+///
+/// # Panics
+///
+/// If `items` is an empty `Vec`, which would wait forever too.
+#[track_caller]
+pub fn poll<I: PollItems>(items: I) -> Result<I::Ready, Terminated> {
+    items.assert_some();
     wait_until(items, None).map(|ready| ready.expect("no deadline"))
 }
 
 /// Waits at most `timeout` for at least one of `items` to be ready, as
-/// [`poll`] does. `None` if none is ready in time.
-pub fn poll_timeout<const N: usize>(
-    items: [PollItem<'_>; N],
+/// [`poll`] does. `None` if none is ready in time, which with no items is
+/// always.
+pub fn poll_timeout<I: PollItems>(
+    items: I,
     timeout: Duration,
-) -> Result<Option<[bool; N]>, Terminated> {
+) -> Result<Option<I::Ready>, Terminated> {
     wait_until(items, wait::deadline(timeout))
 }
 
-fn wait_until<const N: usize>(
-    mut items: [PollItem<'_>; N],
+fn wait_until<I: PollItems>(
+    mut items: I,
     deadline: Option<Instant>,
-) -> Result<Option<[bool; N]>, Terminated> {
+) -> Result<Option<I::Ready>, Terminated> {
+    let mut ready = items.none_ready();
     wait::block_on_until(deadline, |cx| {
-        if items.iter().any(|item| item.poll_terminated(&mut noop())) {
+        if items.poll_terminated(&mut noop()) {
             return Poll::Ready(Err(Terminated));
         }
-        // Each item is polled, ready or not, so that each registers `cx`.
-        let ready = items.each_mut().map(|item| item.poll(cx).is_ready());
-        if ready.contains(&true) {
-            Poll::Ready(Ok(ready))
-        } else if items.iter().any(|item| item.poll_terminated(cx)) {
+        if items.poll_each(&mut ready, cx) {
+            Poll::Ready(Ok(()))
+        } else if items.poll_terminated(cx) {
             Poll::Ready(Err(Terminated))
         } else {
             Poll::Pending
         }
     })
     .transpose()
+    .map(|polled| polled.map(|()| ready))
 }

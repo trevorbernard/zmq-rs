@@ -144,8 +144,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Waiting on several sockets: `poll`
 
 `zmq::poll` waits until any of its sockets is ready and says which, as
-`zmq_poll`. Each socket is borrowed only for the call, and one reported
-readable returns a message from its next `try_recv`. Only socket types that
+`zmq_poll`. The sockets go in an array, or in a `Vec` when how many there
+are is known only as the program runs. Each is borrowed only for the call,
+and one reported readable returns a message from its next `try_recv`. Only
+socket types that
 receive have `readable`, and only those whose sends can wait have
 `writable`.
 

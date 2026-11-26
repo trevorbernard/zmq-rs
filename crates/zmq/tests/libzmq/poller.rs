@@ -8,9 +8,9 @@
 //!   items would borrow it mutably;
 //! - `test_poll_fd`, `test_call_poller_fd` and the `*_fd_*` cases: zmq-rs
 //!   does not poll plain file descriptors;
-//! - `test_call_poller_wait_empty_without_timeout_fails` and
-//!   `..._wait_all_empty_with_timeout_fails`: polling no sockets without a
-//!   timeout does not compile (see `zmq::poll`'s documentation).
+//! - `test_call_poller_wait_all_empty_with_timeout_fails`: the same call
+//!   here as `..._wait_empty_without_timeout_fails`, since `zmq::poll`
+//!   stands for both `zmq_poller_wait` and `zmq_poller_wait_all`.
 
 use std::time::Duration;
 
@@ -86,6 +86,15 @@ fn call_poller_modify_no_events() {
 fn call_poller_wait_empty_with_timeout_fails() {
     // Waiting on no sockets only times out.
     assert_eq!(zmq::poll_timeout([], Duration::ZERO).unwrap(), None);
+}
+
+#[test]
+#[should_panic(expected = "polling no sockets would wait forever")]
+fn call_poller_wait_empty_without_timeout_fails() {
+    // This would never be able to return since no socket was registered:
+    // libzmq fails with EFAULT, and zmq-rs panics. An empty array does not
+    // compile (see `zmq::poll`'s documentation).
+    drop(zmq::poll(Vec::new()));
 }
 
 #[test]

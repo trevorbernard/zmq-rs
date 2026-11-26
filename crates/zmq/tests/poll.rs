@@ -319,3 +319,91 @@ fn a_socket_polled_both_ways_says_which_is_ready() {
     assert!(a.try_send("back").is_ok());
     assert_eq!(b.recv_timeout(FIVE).unwrap(), Some(Message::from("back")));
 }
+
+/// `count` PULLs bound at `name-0`, `name-1` and so on, as a set whose size
+/// is known only as the program runs.
+fn pulls(context: &Context, name: &str, count: usize) -> Vec<zmq::Socket<Pull>> {
+    (0..count)
+        .map(|index| {
+            let mut pull = context.socket::<Pull>().unwrap();
+            pull.bind(format!("inproc://{name}-{index}")).unwrap();
+            pull
+        })
+        .collect()
+}
+
+fn readable(pulls: &mut [zmq::Socket<Pull>]) -> Vec<zmq::PollItem<'_>> {
+    pulls.iter_mut().map(|pull| pull.readable()).collect()
+}
+
+#[test]
+fn a_vec_of_sockets_is_polled_as_an_array_is() {
+    let context = Context::new().unwrap();
+    let mut pulls = pulls(&context, "vec", 5);
+    for ready in [1, 3] {
+        let mut push = context.socket::<Push>().unwrap();
+        push.connect(format!("inproc://vec-{ready}")).unwrap();
+        push.send("job").unwrap();
+    }
+    // A message the poll took is not counted twice.
+    for _ in 0..2 {
+        assert_eq!(
+            zmq::poll(readable(&mut pulls)).unwrap(),
+            [false, true, false, true, false]
+        );
+    }
+    assert_eq!(pulls[1].try_recv().unwrap(), Some(Message::from("job")));
+    assert_eq!(pulls[3].try_recv().unwrap(), Some(Message::from("job")));
+    assert_eq!(
+        zmq::poll_timeout(readable(&mut pulls), BRIEFLY).unwrap(),
+        None
+    );
+}
+
+#[test]
+fn a_vec_of_sockets_waits_for_a_message() {
+    let context = Context::new().unwrap();
+    let mut pulls = pulls(&context, "vec-later", 3);
+    let mut push = context.socket::<Push>().unwrap();
+    push.connect("inproc://vec-later-2").unwrap();
+    let sender = thread::spawn(move || {
+        thread::sleep(BRIEFLY);
+        push.send("late").unwrap();
+        push
+    });
+    assert_eq!(
+        zmq::poll(readable(&mut pulls)).unwrap(),
+        [false, false, true]
+    );
+    drop(sender.join());
+}
+
+#[test]
+fn a_vec_holds_a_socket_polled_both_ways_and_one_left_out() {
+    let context = Context::new().unwrap();
+    let (mut push, mut pull) = pipeline(&context, "vec-mixed");
+    let mut a = context.socket::<Dealer>().unwrap();
+    a.bind("inproc://vec-both-ways").unwrap();
+    let mut b = context.socket::<Dealer>().unwrap();
+    b.connect("inproc://vec-both-ways").unwrap();
+    push.send("job").unwrap();
+    let (a_readable, a_writable) = a.readable_and_writable();
+    let items = vec![a_readable, pull.readable().when(false), a_writable];
+    assert_eq!(
+        zmq::poll_timeout(items, FIVE).unwrap(),
+        Some(vec![false, false, true])
+    );
+}
+
+#[test]
+#[should_panic(expected = "polling no sockets would wait forever")]
+fn polling_an_empty_vec_without_a_timeout_panics() {
+    drop(zmq::poll(Vec::new()));
+}
+
+#[test]
+fn polling_an_empty_vec_with_a_timeout_waits_it_out() {
+    let start = std::time::Instant::now();
+    assert_eq!(zmq::poll_timeout(Vec::new(), BRIEFLY).unwrap(), None);
+    assert!(start.elapsed() >= BRIEFLY);
+}

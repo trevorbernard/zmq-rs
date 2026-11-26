@@ -84,6 +84,7 @@ Divergences that stand.
 | `zmq_ctx_term` blocks until every socket is closed; `zmq_ctx_shutdown` only unblocks | The context ends when its last handle and socket are dropped; `Context::shutdown(timeout)` does both with a deadline |
 | `zmq_proxy_steerable` takes a control socket | `ProxyControl` handle, with the same four commands |
 | `zmq_socket_monitor` gives an `inproc` endpoint | `Monitor` handle |
+| `zmq_poller_*` registers sockets with a poller, and waiting on none without a timeout fails with `EFAULT` | `zmq::poll` over a `Vec` of items made for each wait; an empty `Vec` panics, and an empty array does not compile |
 | An option is accepted and ignored on a socket type that has no use for it | No such setter |
 | Draft sockets refuse `ZMQ_SNDMORE` at run time | They send and receive a `Frame`, so multipart does not compile |
 | `EFSM`, `ENOTSUP`, `ENOTSOCK` | Do not compile |
@@ -230,9 +231,9 @@ Draft options are marked (d). Options that only an Exclusion uses are in
 | `zmq_msg_gets` | `Message::property` | Same; Gap for a draft socket's `Frame` and an XPUB's subscription events |
 | `zmq_msg_get (ZMQ_SRCFD)` | | Gap |
 | `zmq_msg_routing_id`, `zmq_msg_group` and their setters (d) | `ClientId`, `PeerId`, `Group` | Same |
-| `zmq_poll` over sockets | `zmq::poll`, `poll_timeout`, over a set fixed at compile time | Same; Gap: REQ and `Monitor` cannot be polled |
+| `zmq_poll` over sockets | `zmq::poll`, `poll_timeout`, over an array or a `Vec` of items | Same; Gap: REQ and `Monitor` cannot be polled |
 | `zmq_poll` over file descriptors, `zmq_ppoll` | | Gap |
-| `zmq_poller_*` (d), with `zmq_poller_fd` and `_add_fd` | | Gap |
+| `zmq_poller_*` (d), with `zmq_poller_fd` and `_add_fd` | `zmq::poll`, `poll_timeout` over a `Vec` | Exception (API shape); Gap: `zmq_poller_fd`, `_add_fd` |
 | `zmq_timers_*` (d) | | Exclusion |
 | `zmq_proxy`, `zmq_device` | `Proxy` | Same; Gap: a REP end, or one socket as both ends |
 | `zmq_proxy_steerable` | `ProxyControl` | Exception (API shape) |
@@ -281,7 +282,7 @@ known to fall short of the bar:
   against the Reference's on 2026-11-22. Of 80, 42 have every case and
   assert what libzmq's assert. The others, by what keeps them from it:
   - **Cases left out**, for a Gap, an Exclusion or the API's shape:
-    `poller` (6 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
+    `poller` (7 of 49), `security_zap` (12 of 30), `monitor` (4 of 10),
     `radio_dish` (9 of 16), `router_notify`, `connect_rid`,
     `unbind_wildcard`, `router_mandatory`, `security_curve`, `pair_tcp`,
     `client_server`, `channel`, `scatter_gather`, `spec_dealer`,
@@ -290,8 +291,8 @@ known to fall short of the bar:
   - **An Exception asserted** in place of libzmq's outcome:
     `router_mandatory`, `bind_src_address`, `req_relaxed`, `reqrep_ipc`,
     `xpub_manual_last_value`, `hwm_pubsub`, `reconnect_options`,
-    `security_zap`, `security_no_zap_handler`, `invalid_rep` and
-    `proxy_terminate`.
+    `security_zap`, `security_no_zap_handler`, `invalid_rep`,
+    `proxy_terminate` and `poller`.
   - **An assertion looser than libzmq's**, which is yet to be tightened
     or explained: which events a server's monitor reports, and how many,
     in `security_curve` and `security_zap`; how often a client retries

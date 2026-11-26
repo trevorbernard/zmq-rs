@@ -141,7 +141,7 @@ use std::time::Duration;
 pub use draft::{Channel, Client, ClientId, Dish, Gather, Peer, PeerId, Radio, Scatter, Server};
 pub use endpoint::{Endpoint, Error, ToEndpoint};
 pub use options::{InvalidRoutingId, RoutingId, SocketOptions, SocksProxy};
-pub use polling::{PollItem, poll, poll_timeout};
+pub use polling::{PollItem, PollItems, poll, poll_timeout};
 pub use proxy::{Capture, Count, Proxy, ProxyControl, ProxyEnd, ProxyStatistics, SideStatistics};
 #[doc(hidden)]
 pub use socket::Routing;

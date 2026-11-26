@@ -318,3 +318,16 @@ fn a_connection_still_shaking_hands_does_not_hold_a_shutdown_up() {
     assert_eq!(context.shutdown(FIVE), Ok(()));
     assert!(started.elapsed() < Duration::from_secs(1));
 }
+
+#[test]
+fn a_blocked_poll_of_a_vec_fails_once_the_context_is_shut_down() {
+    let context = Context::new().unwrap();
+    let mut pull = context.socket::<Pull>().unwrap();
+    pull.bind("inproc://poll-vec").unwrap();
+    let mut push = context.socket::<Push>().unwrap();
+    push.bind("inproc://poll-vec-out").unwrap();
+    let result = woken(&context, move || {
+        zmq::poll(vec![pull.readable(), push.writable()])
+    });
+    assert_eq!(result, Err(Terminated));
+}
