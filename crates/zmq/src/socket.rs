@@ -759,6 +759,13 @@ fn default_linger<T: SocketType>() -> Linger {
     }
 }
 
+/// libzmq's `is_single_connect`: a DEALER, SUB, PUB or REQ ignores a
+/// connect to an endpoint it holds, over any transport but `inproc`.
+fn connects_once<T: SocketType>() -> bool {
+    use zmtp::SocketType::{Dealer, Pub, Req, Sub};
+    matches!(T::KIND, Dealer | Sub | Pub | Req)
+}
+
 impl<T: SocketType> Socket<T> {
     pub(crate) fn new(context: zmq_core::Context, options: SocketOptions) -> Self {
         let config = ConnectionConfig {
@@ -1068,6 +1075,13 @@ impl<T: SocketType> Socket<T> {
     /// and reconnects if it breaks. An `inproc`
     /// connection waits for its name to be bound in this socket's context,
     /// and ends for good when the bound socket is dropped.
+    ///
+    /// A DEALER, SUB, PUB or REQ connects to an endpoint once, as in
+    /// libzmq: connecting again to one written the same way succeeds and
+    /// does nothing, until it is [disconnected](Self::disconnect). So does
+    /// connecting to an endpoint the socket is bound to, written as
+    /// [`bind`](Self::bind) returned it. Over `inproc`, and for every other
+    /// socket type, each connect makes a connection.
     pub fn connect(&mut self, endpoint: impl ToEndpoint) -> Result<(), Error> {
         self.connect_key(&endpoint.written()).map(drop)
     }
@@ -1087,8 +1101,22 @@ impl<T: SocketType> Socket<T> {
         }
     }
 
+    /// Whether `endpoint` is written as one the socket is connected or
+    /// bound to. libzmq keeps both in one map, which its
+    /// `is_single_connect` looks in.
+    fn holds(&self, endpoint: &str) -> bool {
+        self.connected
+            .iter()
+            .any(|(written, ..)| written == endpoint)
+            || self
+                .bound
+                .iter()
+                .any(|(bound, _)| bound.to_string() == endpoint)
+    }
+
     /// Connects to `endpoint` and returns the new peer, unless
-    /// [`immediate`](SocketOptions::immediate) defers it.
+    /// [`immediate`](SocketOptions::immediate) defers it or the socket
+    /// [connects once](connects_once) and holds the endpoint already.
     pub(crate) fn connect_key(
         &mut self,
         endpoint: &str,
@@ -1097,6 +1125,9 @@ impl<T: SocketType> Socket<T> {
         endpoint::compatible(endpoint, T::KIND, false)?;
         let target = endpoint::connect_target(endpoint)?;
         self.served(&target)?;
+        if connects_once::<T>() && !matches!(target, Target::Inproc(_)) && self.holds(endpoint) {
+            return Ok(None);
+        }
         let (id, key) = match &target {
             Target::Tcp(addr) => self.peers.connect(*addr),
             Target::TcpHost { host, port, source } => self.peers.connect_host(host, *port, *source),
